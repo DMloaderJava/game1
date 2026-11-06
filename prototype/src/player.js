@@ -21,12 +21,27 @@ const hpHist = [];
 
 export function isRewinding() { return rewinding; }
 
+/**
+ * Внешний импульс скорости: взрыв под ногами, парадокс, пробитие фазы босса.
+ * Используется для рокет-джампа от собственного коллапса.
+ */
+export function applyImpulse(dx, dy, dz, power) {
+  const P = S.player;
+  if (!P.alive || S.mode !== 'play' || !(power > 0)) return;
+  P.vel.x += dx * power;
+  P.vel.z += dz * power;
+  P.vel.y += dy * power;
+  if (dy * power > 2) P.onGround = false;
+  if (power > 7) S.flags.launched = 0.32;
+}
+
 /* ------------------------------------------------------------------ */
 /*  СПАВН / СБРОС                                                     */
 /* ------------------------------------------------------------------ */
 export function resetPlayer(x, y, z) {
   S.flags.rewinding = false;
   S.flags.sculpting = false;
+  S.flags.launched = 0;
   P.pos.set(x, y, z);
   P.vel.set(0, 0, 0);
   P.hp = P.maxHp;
@@ -78,6 +93,14 @@ export function updatePlayer(dt) {
   const bob = Math.sin(S.time * 11) * bobAmp;
   W.camera.position.set(P.pos.x, P.pos.y + CFG.EYE + bob, P.pos.z);
   W.camera.rotation.set(S.pitch, S.yaw, 0, 'YXZ');
+
+  /* отдача от собственного импульса: короткий кик камеры вверх */
+  if (S.flags.launched > 0) {
+    S.flags.launched = Math.max(0, S.flags.launched - dt);
+    const lk = S.flags.launched / 0.32;
+    W.camera.rotation.x += lk * 0.055;
+    W.camera.position.y += lk * 0.06;
+  }
 
   if (!rewinding) P.charge = Math.min(100, P.charge + 8 * dt);
   P.mass = Math.min(maxMass(), P.mass + (rewinding ? 0 : 6 * dt));

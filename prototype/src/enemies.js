@@ -160,6 +160,17 @@ export function updateEnemies(dt) {
     if (!e.alive) continue;
     const ep = e.pos;
 
+    /* кинетика: врага отбрасывает взрывом, импульс гаснет */
+    if (e.knock) {
+      const kl = e.knock.lengthSq();
+      if (kl > 0.05) {
+        ep.addScaledVector(e.knock, dt);
+        e.knock.multiplyScalar(Math.max(0, 1 - 5.5 * dt));
+      } else if (kl > 0) {
+        e.knock.set(0, 0, 0);
+      }
+    }
+
     if (e.type === 'suture') {
       const to = S.player.pos.clone().sub(ep);
       to.y = 0;

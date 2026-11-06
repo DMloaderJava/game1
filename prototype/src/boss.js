@@ -5,7 +5,7 @@ import { W } from './world.js';
 import { hurtPlayer } from './combat.js';
 import { makeShade } from './enemies.js';
 import { poseAt } from './player.js';
-import { shockwave, spark } from './fx.js';
+import { shockwave, spark, hitstop, cameraShake, debris } from './fx.js';
 import { sfx } from './audio.js';
 import { toast, flash } from './ui.js';
 
@@ -65,6 +65,18 @@ export function spawnBoss(pos) {
   return S.boss;
 }
 
+/* пробитие фазы: мир на мгновение замирает и бьёт по камере */
+function phaseBreak(b, power) {
+  const dir = S.player.pos.clone().sub(b.pos);
+  dir.y = 0.18;
+  hitstop(0.07);
+  cameraShake(0.34 * power, 0.62, dir);
+  debris(b.pos.clone(), 0xff66cc, 12, 1.5 * power, 1.3);
+  shockwave(b.pos.clone(), 9 * power, 0xff66cc, 0.6);
+  spark(b.pos.clone(), 0xffaaff, 26);
+  flash('#ff66cc', 0.22);
+}
+
 function hurtBoss(b, dmg) {
   if (!b.alive) return;
   b.hp -= dmg;
@@ -76,6 +88,9 @@ function hurtBoss(b, dmg) {
     S.stats.bossDown = true;
     S.stats.sec += 6;
     S.stats.paradox += 3;
+    hitstop(0.09);
+    cameraShake(0.75, 0.9, S.player.pos.clone().sub(b.pos));
+    debris(b.pos.clone(), 0xff9bff, 14, 2.0, 1.6);
     shockwave(b.pos.clone(), 26, 0xff66cc, 1.6);
     spark(b.pos.clone(), 0xffaaff, 60);
     flash('#ffffff', 0.8);
@@ -84,11 +99,13 @@ function hurtBoss(b, dmg) {
   } else if (b.hp < b.maxHp * 0.33 && b.phase < 3) {
     b.phase = 3;
     sfx('phase');
+    phaseBreak(b, 1.25);
     toast('ФАЗА III · СИНГУЛЯРНОСТЬ');
     S.rift = Math.min(100, S.rift + 10);
   } else if (b.hp < b.maxHp * 0.66 && b.phase < 2) {
     b.phase = 2;
     sfx('phase');
+    phaseBreak(b, 1.0);
     toast('ФАЗА II · РЕВИЗИЯ');
   }
 }

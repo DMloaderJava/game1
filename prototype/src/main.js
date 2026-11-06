@@ -4,12 +4,12 @@ import { S, CFG, clamp } from './state.js';
 import { W, initWorld, setMood, updateAtmosphere, renderFrame, checkShaderHealth } from './world.js';
 import { initUI, hud, toast, show, hide, hideAll, refreshHud, renderUpgrade, ending, bossBar, setObjective, costOf, flash } from './ui.js';
 import { initAudio, updateAudio, setVolume, sfx } from './audio.js';
-import { updateFx, updateMemoryTrails } from './fx.js';
+import { updateFx, updateMemoryTrails, tickHitstop } from './fx.js';
 import { recordHistory } from './rewind.js';
 import {
   updatePlayer, updateSculpt, updateRewind, recordPlayer, resetPlayer,
   startSculpt, endSculpt, condense, spawnEcho, beginRewind, endRewind,
-  jump, dash, isRewinding, toggleMemory
+  jump, dash, isRewinding, toggleMemory, applyImpulse
 } from './player.js';
 import { updateCrystals, updatePending } from './combat.js';
 import { updateEnemies, clearEnemies } from './enemies.js';
@@ -48,6 +48,7 @@ S.hooks.buy = (id) => {
   sfx('buy');
   renderUpgrade();
 };
+S.hooks.impulse = applyImpulse;   // взрывы/парадокс отбрасывают игрока
 S.hooks.nextZone = () => nextZone();
 S.hooks.crumble = () => crumbleArena();
 S.hooks.onBossDown = () => onBossDown();
@@ -248,10 +249,13 @@ function loop() {
   if (++frameCount === 8) checkShaderHealth();
   const raw = Math.min(0.05, clock.getDelta());
 
+  /* hitstop: мир замирает на 40–70 мс, камера при этом продолжает дрожать */
+  const frozen = tickHitstop(raw);
+
   if (S.mode === 'play') {
     const mem = !!S.keys['Tab'];
     toggleMemory(mem);
-    const dt = raw * (mem ? 0.25 : 1);
+    const dt = frozen ? 0 : raw * (mem ? 0.25 : 1);
 
     S.time += dt;
     S.zoneTime += dt;
@@ -264,7 +268,7 @@ function loop() {
     updateEnemies(dt);
     updateBoss(dt);
     updateZone(dt);
-    updateFx(dt);
+    updateFx(dt, raw);
     updateMemoryTrails(dt);
 
     recordHistory(S.time);
@@ -290,7 +294,7 @@ function loop() {
       if (!near) coreHint = false;
     }
   } else {
-    updateFx(raw);
+    updateFx(raw, raw);
     updateMemoryTrails(0);   // вне игры шлейфы гасим
     if (core) {
       core.orb.rotation.y += raw * 0.4;

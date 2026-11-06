@@ -10,6 +10,7 @@ import { resetPlayer } from './player.js';
 import { zoneCard, setObjective, toast } from './ui.js';
 import { sfx, setZoneTone } from './audio.js';
 import { spark } from './fx.js';
+import { clearBlastRings } from './combat.js';
 
 const G = new THREE.Group();   // всё, что принадлежит зоне
 
@@ -375,6 +376,7 @@ export const ZONES = [
 export function clearZone() {
   clearEnemies();
   clearBoss();
+  clearBlastRings();
 
   for (const b of S.blocks) if (b.mesh) W.scene.remove(b.mesh);
   S.blocks.length = 0;
@@ -429,7 +431,7 @@ export function loadZone(i) {
 
   if (i === 0) {
     setTimeout(() => {
-      if (S.mode === 'play') toast('ЛКМ — лепить · ПКМ — уплотнить · подорви структуру рядом с узлом', 5.5);
+      if (S.mode === 'play') toast('ЛКМ — лепить · ПКМ — уплотнить · подорви структуру у узла и отпрыгни: взрыв подкидывает', 6);
     }, 3200);
   }
 

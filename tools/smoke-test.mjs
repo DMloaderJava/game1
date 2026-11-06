@@ -589,6 +589,81 @@ async function main() {
     assert(fov < 82, 'FOV ушёл в крайность: ' + fov.toFixed(2));
   });
 
+  /* ---------- 3c. ТАКТИЛЬНОСТЬ БОЯ ---------- */
+  console.log('\n▶ тактильность: hitstop, телеграф коллапса, осколки, отбрасывание');
+  const T3 = AP.THREE;
+  const lastCrystal = () => S.crystals[S.crystals.length - 1];
+
+  check('телеграф коллапса: вибрация, градиент, кольцо поражения', () => {
+    S.player.hp = 1e6;
+    S.player.pos.set(0, 2.4, 25);
+    S.player.vel.set(0, 0, 0);
+    S.yaw = 0.9;
+    S.pitch = -0.45;
+    run(3, 'tele');
+    const before = S.crystals.length;
+    S.player.mass = 40;
+    env.mouse('mousedown', 2);
+    run(1, 'tele');
+    assert(S.crystals.length > before, 'кристалл не создан');
+    const cr = lastCrystal();
+    assert(cr.ring && cr.ring.group.visible, 'кольца поражения нет');
+    assert(cr.mat && cr.mat !== AP.W.M.crystal, 'материал не склонирован');
+
+    cr.timer = 3.6;            // k ≈ 0.1
+    run(1, 'tele');
+    const c1 = cr.mat.color.getHex();
+    const f1 = cr.ring.fill.scale.x;
+    cr.timer = 0.35;           // k ≈ 0.91
+    run(1, 'tele');
+    const c2 = cr.mat.color.getHex();
+    assert(c1 !== c2, 'градиент цвета не работает');
+    assert(cr.mesh.position.distanceTo(cr.base) > 0.001, 'меш не вибрирует');
+    assert(cr.ring.fill.scale.x > f1 + 0.4, 'заливка радиуса не растёт');
+  });
+
+  check('hitstop: мир замирает на кадры после взрыва', () => {
+    const cr = lastCrystal();
+    cr.timer = 0.004;
+    const hit = runUntil(() => !cr.alive, 40, 'hitstop');   // кадр детонации
+    assert(hit >= 0, 'кристалл не сдетонировал');
+    const t0 = S.time;
+    run(2, 'hitstop');
+    assert(S.time - t0 < 1e-9, 'время шло во время hitstop: +' + (S.time - t0).toFixed(4));
+  });
+
+  check('осколки с затухающим шлейфом', () => {
+    run(5, 'debris');
+    const shards = AP.W.scene.children.filter(
+      (o) => o.isMesh && o.visible && o.geometry && o.geometry.type === 'TetrahedronGeometry');
+    assert(shards.length > 0, 'осколков нет');
+    const trails = AP.W.scene.children.filter(
+      (o) => o.isPoints && o.material && o.material.vertexColors === true);
+    assert(trails.length > 0, 'пул шлейфа не создан');
+  });
+
+  check('отбрасывание: рокет-джамп от собственного коллапса', () => {
+    S.player.hp = 1e6;
+    S.player.mass = 40;
+    env.mouse('mousedown', 2);
+    const cr = lastCrystal();
+    assert(cr && cr.alive, 'нет живого кристалла для подрыва');
+    S.player.pos.copy(cr.base).add(new T3.Vector3(0, 2, 0));
+    S.player.vel.set(0, 0, 0);
+    const hpBefore = S.player.hp;
+    cr.timer = 0.004;
+    const boom = runUntil(() => !cr.alive, 40, 'rocket');
+    assert(boom >= 0, 'кристалл не сдетонировал');
+    assert(S.player.vel.y > 2, 'нет вертикального импульса: ' + S.player.vel.y.toFixed(2));
+    assert(S.player.hp < hpBefore, 'самоурон не сработал');
+  });
+
+  /* возвращаем игрока в игру */
+  S.player.hp = 100;
+  S.player.vel.set(0, 0, 0);
+  S.player.pos.set(0, 2, 25);
+  run(4, 'restore');
+
   /* ---------- 4. КАМПАНИЯ: ПЯТЬ ЗОН ---------- */
   console.log('\n▶ кампания: четыре биома и арена босса');
 

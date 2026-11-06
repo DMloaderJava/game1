@@ -132,6 +132,22 @@ export function aimBlocks(far) {
   return S.blocks.find((b) => b.mesh === hits[0].object) || null;
 }
 
+/* высота пола под точкой (для колец поражения и телеграфа) */
+const downDir = new THREE.Vector3(0, -1, 0);
+const rayOrigin = new THREE.Vector3();
+
+export function groundY(x, z, fromY, exclude) {
+  rayOrigin.set(x, fromY, z);
+  raycaster.set(rayOrigin, downDir);
+  raycaster.far = 90;
+  const hits = raycaster.intersectObjects(visibleTargets(), false);
+  for (let i = 0; i < hits.length; i++) {
+    if (exclude && hits[i].object === exclude) continue;
+    return hits[i].point.y;
+  }
+  return null;
+}
+
 export function pointInBox(p, min, max) {
   return p.x > min.x && p.x < max.x && p.y > min.y && p.y < max.y && p.z > min.z && p.z < max.z;
 }

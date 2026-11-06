@@ -53,7 +53,231 @@ export function trail(pos, color) {
   fx.push({ o: m, t: 0, life: 0.35, type: 'fade' });
 }
 
-export function updateFx(dt) {
+/* ------------------------------------------------------------------ */
+/*  HITSTOP: микро-пауза кадра на удар                                */
+/* ------------------------------------------------------------------ */
+const HITSTOP_CAP = 0.09;
+let hitstopLeft = 0;
+
+export function hitstop(sec) {
+  hitstopLeft = Math.min(HITSTOP_CAP, Math.max(hitstopLeft, sec));
+}
+
+/** Вызывается из главного цикла с РЕАЛЬНЫМ dt. true — мир в этот кадр замер. */
+export function tickHitstop(realDt) {
+  if (hitstopLeft <= 0) return false;
+  hitstopLeft = Math.max(0, hitstopLeft - realDt);
+  return true;
+}
+
+export function isHitstop() { return hitstopLeft > 0; }
+
+/* ------------------------------------------------------------------ */
+/*  ТРЯСКА КАМЕРЫ: направленная, с затуханием                         */
+/* ------------------------------------------------------------------ */
+const shake = { t: 1, dur: 1, amp: 0, dir: new THREE.Vector3(0, 1, 0) };
+let fxClock = 0;
+
+export function cameraShake(amp, dur, dir) {
+  /* слабый импульс не перебивает сильный, который ещё играет */
+  if (shake.t < shake.dur && amp < shake.amp * 0.55) return;
+  shake.amp = amp;
+  shake.dur = dur || 0.35;
+  shake.t = 0;
+  if (dir) shake.dir.copy(dir).normalize();
+  else shake.dir.set(0, 0.25, 0).normalize();
+}
+
+function applyShake(realDt) {
+  fxClock += realDt;
+  if (shake.t >= shake.dur) return;
+  shake.t += realDt;
+  const k = 1 - Math.min(1, shake.t / shake.dur);
+  const a = shake.amp * k * k;
+  if (a <= 0.0001) return;
+  const tx = fxClock;
+  const nx = Math.sin(tx * 61.7) * 0.55 + Math.sin(tx * 33.1 + 1.7) * 0.45;
+  const ny = Math.sin(tx * 47.3 + 2.1) * 0.55 + Math.sin(tx * 27.9 + 0.3) * 0.45;
+  const nz = Math.sin(tx * 39.5 + 4.2);
+  /* 65% — толчок от источника, 35% — «дрожь» по осям */
+  W.camera.position.x += (shake.dir.x * 0.65 + nx * 0.35) * a;
+  W.camera.position.y += (shake.dir.y * 0.65 + ny * 0.35) * a;
+  W.camera.position.z += (shake.dir.z * 0.65 + nz * 0.35) * a;
+  W.camera.rotation.x += ny * a * 0.16;
+  W.camera.rotation.y += nx * a * 0.16;
+}
+
+/* ------------------------------------------------------------------ */
+/*  ОСКОЛКИ: угловатые тетраэдры + затухающий шлейф                    */
+/* ------------------------------------------------------------------ */
+const DEBRIS_MAX = 36;
+const debrisPool = [];
+let debrisCursor = 0;
+const debrisGeo = new THREE.TetrahedronGeometry(0.26, 0);
+
+function debrisSlot(i) {
+  if (debrisPool[i]) return debrisPool[i];
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xffaaff, transparent: true, opacity: 1,
+    blending: THREE.AdditiveBlending, depthWrite: false
+  });
+  const mesh = new THREE.Mesh(debrisGeo, mat);
+  mesh.visible = false;
+  mesh.frustumCulled = false;
+  W.scene.add(mesh);
+  const d = {
+    mesh, mat, t: 0, life: 1, active: false, trailT: 0,
+    vel: new THREE.Vector3(), spin: new THREE.Vector3()
+  };
+  debrisPool[i] = d;
+  return d;
+}
+
+export function debris(pos, color, n, power, size) {
+  const count = Math.max(1, Math.min(14, n || 8));
+  const pw = power || 1;
+  const sz = size || 1;
+  for (let k = 0; k < count; k++) {
+    const d = debrisSlot(debrisCursor % DEBRIS_MAX);
+    debrisCursor++;
+    const a = Math.random() * Math.PI * 2;
+    const sp = (5 + Math.random() * 8) * pw;
+    d.vel.set(Math.cos(a) * sp, (0.4 + Math.random() * 0.9) * sp * 0.75 + 2.5, Math.sin(a) * sp);
+    d.mesh.position.copy(pos);
+    d.mesh.position.x += (Math.random() - 0.5) * 0.7;
+    d.mesh.position.y += (Math.random() - 0.5) * 0.7;
+    d.mesh.position.z += (Math.random() - 0.5) * 0.7;
+    d.mesh.rotation.set(Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28);
+    d.mesh.scale.setScalar((0.6 + Math.random() * 0.9) * sz);
+    d.spin.set((Math.random() - 0.5) * 16, (Math.random() - 0.5) * 16, (Math.random() - 0.5) * 16);
+    d.mat.color.setHex(color);
+    d.mat.opacity = 1;
+    d.t = 0;
+    d.trailT = 0;
+    d.life = 0.7 + Math.random() * 0.65;
+    d.active = true;
+    d.mesh.visible = true;
+  }
+}
+
+/* пул точек-шлейфов: одна геометрия, один draw call */
+const TRAIL_PTS = 240;
+const tPos = new Float32Array(TRAIL_PTS * 3);
+const tCol = new Float32Array(TRAIL_PTS * 3);
+const tVel = new Float32Array(TRAIL_PTS * 3);
+const tBase = new Float32Array(TRAIL_PTS * 3);
+const tAge = new Float32Array(TRAIL_PTS);
+const tLife = new Float32Array(TRAIL_PTS);
+let trailGeo = null;
+let trailCursor = 0;
+
+function ensureTrailPool() {
+  if (trailGeo) return;
+  trailGeo = new THREE.BufferGeometry();
+  trailGeo.setAttribute('position', new THREE.BufferAttribute(tPos, 3));
+  trailGeo.setAttribute('color', new THREE.BufferAttribute(tCol, 3));
+  const pts = new THREE.Points(trailGeo, new THREE.PointsMaterial({
+    size: 0.17, transparent: true, opacity: 0.9, vertexColors: true,
+    blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true
+  }));
+  pts.frustumCulled = false;
+  pts.renderOrder = 3;
+  W.scene.add(pts);
+}
+
+function emitTrail(x, y, z, r, g, b) {
+  ensureTrailPool();
+  const i = trailCursor % TRAIL_PTS;
+  trailCursor++;
+  const i3 = i * 3;
+  tPos[i3] = x; tPos[i3 + 1] = y; tPos[i3 + 2] = z;
+  tBase[i3] = r; tBase[i3 + 1] = g; tBase[i3 + 2] = b;
+  tVel[i3] = 0; tVel[i3 + 1] = 0.35; tVel[i3 + 2] = 0;
+  tAge[i] = 0;
+  tLife[i] = 0.42;
+}
+
+function updateDebris(dt) {
+  for (let i = 0; i < debrisPool.length; i++) {
+    const d = debrisPool[i];
+    if (!d.active) continue;
+    d.t += dt;
+    const k = d.t / d.life;
+    if (k >= 1) {
+      d.active = false;
+      d.mesh.visible = false;
+      continue;
+    }
+    d.vel.y -= 26 * dt;
+    d.mesh.position.addScaledVector(d.vel, dt);
+    d.mesh.rotation.x += d.spin.x * dt;
+    d.mesh.rotation.y += d.spin.y * dt;
+    d.mesh.rotation.z += d.spin.z * dt;
+    d.mat.opacity = (1 - k) * (1 - k);
+    d.trailT += dt;
+    if (d.trailT >= 0.035) {
+      d.trailT = 0;
+      const c = d.mat.color;
+      emitTrail(d.mesh.position.x, d.mesh.position.y, d.mesh.position.z, c.r, c.g, c.b);
+    }
+  }
+}
+
+function updateTrailPoints(dt) {
+  if (!trailGeo) return;
+  let alive = 0;
+  const drag = Math.pow(0.35, dt);
+  for (let i = 0; i < TRAIL_PTS; i++) {
+    if (tLife[i] <= 0) continue;
+    tAge[i] += dt;
+    const k = tAge[i] / tLife[i];
+    const i3 = i * 3;
+    if (k >= 1) {
+      tLife[i] = 0;
+      tCol[i3] = 0; tCol[i3 + 1] = 0; tCol[i3 + 2] = 0;
+      continue;
+    }
+    alive++;
+    tVel[i3 + 1] -= 1.5 * dt;
+    tPos[i3] += tVel[i3] * dt;
+    tPos[i3 + 1] += tVel[i3 + 1] * dt;
+    tPos[i3 + 2] += tVel[i3 + 2] * dt;
+    tVel[i3] *= drag; tVel[i3 + 1] *= drag; tVel[i3 + 2] *= drag;
+    const f = 1 - k;
+    tCol[i3] = tBase[i3] * f;
+    tCol[i3 + 1] = tBase[i3 + 1] * f;
+    tCol[i3 + 2] = tBase[i3 + 2] * f;
+  }
+  trailGeo.attributes.position.needsUpdate = true;
+  trailGeo.attributes.color.needsUpdate = true;
+  if (trailGeo.setDrawRange) trailGeo.setDrawRange(0, TRAIL_PTS);
+  return alive;
+}
+
+export function clearDebris() {
+  for (let i = 0; i < debrisPool.length; i++) {
+    debrisPool[i].active = false;
+    debrisPool[i].mesh.visible = false;
+  }
+  for (let i = 0; i < TRAIL_PTS; i++) {
+    tLife[i] = 0;
+    tCol[i * 3] = 0; tCol[i * 3 + 1] = 0; tCol[i * 3 + 2] = 0;
+  }
+  if (trailGeo) {
+    trailGeo.attributes.position.needsUpdate = true;
+    trailGeo.attributes.color.needsUpdate = true;
+  }
+  shake.t = shake.dur;
+  shake.amp = 0;
+  hitstopLeft = 0;
+}
+
+export function updateFx(dt, realDt) {
+  const rt = realDt === undefined ? dt : realDt;
+  applyShake(rt);
+  updateDebris(dt);
+  updateTrailPoints(dt);
+
   for (let i = fx.length - 1; i >= 0; i--) {
     const f = fx[i];
     f.t += dt;
@@ -182,6 +406,7 @@ export function updateMemoryTrails(dt) {
 }
 
 export function clearFx() {
+  clearDebris();
   for (const f of fx) {
     W.scene.remove(f.o);
     if (f.o.geometry) f.o.geometry.dispose();
