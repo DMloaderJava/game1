@@ -1,6 +1,7 @@
 /* Сцена, свет, атмосфера, материалы. */
 import * as THREE from '../vendor/three.module.js';
 import { S, CFG, clamp, lerp } from './state.js';
+import { applyTextures } from './tex.js';
 
 export const W = { M: {}, lights: {} };
 
@@ -60,6 +61,16 @@ export function initWorld() {
   M.portal = new THREE.MeshStandardMaterial({ color: 0x1a0a3a, emissive: 0xaa44ff, emissiveIntensity: 2.2, roughness: 0.2, transparent: true, opacity: 0.8, side: THREE.DoubleSide });
   M.boss = new THREE.MeshStandardMaterial({ color: 0x3a1a2a, roughness: 0.5, metalness: 0.7, emissive: 0x6a0a2a, emissiveIntensity: 0.9 });
   M.bossGlow = new THREE.MeshStandardMaterial({ color: 0x6a0a3a, emissive: 0xff2b6a, emissiveIntensity: 2.2, roughness: 0.3 });
+
+  /* руки: биомеханический металл со светящимися швами */
+  M.hand = new THREE.MeshStandardMaterial({
+    color: 0x3a2a5a, roughness: 0.52, metalness: 0.68,
+    emissive: 0x7b2dff, emissiveIntensity: 0.5
+  });
+  M.handGlow = new THREE.MeshBasicMaterial({ color: 0x9b6bff });
+
+  /* процедурные карты на камень, медь и кость (если canvas доступен) */
+  applyTextures(M);
 
   /* живая биомеханика: вершинное «дыхание» поверх обычного PBR —
      коллайдеры строятся по bounding box меша на CPU, поэтому физика не меняется */

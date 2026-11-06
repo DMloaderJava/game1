@@ -128,7 +128,22 @@ function makeElement(tag = 'div', attrs = {}) {
     getBoundingClientRect() { return { left: 0, top: 0, right: 1280, bottom: 720, width: 1280, height: 720 }; },
     focus() {},
     blur() {},
-    getContext() { return null; },
+    getContext(kind) {
+      if (kind !== '2d') return null;
+      const blank = (w, h) => ({ width: w | 0, height: h | 0, data: new Uint8ClampedArray((w | 0) * (h | 0) * 4) });
+      return {
+        canvas: el,
+        fillStyle: '#000', strokeStyle: '#000', lineWidth: 1, globalAlpha: 1,
+        createImageData: (w, h) => blank(w, h),
+        getImageData: (x, y, w, h) => blank(w, h),
+        putImageData() {}, fillRect() {}, clearRect() {}, strokeRect() {},
+        beginPath() {}, closePath() {}, moveTo() {}, lineTo() {}, arc() {},
+        fill() {}, stroke() {}, save() {}, restore() {},
+        translate() {}, rotate() {}, scale() {},
+        createLinearGradient: () => ({ addColorStop() {} }),
+        createRadialGradient: () => ({ addColorStop() {} })
+      };
+    },
     requestPointerLock() { globalThis.document.pointerLockElement = el; return undefined; },
     releasePointerLock() { globalThis.document.pointerLockElement = null; }
   };
@@ -587,6 +602,55 @@ async function main() {
     S.rift = 0;
     assert(fov > 74.2, 'FOV не вырос: ' + fov.toFixed(2));
     assert(fov < 82, 'FOV ушёл в крайность: ' + fov.toFixed(2));
+  });
+
+  /* ---------- 3b-2. ТЕКСТУРЫ И РУКИ ---------- */
+  console.log('\n▶ текстуры и вьюмодель рук');
+
+  check('текстуры: карты на камне, меди и кости', () => {
+    const M = AP.W.M;
+    assert(M.stone.map, 'у камня нет карты');
+    assert(M.stone.bumpMap, 'у камня нет bump-карты');
+    assert(M.copper.map, 'у меди нет карты');
+    assert(M.bone.map, 'у кости нет карты');
+    const img = M.stone.map.image;
+    assert(img && img.width >= 64 && img.height >= 64,
+      'размер изображения: ' + (img ? img.width + 'x' + img.height : 'null'));
+    assert(M.stone.map.wrapS === AP.THREE.RepeatWrapping, 'текстура не тайлится');
+  });
+
+  check('текстуры: UV платформ отмасштабированы под размер', () => {
+    let tiled = 0;
+    let checked = 0;
+    AP.W.scene.traverse((o) => {
+      if (!o.isMesh || !o.geometry || !o.geometry.attributes || !o.geometry.attributes.uv) return;
+      checked++;
+      const uv = o.geometry.attributes.uv;
+      let mx = 0;
+      for (let i = 0; i < uv.count; i += 3) mx = Math.max(mx, uv.getX(i), uv.getY(i));
+      if (mx > 1.15) tiled++;
+    });
+    assert(checked > 10, 'мало мешей с UV: ' + checked);
+    assert(tiled > 5, 'затайлено мешей: ' + tiled + ' из ' + checked);
+  });
+
+  check('руки: вьюмодель на камере и реагирует на лепку', () => {
+    const H = AP.hands;
+    assert(H && H.group, 'рук нет');
+    assert(H.group.parent === AP.W.camera, 'руки не прикреплены к камере');
+    assert(H.group.visible, 'руки невидимы в игре');
+    const f = H.right.fingers[2];   // внешний палец — он и должен расходиться
+    const x0 = f.position.x;
+    const z0 = H.right.group.position.z;
+    S.player.mass = 40;
+    env.mouse('mousedown', 0);
+    run(14, 'hands');
+    env.mouse('mouseup', 0);
+    const opened = f.position.x;
+    const pushed = H.right.group.position.z;
+    run(2, 'hands');
+    assert(opened > x0 + 0.004, 'пальцы не раскрываются: ' + x0.toFixed(3) + ' → ' + opened.toFixed(3));
+    assert(pushed < z0 - 0.005, 'руки не выдвигаются вперёд: ' + z0.toFixed(3) + ' → ' + pushed.toFixed(3));
   });
 
   /* ---------- 3c. ТАКТИЛЬНОСТЬ БОЯ ---------- */

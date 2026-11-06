@@ -12,6 +12,7 @@ import {
   jump, dash, isRewinding, toggleMemory, applyImpulse
 } from './player.js';
 import { updateCrystals, updatePending } from './combat.js';
+import { initHands, updateHands, getHands } from './hands.js';
 import { updateEnemies, clearEnemies } from './enemies.js';
 import { updateBoss } from './boss.js';
 import { ZONES, loadZone, updateZone, clearZone, crumbleArena } from './level.js';
@@ -26,6 +27,7 @@ let coreHint = false;
 /* ------------------------------------------------------------------ */
 initWorld();
 initUI();
+initHands();
 
 S.hooks.rewinding = isRewinding;
 S.hooks.respawn = (reason) => {
@@ -270,6 +272,7 @@ function loop() {
     updateZone(dt);
     updateFx(dt, raw);
     updateMemoryTrails(dt);
+    updateHands(dt);
 
     recordHistory(S.time);
     recordPlayer(S.time);
@@ -295,7 +298,8 @@ function loop() {
     }
   } else {
     updateFx(raw, raw);
-    updateMemoryTrails(0);   // вне игры шлейфы гасим
+    updateMemoryTrails(0);
+    updateHands(0);   // вне игры шлейфы гасим
     if (core) {
       core.orb.rotation.y += raw * 0.4;
     }
@@ -310,6 +314,7 @@ loop();
 /* отладка */
 window.__AP = {
   S, W, THREE, get state() { return S.mode; },
+  get hands() { return getHands(); },
   get enemies() { return S.enemies; },
   get planks() { return []; },
   loadZone, finish, nextZone,

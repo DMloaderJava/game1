@@ -19,8 +19,22 @@ const G = new THREE.Group();   // всё, что принадлежит зоне
 /* ------------------------------------------------------------------ */
 function add(mesh) { G.add(mesh); return mesh; }
 
+/* текстуры тайлятся: масштабируем UV по размеру грани,
+   чтобы плотность текселей была одинаковой на маленьком мосту и на арене */
+const TILE = 4.5;
+function tileUV(geo, size) {
+  const uv = geo && geo.attributes && geo.attributes.uv;
+  if (!uv) return geo;
+  const k = Math.max(1, size || 1);
+  if (k === 1) return geo;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * k, uv.getY(i) * k);
+  uv.needsUpdate = true;
+  return geo;
+}
+
 function plat(w, h, d, x, y, z, mat, opts = {}) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat || W.M.stone);
+  const geo = tileUV(new THREE.BoxGeometry(w, h, d), Math.max(w, d) / TILE);
+  const m = new THREE.Mesh(geo, mat || W.M.stone);
   m.position.set(x, y, z);
   if (opts.rotY) m.rotation.y = opts.rotY;
   m.updateMatrixWorld(true);
@@ -30,7 +44,7 @@ function plat(w, h, d, x, y, z, mat, opts = {}) {
 }
 
 function pillar(x, y, z, h, r, mat) {
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.55, r, h, 7), mat || W.M.copper);
+  const m = new THREE.Mesh(tileUV(new THREE.CylinderGeometry(r * 0.55, r, h, 7), h / TILE), mat || W.M.copper);
   m.position.set(x, y + h / 2, z);
   add(m);
   return m;
@@ -112,7 +126,7 @@ export const ZONES = [
       /* мост, который рухнул 4 секунды назад */
       for (let i = 0; i < 5; i++) {
         const z = 22.4 - i * 2.75;
-        const m = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.45, 2.8), W.M.copper);
+        const m = new THREE.Mesh(tileUV(new THREE.BoxGeometry(4.4, 0.45, 2.8), 4.4 / TILE), W.M.copper);
         m.position.set(0, -0.225, z);
         add(m);
         const c = { min: new THREE.Vector3(), max: new THREE.Vector3(), solid: false, mesh: m };
@@ -145,7 +159,7 @@ export const ZONES = [
         { w: 9, h: 1.2, d: 6, x: 0, y: 4.4, z: -8, ph: 3.5, amp: 0.9 }
       ];
       for (const L of lungs) {
-        const m = new THREE.Mesh(new THREE.BoxGeometry(L.w, L.h, L.d), W.M.bone);
+        const m = new THREE.Mesh(tileUV(new THREE.BoxGeometry(L.w, L.h, L.d), L.w / TILE), W.M.bone);
         m.position.set(L.x, L.y, L.z);
         add(m);
         const c = addCollider(m, { dyn: true });
@@ -260,7 +274,7 @@ export const ZONES = [
       for (const p of ph) {
         const mat = W.M.stone2.clone();
         mat.transparent = true;
-        const m = new THREE.Mesh(new THREE.BoxGeometry(p.w, 1.2, p.d), mat);
+        const m = new THREE.Mesh(tileUV(new THREE.BoxGeometry(p.w, 1.2, p.d), Math.max(p.w, p.d) / TILE), mat);
         m.position.set(p.x, p.y, p.z);
         add(m);
         const c = addCollider(m, { dyn: true });
@@ -312,7 +326,7 @@ export const ZONES = [
       for (const p of e) {
         const mat = W.M.stone.clone();
         mat.transparent = true;
-        const m = new THREE.Mesh(new THREE.BoxGeometry(p.w, 1.4, p.d), mat);
+        const m = new THREE.Mesh(tileUV(new THREE.BoxGeometry(p.w, 1.4, p.d), Math.max(p.w, p.d) / TILE), mat);
         m.position.set(p.x, p.y, p.z);
         add(m);
         const c = addCollider(m, { dyn: true });
