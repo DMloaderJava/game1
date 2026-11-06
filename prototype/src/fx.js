@@ -1,6 +1,8 @@
-/* Визуальные эффекты: ударные волны, искры, вспышки. */
+/* Визуальные эффекты: ударные волны, искры, вспышки, линии памяти. */
 import * as THREE from '../vendor/three.module.js';
 import { W } from './world.js';
+import { S } from './state.js';
+import { nearbyPaths, PATH_MAX } from './rewind.js';
 
 const fx = [];
 
@@ -86,6 +88,96 @@ export function updateFx(dt) {
       f.o.material.opacity = 0.75 * (1 - k);
       f.o.scale.setScalar(1 + k * 1.5);
     }
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  ЛИНИИ ПАМЯТИ                                                      */
+/*  Пока игрок держит перемотку (или слой памяти Tab) — вокруг него       */
+/*  расходятся тонкие пунктирные шлейфы: где был объект последние 8 с.    */
+/* ------------------------------------------------------------------ */
+const TRAIL_MAX = 16;
+const TRAIL_RADIUS = 26;
+const TRAIL_COLORS = {
+  crystal: 0xff44dd,
+  enemy: 0xff5a7a,
+  echo: 0x9a6bff,
+  block: 0x7b2dff,
+  boss: 0xff2b6a
+};
+const trailPool = [];
+const nearBuf = [];
+
+function getTrail(i) {
+  if (trailPool[i]) return trailPool[i];
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(PATH_MAX * 3), 3));
+  geo.setAttribute('lineDistance', new THREE.BufferAttribute(new Float32Array(PATH_MAX), 1));
+  const mat = new THREE.LineDashedMaterial({
+    color: 0x7b2dff,
+    dashSize: 0.42,
+    gapSize: 0.26,
+    transparent: true,
+    opacity: 0.6,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+  });
+  const line = new THREE.Line(geo, mat);
+  line.frustumCulled = false;
+  line.renderOrder = 4;
+  line.visible = false;
+  W.scene.add(line);
+  trailPool[i] = line;
+  return line;
+}
+
+export function hideMemoryTrails() {
+  for (let i = 0; i < trailPool.length; i++) trailPool[i].visible = false;
+}
+
+export function updateMemoryTrails(dt) {
+  const active = (S.flags.rewinding || S.flags.memory) && S.mode === 'play';
+  if (!active) { hideMemoryTrails(); return; }
+
+  nearbyPaths(S.player.pos, TRAIL_RADIUS, nearBuf, TRAIL_MAX);
+
+  for (let i = 0; i < TRAIL_MAX; i++) {
+    const line = getTrail(i);
+    const r = nearBuf[i];
+    if (!r) { line.visible = false; continue; }
+
+    const src = r.path;
+    const total = src.length / 3;
+    if (total < 4) { line.visible = false; continue; }
+    const stride = total > 90 ? 2 : 1;
+
+    const pos = line.geometry.attributes.position.array;
+    const dist = line.geometry.attributes.lineDistance.array;
+    let n = 0;
+    let len = 0;
+    let px = 0, py = 0, pz = 0;
+    for (let k = 0; k < total; k += stride) {
+      const x = src[k * 3], y = src[k * 3 + 1], z = src[k * 3 + 2];
+      if (n > 0) len += Math.hypot(x - px, y - py, z - pz);
+      pos[n * 3] = x; pos[n * 3 + 1] = y; pos[n * 3 + 2] = z;
+      dist[n] = len;
+      px = x; py = y; pz = z;
+      n++;
+      if (n >= PATH_MAX) break;
+    }
+    if (n < 3) { line.visible = false; continue; }
+
+    line.geometry.setDrawRange(0, n);
+    line.geometry.attributes.position.needsUpdate = true;
+    line.geometry.attributes.lineDistance.needsUpdate = true;
+
+    line.material.color.setHex(TRAIL_COLORS[r.kind] || 0x7b2dff);
+    const d = r.anchor.distanceTo(S.player.pos);
+    const near = 1 - Math.min(1, d / TRAIL_RADIUS);
+    const boost = S.flags.rewinding ? 1 : 0.55;
+    line.material.opacity = (0.14 + near * 0.55) * boost;
+    line.material.dashSize = 0.34 + near * 0.22;
+    line.visible = true;
   }
 }
 

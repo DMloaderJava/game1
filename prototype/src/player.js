@@ -26,6 +26,7 @@ export function isRewinding() { return rewinding; }
 /* ------------------------------------------------------------------ */
 export function resetPlayer(x, y, z) {
   S.flags.rewinding = false;
+  S.flags.sculpting = false;
   P.pos.set(x, y, z);
   P.vel.set(0, 0, 0);
   P.hp = P.maxHp;
@@ -136,6 +137,7 @@ export function startSculpt() {
   mesh.position.copy(point);
   W.scene.add(mesh);
   sculpt = { mesh, size: 0.4, base: point.clone() };
+  S.flags.sculpting = true;
   sfx('sculpt');
 }
 
@@ -161,6 +163,7 @@ export function endSculpt() {
   mesh.updateMatrixWorld(true);
   const s = sculpt.size;
   sculpt = null;
+  S.flags.sculpting = false;
   if (s < 0.55) {
     W.scene.remove(mesh);
     mesh.geometry.dispose();
@@ -399,4 +402,5 @@ export function recordPlayer(t) {
 
 export function toggleMemory(on) {
   memoryMode = on;
+  S.flags.memory = !!on;
 }

@@ -8,7 +8,8 @@ export function addRewindable(kind, obj, get, apply, anchor, onDead) {
     kind, obj, get, apply,
     anchor: anchor || obj.position,
     onDead: onDead || null,
-    hist: [], lastT: -99, touched: false, dead: false
+    hist: [], lastT: -99, touched: false, dead: false,
+    path: []          // плоский xyz-буфер траектории (~8 с) для линий памяти
   };
   rewindables.push(r);
   return r;
@@ -25,6 +26,20 @@ export function clearRewindables() {
   rewindables.length = 0;
 }
 
+/* ближайшие к точке объекты с накопленной траекторией — для линий памяти */
+export function nearbyPaths(center, radius, out, max) {
+  out.length = 0;
+  for (let i = 0; i < rewindables.length; i++) {
+    const r = rewindables[i];
+    if (r.dead || r.kind === 'prop') continue;
+    if (r.path.length < 12) continue;
+    if (r.anchor.distanceTo(center) > radius) continue;
+    out.push(r);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
 /* запись состояний ~25 раз в секунду */
 export function recordHistory(t) {
   for (let i = 0; i < rewindables.length; i++) {
@@ -34,8 +49,16 @@ export function recordHistory(t) {
     r.lastT = t;
     r.hist.push({ t, s: r.get() });
     if (r.hist.length > 340) r.hist.shift();
+
+    /* траектория: 3 числа на точку, ~25 Гц → 200 точек ≈ 8 секунд */
+    const a = r.anchor;
+    r.path.push(a.x, a.y, a.z);
+    if (r.path.length > PATH_MAX * 3) r.path.splice(0, r.path.length - PATH_MAX * 3);
   }
 }
+
+/* сколько точек траектории помним (25 Гц × 8 с) */
+export const PATH_MAX = 200;
 
 export function sampleAt(r, t) {
   const h = r.hist;

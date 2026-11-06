@@ -1,10 +1,10 @@
 /* Точка входа: машина состояний, ввод, главный цикл. */
 import * as THREE from '../vendor/three.module.js';
 import { S, CFG, clamp } from './state.js';
-import { W, initWorld, setMood, updateAtmosphere } from './world.js';
+import { W, initWorld, setMood, updateAtmosphere, renderFrame, checkShaderHealth } from './world.js';
 import { initUI, hud, toast, show, hide, hideAll, refreshHud, renderUpgrade, ending, bossBar, setObjective, costOf, flash } from './ui.js';
 import { initAudio, updateAudio, setVolume, sfx } from './audio.js';
-import { updateFx } from './fx.js';
+import { updateFx, updateMemoryTrails } from './fx.js';
 import { recordHistory } from './rewind.js';
 import {
   updatePlayer, updateSculpt, updateRewind, recordPlayer, resetPlayer,
@@ -240,9 +240,12 @@ function finish(kind) {
 /*  ЦИКЛ                                                              */
 /* ------------------------------------------------------------------ */
 const clock = new THREE.Clock();
+let frameCount = 0;
 
 function loop() {
   requestAnimationFrame(loop);
+  /* через несколько кадров проверяем, что кастомные шейдеры собрались */
+  if (++frameCount === 8) checkShaderHealth();
   const raw = Math.min(0.05, clock.getDelta());
 
   if (S.mode === 'play') {
@@ -262,6 +265,7 @@ function loop() {
     updateBoss(dt);
     updateZone(dt);
     updateFx(dt);
+    updateMemoryTrails(dt);
 
     recordHistory(S.time);
     recordPlayer(S.time);
@@ -287,20 +291,21 @@ function loop() {
     }
   } else {
     updateFx(raw);
+    updateMemoryTrails(0);   // вне игры шлейфы гасим
     if (core) {
       core.orb.rotation.y += raw * 0.4;
     }
   }
 
   updateAtmosphere(raw);
-  W.renderer.render(W.scene, W.camera);
+  renderFrame();
 }
 
 loop();
 
 /* отладка */
 window.__AP = {
-  S, W, get state() { return S.mode; },
+  S, W, THREE, get state() { return S.mode; },
   get enemies() { return S.enemies; },
   get planks() { return []; },
   loadZone, finish, nextZone,

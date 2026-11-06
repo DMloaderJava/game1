@@ -1,7 +1,7 @@
 /* Зоны-биомы: геометрия, законы, узлы, портал. */
 import * as THREE from '../vendor/three.module.js';
 import { S, rand, clamp } from './state.js';
-import { W, setMood } from './world.js';
+import { W, setMood, setZoneBreath } from './world.js';
 import { makeBox, addCollider, refreshCollider, clearColliders } from './physics.js';
 import { clearRewindables, addRewindable } from './rewind.js';
 import { clearEnemies, makeSuture, makeMemophage, makeReversion } from './enemies.js';
@@ -412,6 +412,7 @@ export function loadZone(i) {
 
   const Z = ZONES[i];
   setMood(Z.mood);
+  setZoneBreath(i);   // у каждой зоны своя амплитуда «дыхания» геометрии
   setZoneTone(i);
   S.laws = Z.laws || {};
 

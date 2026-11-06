@@ -333,6 +333,9 @@ export class WebGLRenderer {
   setViewport() {}
   setScissorTest() {}
   clear() {}
+  setRenderTarget() {}
+  getRenderTarget() { return null; }
+  getPixelRatio() { return 1; }
   /* настоящий WebGLRenderer перед отрисовкой обновляет мировые матрицы;
      без этого луч из камеры (aimPoint/aimBlocks) считался бы по устаревшей матрице */
   render(scene, camera) {
@@ -500,6 +503,91 @@ async function main() {
 
   /* наводим порядок: игрок жив, камера осмысленная */
   S.player.hp = 100;
+
+  /* ---------- 3b. ВИЗУАЛЬНЫЕ СИСТЕМЫ ---------- */
+  console.log('\n▶ визуальные системы: купол, живые материалы, шлейфы, аберрация');
+
+  check('купол разлома: ShaderMaterial радиусом 18 м', () => {
+    const D = AP.W.dome;
+    assert(D && D.mesh && D.material, 'купол не создан');
+    assert(D.material.type === 'ShaderMaterial', 'материал: ' + D.material.type);
+    assert(D.material.uniforms.uColor, 'нет униформы цвета');
+    assert(Math.abs(D.mesh.scale.x - 18) < 0.8, 'радиус ' + D.mesh.scale.x.toFixed(2));
+    assert(D.mesh.visible, 'купол невидим в режиме play');
+  });
+
+  check('купол ярче при перемотке', () => {
+    const u = AP.W.dome.material.uniforms;
+    S.player.charge = 100;
+    const before = u.uIntensity.value;
+    env.key('KeyQ', true);
+    run(26, 'dome');
+    const during = u.uIntensity.value;
+    const rew = u.uRewind.value;
+    env.key('KeyQ', false);
+    run(4, 'dome');
+    assert(during > before + 0.05, `${before.toFixed(2)} → ${during.toFixed(2)}`);
+    assert(rew >= 0.9, 'uRewind во время перемотки = ' + rew);
+  });
+
+  check('живые материалы: дыхание вставлено в вершинный шейдер three', () => {
+    const T = AP.THREE;
+    const std = T.ShaderLib.standard.vertexShader;
+    assert(std.includes('#include <begin_vertex>'), 'в three нет begin_vertex — патч не сработает');
+    const entry = AP.W.living[0];
+    assert(!!entry && entry.mat.onBeforeCompile, 'материал не пропатчен');
+    const fake = { uniforms: {}, vertexShader: std, fragmentShader: '' };
+    entry.mat.onBeforeCompile(fake);
+    assert(!fake.vertexShader.includes('#include <begin_vertex>'), 'include не заменён');
+    assert(fake.vertexShader.includes('transformed += objectNormal'), 'нет смещения по нормали');
+    assert(fake.uniforms.uRift && fake.uniforms.uAmp && fake.uniforms.uBreath, 'униформы не проброшены');
+  });
+
+  check('дыхание усиливается разломом (uniform растёт)', () => {
+    const u = AP.W.living[0].uni;
+    const before = u.uRift.value;
+    S.rift = 100;
+    run(3, 'living');
+    const during = u.uRift.value;
+    S.rift = 0;
+    assert(before < 0.2, 'стартовый rift ' + before);
+    assert(during > 0.9, 'uRift не вырос: ' + during);
+  });
+
+  check('линии памяти: шлейфы при перемотке', () => {
+    S.player.charge = 100;
+    S.rift = 0;
+    env.key('KeyQ', true);
+    run(24, 'trails');
+    const lines = AP.W.scene.children.filter((o) => o.isLine);
+    const shown = lines.filter((o) => o.visible && o.geometry.drawRange.count > 3);
+    env.key('KeyQ', false);
+    run(4, 'trails');
+    assert(lines.length > 0, 'линии не созданы');
+    assert(shown.length > 0, 'ни один шлейф не показан');
+    assert(shown[0].geometry.attributes.lineDistance, 'нет пунктира (lineDistance)');
+  });
+
+  check('пост-обработка: буфер + аберрация на разломе', () => {
+    const P = AP.W.post;
+    assert(P && P.enabled, 'пост-проход не включён');
+    assert(P.target && P.mat, 'нет рендер-таргета');
+    S.rift = 100;
+    run(3, 'post');
+    const u = P.mat.uniforms;
+    assert(u.uRift.value > 0.9, 'uRift = ' + u.uRift.value);
+    assert(u.uGlitch.value > 0.9, 'глитч не включился: ' + u.uGlitch.value);
+    S.rift = 0;
+  });
+
+  check('FOV качается от разлома, но остаётся играбельным', () => {
+    S.rift = 100;
+    run(40, 'fov');
+    const fov = AP.W.camera.fov;
+    S.rift = 0;
+    assert(fov > 74.2, 'FOV не вырос: ' + fov.toFixed(2));
+    assert(fov < 82, 'FOV ушёл в крайность: ' + fov.toFixed(2));
+  });
 
   /* ---------- 4. КАМПАНИЯ: ПЯТЬ ЗОН ---------- */
   console.log('\n▶ кампания: четыре биома и арена босса');
