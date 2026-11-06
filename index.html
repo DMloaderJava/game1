@@ -178,6 +178,12 @@
     display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
   footer a:hover{color:#c9a0ff}
 
+  .content-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:rgba(168,85,255,.12);
+    border:1px solid rgba(168,85,255,.12);margin-top:36px;text-align:left}
+  .content-grid div{background:#0a0617;padding:20px 20px}
+  .content-grid b{display:block;font-size:12.5px;letter-spacing:.16em;text-transform:uppercase;color:#e2d4ff;margin-bottom:6px;font-weight:500}
+  .content-grid span{font-size:12px;color:#8d80ac;line-height:1.6}
+  @media(max-width:900px){.content-grid{grid-template-columns:1fr}}
   .reveal{opacity:0;transform:translateY(26px);transition:opacity .9s cubic-bezier(.2,.7,.2,1),transform .9s cubic-bezier(.2,.7,.2,1)}
   .reveal.in{opacity:1;transform:none}
 
@@ -202,7 +208,7 @@
     <h1>Архитектор<span>парадоксов</span></h1>
     <p>Ты — <em>Разломщик</em>. В радиусе 18 метров законы физики тебя слушаются — на восемь секунд. Мир вокруг — живой организм размером с континент, который постоянно перестраивает сам себя. Он помнит всё, что ты сделал. И он тебе этого не простит.</p>
     <div class="btns">
-      <a class="btn primary" href="prototype/index.html">▶ Играть в прототип</a>
+      <a class="btn primary" href="prototype/index.html">▶ Играть</a>
       <a class="btn ghost" href="docs/concept.html">Полный концепт-документ</a>
     </div>
   </div>
@@ -439,27 +445,21 @@
     <div class="reveal">
       <div class="eyebrow">проверка на играбельность</div>
       <h2>Концепт, в который <b>можно зайти прямо сейчас.</b></h2>
-      <p class="lead">Прототип на three.js: перемотка, лепка, эхо, каскадные коллапсы, три типа врагов и два финала. Без установки, в браузере.</p>
-      <div class="btns" style="justify-content:center">
-        <a class="btn primary" href="prototype/index.html">▶ Запустить прототип</a>
+      <p class="lead">Полная кампания в браузере: четыре биома со своими законами физики, три типа врагов, босс с тремя фазами, прокачка через осколки и два финала. Без установки.</p>
+      <div class="content-grid">
+        <div><b>Лёгкие Хора</b><span>мир дышит · мост, который рухнул 4 секунды назад</span></div>
+        <div><b>Медный Позвоночник</b><span>восходящие потоки · гравитационные колодцы</span></div>
+        <div><b>Канцелярия</b><span>фазовые платформы · память архитектуры</span></div>
+        <div><b>Мембрана</b><span>волны стирания · закон сохранения материи</span></div>
+        <div><b>Хор-Ноль</b><span>три фазы · два финала</span></div>
+        <div><b>Вплетение</b><span>Стазис · Потоп · Распад</span></div>
+      </div>
+      <div class="btns" style="justify-content:center;margin-top:38px">
+        <a class="btn primary" href="prototype/index.html">▶ Запустить игру</a>
         <a class="btn ghost" href="docs/concept.html">Читать полный документ</a>
       </div>
     </div>
   </div>
-</section>
-
-<div class="wrap">
-  <footer>
-    <div>Архитектор Парадоксов — концепт-документ и вертикальный срез · 2026</div>
-    <div><a href="docs/CONCEPT.md">CONCEPT.md</a> · <a href="prototype/index.html">prototype</a> · <a href="art/">art</a></div>
-  </footer>
-</div>
-
-<script>
-  const io = new IntersectionObserver((entries) => {
-    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
-  }, { threshold: 0.12 });
-  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
-</script>
+</section>script>
 </body>
 </html>

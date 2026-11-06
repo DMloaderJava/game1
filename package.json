@@ -1,0 +1,14 @@
+{
+  "name": "architect-of-paradoxes",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Архитектор Парадоксов — концепт и играбельная кампания (three.js, ES-модули)",
+  "scripts": {
+    "serve": "python3 -m http.server 8080 --bind 0.0.0.0",
+    "doc": "node tools/render-doc.mjs"
+  },
+  "dependencies": {
+    "marked": "^18.1.3"
+  }
+}
