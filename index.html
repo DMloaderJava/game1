@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Архитектор Парадоксов — концепт 3D-игры</title>
+<meta name="description" content="Сюрреалистическая экшен-адвенчура от первого лица о манипуляции пространством и временем. Концепт + играбельный прототип.">
+<style>
+  :root{
+    --ink:#07040f;
+    --ink2:#0d0820;
+    --violet:#a855ff;
+    --violet-dim:#6b34b8;
+    --copper:#c1743f;
+    --copper-dim:#7a4423;
+    --paper:#efe9ff;
+    --muted:#9d90bd;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--ink); color:var(--paper);
+    font-family:"Segoe UI",Roboto,Inter,system-ui,-apple-system,sans-serif;
+    line-height:1.7; overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{background:rgba(168,85,255,.35)}
+  a{color:inherit;text-decoration:none}
+  img{display:block;max-width:100%}
+
+  .wrap{max-width:1180px;margin:0 auto;padding:0 28px}
+  .eyebrow{font-size:11px;letter-spacing:.42em;text-transform:uppercase;color:var(--violet);opacity:.85;margin-bottom:18px}
+  h2{font-size:clamp(26px,3.6vw,44px);font-weight:300;letter-spacing:.02em;line-height:1.2;margin-bottom:18px}
+  h2 b{font-weight:600;color:#dcc9ff}
+  .lead{max-width:720px;color:var(--muted);font-size:16.5px;line-height:1.85}
+  section{padding:110px 0;position:relative}
+  section + section{border-top:1px solid rgba(168,85,255,.09)}
+
+  /* ---------- HERO ---------- */
+  .hero{
+    min-height:100vh;display:flex;align-items:center;position:relative;overflow:hidden;
+    background:#07040f url("art/00_cover.jpg") center 30%/cover no-repeat;
+  }
+  .hero::after{
+    content:"";position:absolute;inset:0;
+    background:
+      radial-gradient(ellipse at 20% 40%, rgba(10,4,26,.55), transparent 60%),
+      linear-gradient(180deg, rgba(7,4,15,.82) 0%, rgba(7,4,15,.45) 35%, rgba(7,4,15,.94) 88%, #07040f 100%);
+  }
+  .hero .wrap{position:relative;z-index:2;padding-top:70px;padding-bottom:70px}
+  .hero h1{
+    font-size:clamp(38px,7.6vw,96px); font-weight:200; line-height:.98;
+    letter-spacing:-.01em; text-transform:uppercase; margin-bottom:26px;
+    background:linear-gradient(175deg,#fff 10%,#d3b4ff 45%,#7a3ec0 92%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    text-shadow:0 0 90px rgba(168,85,255,.25);
+  }
+  .hero h1 span{display:block;letter-spacing:.16em;font-size:.42em;margin-top:22px;font-weight:300;
+    background:linear-gradient(90deg,#c1743f,#ffd6b0 60%,#c1743f);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero p{max-width:560px;font-size:17px;color:#cfc3e8;margin-bottom:38px}
+  .hero p em{font-style:normal;color:#e7d8ff;border-bottom:1px solid rgba(168,85,255,.5)}
+  .btns{display:flex;gap:16px;flex-wrap:wrap}
+  .btn{
+    display:inline-flex;align-items:center;gap:12px;padding:16px 38px;
+    font-size:11.5px;letter-spacing:.28em;text-transform:uppercase;
+    border:1px solid rgba(168,85,255,.5);background:rgba(168,85,255,.08);
+    transition:.25s;position:relative;overflow:hidden;
+  }
+  .btn:hover{background:rgba(168,85,255,.22);box-shadow:0 0 44px rgba(168,85,255,.35);transform:translateY(-1px)}
+  .btn.primary{background:linear-gradient(120deg,rgba(168,85,255,.32),rgba(193,116,63,.22));border-color:rgba(200,150,255,.7)}
+  .btn.ghost{border-color:rgba(255,255,255,.18);background:transparent;color:#c9bfe0}
+  .btn.ghost:hover{background:rgba(255,255,255,.05);box-shadow:none}
+
+  .scrollhint{position:absolute;left:50%;bottom:28px;transform:translateX(-50%);font-size:10px;letter-spacing:.4em;
+    text-transform:uppercase;color:#7d6fa0;z-index:2;animation:pulse 2.6s infinite}
+  @keyframes pulse{0%,100%{opacity:.35}50%{opacity:.9}}
+
+  /* ---------- STATS ---------- */
+  .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:rgba(168,85,255,.14);
+    border:1px solid rgba(168,85,255,.14);margin-top:-46px;position:relative;z-index:3}
+  .stat{background:#0a0617;padding:26px 20px;text-align:center}
+  .stat b{display:block;font-size:clamp(22px,2.6vw,32px);font-weight:300;color:#e3d3ff;letter-spacing:-.01em}
+  .stat span{font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:#8d80ac}
+
+  /* ---------- VERBS ---------- */
+  .verbs{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:rgba(168,85,255,.12);margin-top:52px;
+    border:1px solid rgba(168,85,255,.12)}
+  .verb{background:#0a0617;padding:38px 34px;position:relative;transition:.3s}
+  .verb:hover{background:#120a26}
+  .verb:hover .k{color:#fff;text-shadow:0 0 24px var(--violet)}
+  .verb .k{font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:var(--violet);margin-bottom:14px;transition:.3s}
+  .verb h3{font-size:21px;font-weight:400;margin-bottom:10px;letter-spacing:.01em}
+  .verb p{color:#a294c2;font-size:14.5px;line-height:1.8}
+  .verb .num{position:absolute;right:26px;top:26px;font-size:11px;color:#3d3160;letter-spacing:.2em}
+
+  /* ---------- BIOMES ---------- */
+  .biome{display:grid;grid-template-columns:1.05fr 1fr;gap:0;align-items:stretch;margin-bottom:74px;
+    border:1px solid rgba(168,85,255,.13);background:#0a0617}
+  .biome:nth-child(even){grid-template-columns:1fr 1.05fr}
+  .biome:nth-child(even) .bimg{order:2}
+  .bimg{position:relative;overflow:hidden;min-height:340px}
+  .bimg img{width:100%;height:100%;object-fit:cover;transition:transform 1.1s ease;}
+  .biome:hover .bimg img{transform:scale(1.05)}
+  .bimg::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(10,6,23,.85),transparent 55%)}
+  .biome:nth-child(even) .bimg::after{background:linear-gradient(270deg,rgba(10,6,23,.85),transparent 55%)}
+  .btxt{padding:44px 42px}
+  .bnum{font-size:11px;letter-spacing:.34em;color:var(--copper);margin-bottom:12px}
+  .btxt h3{font-size:clamp(21px,2.4vw,30px);font-weight:300;margin-bottom:6px}
+  .btxt .q{font-size:13.5px;font-style:italic;color:#9b8cbb;margin-bottom:18px;line-height:1.7}
+  .btxt p{font-size:14.5px;color:#b3a6cf;line-height:1.85;margin-bottom:16px}
+  .law{display:inline-block;font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;
+    color:#e0ccff;border:1px solid rgba(168,85,255,.4);padding:7px 14px;background:rgba(168,85,255,.08)}
+  .tags{margin-top:18px;display:flex;gap:8px;flex-wrap:wrap}
+  .tag{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#8d80ac;border:1px solid rgba(255,255,255,.1);padding:4px 10px}
+
+  /* ---------- BESTIARY ---------- */
+  .beasts{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:rgba(168,85,255,.12);
+    border:1px solid rgba(168,85,255,.12);margin-top:52px}
+  .beast{background:#0a0617;padding:34px 30px;transition:.3s}
+  .beast:hover{background:#120a26}
+  .beast .icon{width:38px;height:38px;margin-bottom:20px;border:1px solid rgba(168,85,255,.5);
+    display:flex;align-items:center;justify-content:center;font-size:13px;color:#d9c6ff;
+    background:radial-gradient(circle,rgba(168,85,255,.22),transparent 70%)}
+  .beast h3{font-size:18px;font-weight:500;letter-spacing:.02em;margin-bottom:4px}
+  .beast .role{font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;color:var(--copper);margin-bottom:16px}
+  .beast p{font-size:14px;color:#a294c2;line-height:1.8}
+  .beast .counter{margin-top:16px;font-size:12.5px;color:#8d80ac;border-left:2px solid rgba(193,116,63,.6);padding-left:12px}
+
+  .boss{margin-top:74px;display:grid;grid-template-columns:1fr 1fr;border:1px solid rgba(168,85,255,.16);background:#0a0617}
+  .boss .bimg{min-height:420px}
+  .boss .bimg::after{background:linear-gradient(90deg,rgba(10,6,23,.92),transparent 60%)}
+  .boss .btxt{padding:48px 44px}
+  .phases{margin-top:22px;display:grid;gap:14px}
+  .phase{border-left:1px solid rgba(168,85,255,.35);padding-left:16px}
+  .phase b{display:block;font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:#c9a0ff;margin-bottom:4px}
+  .phase span{font-size:13.5px;color:#a294c2}
+
+  /* ---------- SHARDS ---------- */
+  .shards{display:grid;grid-template-columns:repeat(3,1fr);gap:26px;margin-top:52px}
+  .shard{border:1px solid rgba(168,85,255,.16);padding:32px 28px;background:linear-gradient(180deg,rgba(168,85,255,.05),transparent);transition:.3s}
+  .shard:hover{transform:translateY(-4px);box-shadow:0 24px 60px -30px rgba(168,85,255,.5)}
+  .shard .dot{width:14px;height:14px;border-radius:50%;margin-bottom:20px}
+  .shard .dot.m{background:var(--copper);box-shadow:0 0 22px var(--copper)}
+  .shard .dot.p{background:var(--violet);box-shadow:0 0 22px var(--violet)}
+  .shard .dot.w{background:#f0e8ff;box-shadow:0 0 22px #fff}
+  .shard h3{font-size:16px;font-weight:500;margin-bottom:8px}
+  .shard p{font-size:13.5px;color:#a294c2;line-height:1.8}
+  .quote{margin-top:60px;border-left:2px solid var(--violet);padding:8px 0 8px 30px}
+  .quote p{font-size:clamp(19px,2.4vw,27px);font-weight:300;color:#e2d4ff;line-height:1.5}
+  .quote span{display:block;margin-top:12px;font-size:11px;letter-spacing:.26em;text-transform:uppercase;color:#7d6fa0}
+
+  /* ---------- SETPLAYS ---------- */
+  .sets{display:grid;gap:26px;margin-top:52px}
+  .set{border:1px solid rgba(168,85,255,.15);background:#0a0617;padding:36px 38px;transition:.3s}
+  .set:hover{border-color:rgba(168,85,255,.4)}
+  .set h3{font-size:20px;font-weight:400;margin-bottom:6px}
+  .set .sit{font-size:13.5px;color:#8d80ac;margin-bottom:24px;line-height:1.75}
+  .paths{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:rgba(168,85,255,.12)}
+  .path{background:#0c0720;padding:20px 18px;display:flex;flex-direction:column;gap:8px}
+  .path .n{font-size:10px;letter-spacing:.24em;color:var(--copper)}
+  .path b{font-size:13.5px;font-weight:500;color:#e6dbff}
+  .path span{font-size:12.5px;color:#9d90bd;line-height:1.7}
+  .path .cost{margin-top:auto;font-size:11px;color:#6d5f8f;letter-spacing:.06em}
+
+  /* ---------- CHECKLIST ---------- */
+  .checks{display:grid;grid-template-columns:repeat(2,1fr);gap:18px 44px;margin-top:44px}
+  .check{display:flex;gap:14px;font-size:14.5px;color:#b3a6cf;line-height:1.75}
+  .check i{color:var(--violet);font-style:normal;flex-shrink:0}
+
+  /* ---------- CTA ---------- */
+  .cta{text-align:center;background:
+    radial-gradient(ellipse at 50% 0%, rgba(168,85,255,.16), transparent 65%), #07040f;
+    border-top:1px solid rgba(168,85,255,.15)}
+  .cta h2{margin-bottom:14px}
+  .cta .lead{margin:0 auto 40px}
+
+  footer{border-top:1px solid rgba(168,85,255,.12);padding:44px 0;font-size:12px;color:#6d5f8f;
+    display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
+  footer a:hover{color:#c9a0ff}
+
+  .reveal{opacity:0;transform:translateY(26px);transition:opacity .9s cubic-bezier(.2,.7,.2,1),transform .9s cubic-bezier(.2,.7,.2,1)}
+  .reveal.in{opacity:1;transform:none}
+
+  @media(max-width:900px){
+    section{padding:74px 0}
+    .stats{grid-template-columns:repeat(2,1fr)}
+    .verbs,.beasts,.shards,.checks,.paths{grid-template-columns:1fr}
+    .biome,.boss{grid-template-columns:1fr}
+    .biome:nth-child(even) .bimg{order:0}
+    .bimg{min-height:240px}
+    .btxt{padding:32px 26px}
+    .hero{min-height:92vh}
+  }
+</style>
+</head>
+<body>
+
+<!-- ================= HERO ================= -->
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">концепт 3D-игры · first-person · 2026</div>
+    <h1>Архитектор<span>парадоксов</span></h1>
+    <p>Ты — <em>Разломщик</em>. В радиусе 18 метров законы физики тебя слушаются — на восемь секунд. Мир вокруг — живой организм размером с континент, который постоянно перестраивает сам себя. Он помнит всё, что ты сделал. И он тебе этого не простит.</p>
+    <div class="btns">
+      <a class="btn primary" href="prototype/index.html">▶ Играть в прототип</a>
+      <a class="btn ghost" href="docs/concept.html">Полный концепт-документ</a>
+    </div>
+  </div>
+  <div class="scrollhint">листай</div>
+</header>
+
+<div class="wrap">
+  <div class="stats">
+    <div class="stat"><b>18 м</b><span>радиус пузыря</span></div>
+    <div class="stat"><b>8 с</b><span>глубина перемотки</span></div>
+    <div class="stat"><b>3</b><span>эха одновременно</span></div>
+    <div class="stat"><b>4</b><span>биома-закона</span></div>
+    <div class="stat"><b>2</b><span>финала-действия</span></div>
+  </div>
+</div>
+
+<!-- ================= VERBS ================= -->
+<section id="verbs">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="eyebrow">ядро</div>
+      <h2>Четыре глагола. <b>Ни одного выстрела.</b></h2>
+      <p class="lead">Вся игра — это комбинация четырёх действий, которые работают друг на друга. Ты не стреляешь во врагов. Ты делаешь так, чтобы мир вокруг них перестал быть надёжным.</p>
+    </div>
+    <div class="verbs reveal">
+      <div class="verb"><div class="num">01</div><div class="k">перемотка</div><h3>Откатить реальность на 8 секунд</h3>
+        <p>Разрушенное здание собирается обратно. Враг проживает свой последний рывок заново — по тому же маршруту. И единственный способ лечиться: перемотать собственное тело в состояние, где оно ещё не было ранено.</p></div>
+      <div class="verb"><div class="num">02</div><div class="k">скульптура</div><h3>Лепить геометрию руками</h3>
+        <p>Тянуть материю из стен, сжимать в нестабильные структуры, скручивать в торсионные ловушки. Созданные объекты имеют память: они помнят, как их создали, и постепенно эволюционируют сами.</p></div>
+      <div class="verb"><div class="num">03</div><div class="k">эхо</div><h3>Оставлять себя в прошлом</h3>
+        <p>Каждое действие оставляет призрака — твёрдого, телесного. По нему можно бежать как по ступеням. Им можно бить. Его можно взорвать. Но если эхо коснётся тебя — схлопнется микро-сингулярность.</p></div>
+      <div class="verb"><div class="num">04</div><div class="k">коллапс</div><h3>Ломать то, что сам построил</h3>
+        <p>Нестабильная структура срабатывает через 4 секунды. Задевает соседнюю — каскад, урон ×1,5 за звено. Стоишь в радиусе — получаешь 40% своего же урона. Ошибка в расчёте стоит здоровья.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= BIOMES ================= -->
+<section id="biomes">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="eyebrow">мир</div>
+      <h2>Четыре биома. <b>Четыре закона физики.</b></h2>
+      <p class="lead">Каждый биом — не декорация, а новое правило, которое нужно выучить или сломать. Здесь нельзя «просто пройти дальше»: здесь меняется то, как работает низ, верх и время.</p>
+    </div>
+
+    <div style="margin-top:56px">
+      <article class="biome reveal">
+        <div class="bimg"><img src="art/01_biome_lungs.jpg" alt="Лёгкие Хора"></div>
+        <div class="btxt">
+          <div class="bnum">БИОМ 01 · АКТ I</div>
+          <h3>Лёгкие Хора</h3>
+          <div class="q">«Здесь всё растёт. Даже то, что ты убил.»</div>
+          <p>Ты внутри грудной клетки размером с город. Мембраны втягиваются, медные рёбра уходят вверх. Здания прорастают по два сантиметра в секунду, оставляя за собой леса из собственных корней.</p>
+          <div class="law">Закон: дыхание — цикл 12 секунд</div>
+          <div class="tags"><span class="tag">перемотка</span><span class="tag">базовая лепка</span><span class="tag">тайминг</span></div>
+        </div>
+      </article>
+
+      <article class="biome reveal">
+        <div class="bimg"><img src="art/02_biome_spine.jpg" alt="Медный Позвоночник"></div>
+        <div class="btxt">
+          <div class="bnum">БИОМ 02 · АКТ II</div>
+          <h3>Медный Позвоночник</h3>
+          <div class="q">«Гравитация тут — жидкость. Она течёт вниз по костям. Иногда — вверх.»</div>
+          <p>Шестьсот метров вертикали по исполинскому позвоночнику. Между позвонками текут гравитационные водопады, падающие вбок. Можно откатить сам прилив — и на восемь секунд «низ» окажется сверху.</p>
+          <div class="law">Закон: жидкая гравитация</div>
+          <div class="tags"><span class="tag">приливы</span><span class="tag">падение как оружие</span><span class="tag">глина «желе»</span></div>
+        </div>
+      </article>
+
+      <article class="biome reveal">
+        <div class="bimg"><img src="art/03_biome_bureau.jpg" alt="Канцелярия Невозможных Этажей"></div>
+        <div class="btxt">
+          <div class="bnum">БИОМ 03 · АКТ III</div>
+          <h3>Канцелярия Невозможных Этажей</h3>
+          <div class="q">«Здесь здание помнит, каким оно было.»</div>
+          <p>Бюрократический собор из лестниц, которые соединяются сами с собой. Слой памяти показывает прошлые версии каждой комнаты. Дверь может вести в ту же комнату, но на восемь секунд раньше — ты можешь встретить себя.</p>
+          <div class="law">Закон: память архитектуры и неевклидовы петли</div>
+          <div class="tags"><span class="tag">эхо живёт 30 с</span><span class="tag">петли</span><span class="tag">здание мстит</span></div>
+        </div>
+      </article>
+
+      <article class="biome reveal">
+        <div class="bimg"><img src="art/04_biome_membrane.jpg" alt="Мембрана"></div>
+        <div class="btxt">
+          <div class="bnum">БИОМ 04 · АКТ IV</div>
+          <h3>Мембрана</h3>
+          <div class="q">«Это не конец мира. Это его последний кадр.»</div>
+          <p>Берег моря жидкого света. Волны забывания стирают материю каждые 45 секунд. Вернуть стёртое можно только перемоткой — но действует закон сохранения: возвращённое исчезает где-то ещё.</p>
+          <div class="law">Закон: стирание и сохранение материи</div>
+          <div class="tags"><span class="tag">бухгалтерия с миром</span><span class="tag">эхо-толпа</span><span class="tag">финал</span></div>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ================= BESTIARY ================= -->
+<section id="bestiary">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="eyebrow">бестиарий</div>
+      <h2>Враги, которые <b>забирают у тебя инструменты.</b></h2>
+      <p class="lead">Ни один из них не является мешком здоровья. Каждый отбирает конкретную механику — и каждый, если направить его правильно, становится твоим подрядчиком.</p>
+    </div>
+    <div class="beasts reveal">
+      <div class="beast">
+        <div class="icon">✂</div>
+        <h3>ШОВ</h3>
+        <div class="role">хирург стабильности</div>
+        <p>Сшивает твои постройки с миром навсегда и ставит «стежок» — зону, где перемотка невозможна. Отбирает кнопку «назад».</p>
+        <div class="counter">Контр: удар по спине ×3, или дай ему сшить блок над бездной — получишь вечный мост.</div>
+      </div>
+      <div class="beast">
+        <div class="icon">◉</div>
+        <h3>МНЕМОФАГ</h3>
+        <div class="role">пожиратель памяти</div>
+        <p>Ест твои эхо. Каждое съеденное — плюс здоровье ему и минус секунда глубины перемотки у зоны. Набухнув, взрывается.</p>
+        <div class="counter">Контр: дай нажраться и подорви каскадом — вернёшь всю глубину перемотки.</div>
+      </div>
+      <div class="beast">
+        <div class="icon">◐</div>
+        <h3>РЕВЕРС</h3>
+        <div class="role">тот, кто живёт назад</div>
+        <p>Идёт от своей смерти к своему рождению. Неуязвим спереди: любой удар он «уже пережил». Уязвим только в точке рождения.</p>
+        <div class="counter">Контр: обгони его перемоткой, или поставь стену на маршруте — таймлайн рвётся, урон ×3.</div>
+      </div>
+    </div>
+
+    <div class="boss reveal">
+      <div class="bimg"><img src="art/05_boss_choir.jpg" alt="Хор-Ноль"></div>
+      <div class="btxt">
+        <div class="bnum">ФИНАЛЬНЫЙ БОСС</div>
+        <h3>ХОР-НОЛЬ · Первый Свидетель</h3>
+        <div class="q">Первый Разломщик. Тот, кто сломал этот мир до тебя — и не остановился.</div>
+        <p>Собор, орга́н и мясо. Сотни медных труб, сотни кричащих ртов. Вокруг него по орбите вращается кольцо замороженных эхо — все, кем он был. Он играет твоими же механиками, просто лучше.</p>
+        <div class="phases">
+          <div class="phase"><b>Фаза I · Припев</b><span>Материализует четыре эхо-копии игрока — записанных с твоих же действий. Ты видишь свои приёмы со стороны.</span></div>
+          <div class="phase"><b>Фаза II · Ревизия</b><span>Откатывает тебя на 8 секунд назад. Твои действия отменяются, его — нет. Единственный ответ — нестабильные структуры, которые возвращаются уже сработавшими.</span></div>
+          <div class="phase"><b>Фаза III · Сингулярность</b><span>Арена теряет пол. Босс питается твоим Индексом разлома. Финал выбирается не диалогом, а тем, что ты делаешь руками.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= SHARDS ================= -->
+<section id="shards">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="eyebrow">прогрессия</div>
+      <h2>Осколки сломанного времени. <b>Никакого XP.</b></h2>
+      <p class="lead">Ты не качаешь уровни. Ты вставляешь в себя куски отменённых моментов — и они подходят, только если ты уже умеешь делать то, что в них запечатано.</p>
+    </div>
+    <div class="shards reveal">
+      <div class="shard"><div class="dot m"></div><h3>Осколок-Секунда</h3><p>Медь. За любое вмешательство: откат, коллапс, лепку. Расходник для калибровки и риска.</p></div>
+      <div class="shard"><div class="dot p"></div><h3>Осколок-Противоречие</h3><p>Ультрафиолет. Только за парадоксы: эхо коснулось эха, ты оказался там же, где ты. Открывает навыки.</p></div>
+      <div class="shard"><div class="dot w"></div><h3>Осколок-Свидетель</h3><p>Белый. За боссов, элиту и красивые решения. Открывает ветки: Стазис, Потоп, Распад.</p></div>
+    </div>
+    <div class="quote reveal">
+      <p>«Осколок помнит твою руку».</p>
+      <span>каждый осколок подходит только тому, кто уже выполнял его действие — и тускнеет, когда ты им пользуешься, пока ты не повторишь его снова</span>
+    </div>
+  </div>
+</section>
+
+<!-- ================= SET PLAYS ================= -->
+<section id="sets">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="eyebrow">сеты плей</div>
+      <h2>Одна ситуация. <b>Четыре разных ответа.</b></h2>
+      <p class="lead">Главное обещание игры: задача одна — решений сколько угодно, и у каждого своя цена. Ниже — реальные сцены с разбором.</p>
+    </div>
+    <div class="sets">
+      <div class="set reveal">
+        <h3>A · «Мост, которого уже нет»</h3>
+        <div class="sit">Пропасть 22 метра. Мост рухнул четыре секунды назад. На той стороне — три Шва и Мнемофаг. У тебя 40 HP, ноль осколков.</div>
+        <div class="paths">
+          <div class="path"><div class="n">путь порядка</div><b>Архивный мост</b><span>Откат на 4 секунды — мост собирается обратно.</span><div class="cost">+25% разлома · 0 награды</div></div>
+          <div class="path"><div class="n">путь виртуоза</div><b>Лестница из себя</b><span>Три эха в воздухе как ступени. Вниз — глыбой на Мнемофага.</span><div class="cost">риск падения · 1 Противоречие</div></div>
+          <div class="path"><div class="n">путь манипулятора</div><b>Пусть враг построит</b><span>Подставь блок Шву — он сшьёт его в воздухе навсегда.</span><div class="cost">терпение · вечный мост</div></div>
+          <div class="path"><div class="n">путь сломанной физики</div><b>Гравитационный выстрел</b><span>Пружина под ногами + коллапс = полёт на 24 метра.</span><div class="cost">−35 HP · 1 Свидетель</div></div>
+        </div>
+      </div>
+
+      <div class="set reveal">
+        <h3>B · «Три Реверса в узком коридоре»</h3>
+        <div class="sit">Коридор четыре метра шириной, сзади провал. Мнемофаг урезал глубину перемотки до четырёх секунд. У тебя 62 HP.</div>
+        <div class="paths">
+          <div class="path"><div class="n">математика</div><b>Каскад</b><span>Три кристалла в шахматном порядке. Цепь ×2,25 сносит всё.</span><div class="cost">сам в радиусе · 2 Секунды</div></div>
+          <div class="path"><div class="n">архитектор</div><b>Клетка и провал</b><span>Купол вокруг них → один сверхплотный блок → сброс в бездну.</span><div class="cost">вся масса · 1 Свидетель</div></div>
+          <div class="path"><div class="n">дуэлянт</div><b>Игра в прошлое</b><span>Откат на 4 секунды: они возвращаются в точку рождения и уязвимы 1,2 с.</span><div class="cost">точность до кадра · 2 Противоречия</div></div>
+          <div class="path"><div class="n">самоубийца</div><b>Парадокс-ловушка</b><span>Встань в точку собственного эха. Сингулярность всасывает всех.</span><div class="cost">0,8 с на выход · 3 осколка</div></div>
+        </div>
+      </div>
+
+      <div class="set reveal">
+        <h3>C · «Хор-Ноль, фаза II: Ревизия»</h3>
+        <div class="sit">Босс откатывает тебя на восемь секунд раз в двадцать. Твои действия отменяются. Его — нет. Три подхода — три разных финала.</div>
+        <div class="paths">
+          <div class="path"><div class="n">зеркало</div><b>Программирование копий</b><span>Заранее строй полезное: его копии повторяют тебя.</span><div class="cost">→ нейтральный финал</div></div>
+          <div class="path"><div class="n">техник</div><b>Нулевой разлом</b><span>Не ломать ничего. Держать Индекс ниже 15%.</span><div class="cost">→ стабилизация</div></div>
+          <div class="path"><div class="n">инженер хаоса</div><b>Пироклазм</b><span>Ломай навсегда: обломки старше 8 секунд он откатить не может.</span><div class="cost">→ коллапс</div></div>
+          <div class="path"><div class="n">итог</div><b>Три игры</b><span>Один босс, три совершенно разных боя. Ни один не «правильный».</span><div class="cost">→ три финала</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CHECKLIST ================= -->
+<section id="why">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="eyebrow">дизайн-принципы</div>
+      <h2>Почему это игра, <b>а не катсцена.</b></h2>
+    </div>
+    <div class="checks reveal">
+      <div class="check"><i>✦</i> Ни одной катсцены, кроме интро. Всё сюжетное — через изменение правил на экране.</div>
+      <div class="check"><i>✦</i> Нет аптечек: лечение — это перемотка собственного тела в прошлое.</div>
+      <div class="check"><i>✦</i> Нет уровней и XP: только освоенные действия и вплетённые осколки.</div>
+      <div class="check"><i>✦</i> Финальный выбор — 90 секунд механики, а не кнопка в диалоге.</div>
+      <div class="check"><i>✦</i> Мир помнит: шрамы зон, обиды зданий и эхо-толпа в финале.</div>
+      <div class="check"><i>✦</i> Смерть не перезагружает мир, а меняет его: он остаётся с тем, что ты успел натворить.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CTA ================= -->
+<section class="cta" id="play">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="eyebrow">проверка на играбельность</div>
+      <h2>Концепт, в который <b>можно зайти прямо сейчас.</b></h2>
+      <p class="lead">Прототип на three.js: перемотка, лепка, эхо, каскадные коллапсы, три типа врагов и два финала. Без установки, в браузере.</p>
+      <div class="btns" style="justify-content:center">
+        <a class="btn primary" href="prototype/index.html">▶ Запустить прототип</a>
+        <a class="btn ghost" href="docs/concept.html">Читать полный документ</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wrap">
+  <footer>
+    <div>Архитектор Парадоксов — концепт-документ и вертикальный срез · 2026</div>
+    <div><a href="docs/CONCEPT.md">CONCEPT.md</a> · <a href="prototype/index.html">prototype</a> · <a href="art/">art</a></div>
+  </footer>
+</div>
+
+<script>
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+  }, { threshold: 0.12 });
+  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+</script>
+</body>
+</html>

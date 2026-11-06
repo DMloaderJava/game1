@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Архитектор Парадоксов — играбельный прототип</title>
+<style>
+  :root{
+    --indigo:#0a0620;
+    --violet:#a855ff;
+    --copper:#c1743f;
+    --paper:#e8e2ff;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;overflow:hidden;background:#000;font-family:"Segoe UI",Roboto,system-ui,sans-serif;color:var(--paper)}
+  canvas{display:block;width:100%;height:100%}
+
+  /* ---------- HUD ---------- */
+  #hud{position:fixed;inset:0;pointer-events:none;opacity:0;transition:opacity .6s}
+  #hud.on{opacity:1}
+
+  #crosshair{position:absolute;left:50%;top:50%;width:22px;height:22px;transform:translate(-50%,-50%);opacity:.85}
+  #crosshair::before,#crosshair::after{content:"";position:absolute;background:rgba(200,170,255,.85)}
+  #crosshair::before{left:50%;top:0;width:1px;height:100%;transform:translateX(-50%)}
+  #crosshair::after{top:50%;left:0;height:1px;width:100%;transform:translateY(-50%)}
+  #crosshair .dot{position:absolute;left:50%;top:50%;width:3px;height:3px;border-radius:50%;background:var(--violet);transform:translate(-50%,-50%);box-shadow:0 0 8px var(--violet)}
+
+  #bars{position:absolute;left:26px;bottom:24px;display:flex;flex-direction:column;gap:9px;width:230px;font-size:11px;letter-spacing:.14em;text-transform:uppercase}
+  .bar{position:relative;height:7px;background:rgba(120,90,200,.16);border:1px solid rgba(168,85,255,.35);border-radius:2px;overflow:hidden}
+  .bar > i{position:absolute;inset:0;transform-origin:left;transform:scaleX(0);transition:transform .08s linear}
+  #hpFill{background:linear-gradient(90deg,#5a1f2f,#ff5c7a);box-shadow:0 0 12px #ff5c7a}
+  #chargeFill{background:linear-gradient(90deg,#1b2a6b,#68b6ff);box-shadow:0 0 12px #68b6ff}
+  #massFill{background:linear-gradient(90deg,#7a4218,#ffb066);box-shadow:0 0 12px #ffb066}
+  .lbl{display:flex;justify-content:space-between;opacity:.75}
+  .lbl b{font-weight:600;letter-spacing:.05em}
+
+  /* rift */
+  #riftWrap{position:absolute;right:26px;bottom:24px;width:150px;text-align:right;font-size:11px;letter-spacing:.16em;text-transform:uppercase}
+  #riftWrap .lbl{margin-bottom:6px}
+  #riftBar{height:150px;width:10px;margin-left:auto;border:1px solid rgba(168,85,255,.4);border-radius:3px;position:relative;overflow:hidden;background:rgba(90,60,160,.12)}
+  #riftFill{position:absolute;left:0;right:0;bottom:0;height:0%;background:linear-gradient(0deg,#3a0b5c,#a855ff,#ff2fd0);box-shadow:0 0 18px #a855ff}
+  #riftTicks{position:absolute;inset:0;background:repeating-linear-gradient(to top,transparent 0 14px,rgba(0,0,0,.5) 14px 15px)}
+
+  /* echoes */
+  #echoes{position:absolute;left:50%;top:calc(50% + 34px);transform:translateX(-50%);display:flex;gap:10px}
+  .echo{width:10px;height:10px;border-radius:50%;border:1px solid rgba(168,85,255,.8);background:transparent;transition:.25s}
+  .echo.on{background:#c8a8ff;box-shadow:0 0 12px #a855ff}
+
+  #objective{position:absolute;left:50%;top:26px;transform:translateX(-50%);font-size:12px;letter-spacing:.2em;text-transform:uppercase;opacity:.8;text-align:center;line-height:1.8}
+  #objective b{color:#d9c6ff;font-weight:600}
+  #objective span{display:block;font-size:10px;opacity:.55;letter-spacing:.14em}
+
+  #shards{position:absolute;right:26px;top:24px;text-align:right;font-size:11px;letter-spacing:.14em;text-transform:uppercase;opacity:.9;line-height:1.9}
+  #shards b{font-size:15px;color:#d9c6ff}
+  .shardRow{display:flex;gap:8px;justify-content:flex-end;align-items:center}
+  .sq{width:7px;height:7px;border-radius:1px;display:inline-block}
+  .sq.c{background:var(--copper);box-shadow:0 0 8px var(--copper)}
+  .sq.p{background:var(--violet);box-shadow:0 0 10px var(--violet)}
+
+  #toast{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) translateY(60px);font-size:15px;letter-spacing:.28em;text-transform:uppercase;color:#e0ccff;text-shadow:0 0 24px #a855ff;opacity:0;transition:opacity .25s}
+  #toast.on{opacity:1}
+
+  #hint{position:absolute;left:50%;bottom:26px;transform:translateX(-50%);font-size:11px;letter-spacing:.16em;text-transform:uppercase;opacity:.5;white-space:nowrap}
+
+  #stitch{position:absolute;left:50%;top:calc(50% - 90px);transform:translateX(-50%);font-size:11px;letter-spacing:.2em;color:#ff8fb0;opacity:0;transition:.2s}
+  #stitch.on{opacity:1}
+
+  /* ---------- MENU / ENDING ---------- */
+  .screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:40px;
+    background:radial-gradient(ellipse at 50% 40%, rgba(60,20,110,.55), rgba(4,2,12,.97) 70%);backdrop-filter:blur(3px);z-index:10}
+  .screen.hidden{display:none}
+  .screen h1{font-size:clamp(28px,5vw,58px);letter-spacing:.22em;font-weight:300;text-transform:uppercase;
+    background:linear-gradient(180deg,#fff,#b98cff 60%,#6a2fb0);-webkit-background-clip:text;background-clip:text;color:transparent;margin-bottom:8px}
+  .screen h2{font-size:12px;letter-spacing:.42em;text-transform:uppercase;opacity:.55;font-weight:400;margin-bottom:38px}
+  .screen p{max-width:620px;font-size:14px;line-height:1.85;opacity:.8;margin-bottom:12px}
+  kbd{display:inline-block;min-width:22px;padding:2px 7px;border:1px solid rgba(168,85,255,.45);border-radius:4px;background:rgba(168,85,255,.1);
+    font-family:inherit;font-size:11px;letter-spacing:.06em;margin:0 2px;color:#dcc9ff}
+  .keys{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 34px;margin:26px 0 34px;text-align:left;font-size:12.5px;opacity:.85;max-width:640px}
+  .keys div{display:flex;gap:10px;align-items:center}
+  .keys em{font-style:normal;opacity:.75;letter-spacing:.04em}
+  .btn{pointer-events:auto;cursor:pointer;padding:14px 46px;font-size:12px;letter-spacing:.3em;text-transform:uppercase;color:#efe4ff;
+    background:rgba(168,85,255,.1);border:1px solid rgba(168,85,255,.55);border-radius:2px;transition:.2s;font-family:inherit}
+  .btn:hover{background:rgba(168,85,255,.28);box-shadow:0 0 34px rgba(168,85,255,.45);letter-spacing:.36em}
+  .btn.small{padding:10px 26px;font-size:11px}
+  .choice{display:flex;gap:22px;flex-wrap:wrap;justify-content:center;margin-top:26px}
+  #ending .title{font-size:clamp(24px,4vw,42px);letter-spacing:.18em;text-transform:uppercase;margin-bottom:20px}
+  #ending .stat{font-size:12px;letter-spacing:.16em;opacity:.6;margin-top:18px;text-transform:uppercase;line-height:2}
+  #err{position:fixed;left:0;right:0;bottom:0;background:#400;color:#fdd;font:12px/1.5 monospace;padding:8px;white-space:pre-wrap;z-index:99;display:none}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud">
+  <div id="crosshair"><div class="dot"></div></div>
+
+  <div id="objective">
+    <b>Дойди до Ядра</b>
+    <span id="objSub">оно всё ещё держится</span>
+  </div>
+
+  <div id="shards">
+    <div class="shardRow"><span>секунды</span> <b id="sh1">0</b> <i class="sq c"></i></div>
+    <div class="shardRow"><span>противоречия</span> <b id="sh2">0</b> <i class="sq p"></i></div>
+  </div>
+
+  <div id="bars">
+    <div>
+      <div class="lbl"><span>когерентность</span><b id="hpTxt">100</b></div>
+      <div class="bar"><i id="hpFill"></i></div>
+    </div>
+    <div>
+      <div class="lbl"><span>заряд разлома</span><b id="chTxt">100</b></div>
+      <div class="bar"><i id="chargeFill"></i></div>
+    </div>
+    <div>
+      <div class="lbl"><span>масса</span><b id="msTxt">40</b></div>
+      <div class="bar"><i id="massFill"></i></div>
+    </div>
+  </div>
+
+  <div id="riftWrap">
+    <div class="lbl"><span>индекс разлома</span></div>
+    <div id="riftBar"><div id="riftFill"></div><div id="riftTicks"></div></div>
+    <div class="lbl" style="margin-top:6px"><b id="riftTxt">0%</b></div>
+  </div>
+
+  <div id="echoes">
+    <div class="echo" data-e="0"></div>
+    <div class="echo" data-e="1"></div>
+    <div class="echo" data-e="2"></div>
+  </div>
+
+  <div id="stitch">Перемотка заблокирована: стежок Шва</div>
+  <div id="toast"></div>
+  <div id="hint"><kbd>Q</kbd> перемотка · <kbd>E</kbd> эхо · <kbd>ЛКМ</kbd> лепить · <kbd>ПКМ</kbd> уплотнить · <kbd>Shift</kbd> рывок · <kbd>Tab</kbd> память</div>
+</div>
+
+<div class="screen" id="menu">
+  <h1>Архитектор<br>Парадоксов</h1>
+  <h2>играбельный прототип · вертикальный срез</h2>
+  <p>Ты — Разломщик. В радиусе 18 метров законы физики тебя слушаются. Восемь секунд истории — твой единственный ресурс.</p>
+  <p style="opacity:.55;font-size:12.5px;letter-spacing:.1em">Дойди до Ядра. По дороге: пропасть, мост, который рухнул, и три существа, которые играют по своим правилам.</p>
+  <div class="keys">
+    <div><kbd>W A S D</kbd><em>движение</em></div>
+    <div><kbd>мышь</kbd><em>обзор</em></div>
+    <div><kbd>Space</kbd><em>прыжок</em></div>
+    <div><kbd>Shift</kbd><em>рывок-разлом</em></div>
+    <div><kbd>Q</kbd><em>локальная перемотка (удерживай)</em></div>
+    <div><kbd>E</kbd><em>оставить эхо</em></div>
+    <div><kbd>ЛКМ</kbd><em>лепить материю (удерживай)</em></div>
+    <div><kbd>ПКМ</kbd><em>уплотнить в нестабильную структуру</em></div>
+    <div><kbd>Tab</kbd><em>слой памяти (замедление + прошлое)</em></div>
+    <div><kbd>F</kbd><em>взаимодействие</em></div>
+  </div>
+  <button class="btn" id="startBtn">Войти в пузырь</button>
+</div>
+
+<div class="screen hidden" id="ending">
+  <div class="title" id="endTitle"></div>
+  <p id="endText"></p>
+  <div class="stat" id="endStats"></div>
+  <div class="choice">
+    <button class="btn small" id="againBtn">Ещё раз</button>
+  </div>
+</div>
+
+<div id="err"></div>
+
+<script>
+window.addEventListener('error', function(e){
+  var el = document.getElementById('err');
+  el.style.display = 'block';
+  el.textContent += (e.message || e.error) + '\n@ ' + (e.filename||'') + ':' + (e.lineno||'') + '\n';
+});
+</script>
+<script type="module" src="./game.js"></script>
+</body>
+</html>
