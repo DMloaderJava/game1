@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Архитектор Парадоксов — концепт и играбельная кампания (three.js, ES-модули)",
   "scripts": {
+    "test": "node tools/smoke-test.mjs",
     "serve": "python3 -m http.server 8080 --bind 0.0.0.0",
     "doc": "node tools/render-doc.mjs"
   },

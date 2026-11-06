@@ -50,7 +50,7 @@ const html = `<!DOCTYPE html>
 <body>
 <div class="top"><div class="in">
   <a href="../index.html">← Архитектор Парадоксов</a>
-  <span><a href="../prototype/index.html">Играть в прототип →</a></span>
+  <span><a href="../prototype/index.html">Играть →</a></span>
 </div></div>
 <main>
 ${body}
@@ -59,5 +59,7 @@ ${body}
 </body>
 </html>`;
 
-writeFileSync(new URL('../docs/concept.html', import.meta.url), html, 'utf8');
-console.log('docs/concept.html written,', html.length, 'bytes');
+/* файл всегда завершается переводом строки — так его видят git, sed и парсеры */
+const out = html.endsWith('\n') ? html : html + '\n';
+writeFileSync(new URL('../docs/concept.html', import.meta.url), out, 'utf8');
+console.log('docs/concept.html written,', Buffer.byteLength(out), 'bytes');

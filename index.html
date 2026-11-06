@@ -460,6 +460,31 @@
       </div>
     </div>
   </div>
-</section>script>
+</section>
+
+<div class="wrap">
+  <footer>
+    <div>Архитектор Парадоксов — концепт-документ и играбельный срез · 2026</div>
+    <div><a href="docs/CONCEPT.md">CONCEPT.md</a> · <a href="prototype/index.html">prototype</a> · <a href="art/">art</a></div>
+  </footer>
+</div>
+
+<noscript><style>.reveal{opacity:1;transform:none}</style></noscript>
+<script>
+  /* появление секций при скролле; без него .reveal остаётся opacity:0 */
+  (function () {
+    var items = document.querySelectorAll('.reveal');
+    if (!('IntersectionObserver' in window)) {
+      items.forEach(function (el) { el.classList.add('in'); });
+      return;
+    }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+      });
+    }, { threshold: 0.12 });
+    items.forEach(function (el) { io.observe(el); });
+  })();
+</script>
 </body>
 </html>
