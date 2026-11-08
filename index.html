@@ -155,25 +155,16 @@
   <div class="wrap">
     <div class="eyebrow">GRAVITY: VOID · протокол ревью · итерация 1A</div>
     <h1>Добыча и инвентарь <span class="sub">— ревью</span></h1>
-    <p class="lead">
-      Эта страница — само ревью. Она не зависит от того, запустилась ли игра:
-      текст, скриншоты и замечания лежат отдельным файлом <code>index.html</code>.
-      Игра — <a href="gravity-void.html">gravity-void.html</a>, открывается двойным кликом.
-    </p>
-
     <div class="verdict">
       <span class="tag">ПРИНЯТА С ЗАМЕЧАНИЯМИ</span>
-      <p>Механика добычи соответствует скоупу и проверена автотестами, но есть три вещи,
-      которые я бы починил до 1B: перекрытие ЛКМ у ног, теснота дропов и то,
-      что 1A пришлось начинать с Milestone 0.</p>
+      <p>Скоуп закрыт, автотесты зелёные. До 1B починить: перекрытие ЛКМ у ног и тесноту дропов.</p>
     </div>
 
     <div class="chips" id="chips">
       <span class="chip" id="chip-shots"><span class="led"></span><span>скриншоты: проверяю…</span></span>
       <span class="chip" id="chip-game"><span class="led"></span><span>игра: не проверена</span></span>
       <span class="chip"><span class="led" style="background:var(--ok)"></span><span>автопроверки: 45 / 45</span></span>
-      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>внешних зависимостей: 0</span></span>
-      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>консоль: чисто</span></span>
+      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>зависимостей: 0</span></span>
     </div>
   </div>
 </header>
@@ -194,7 +185,6 @@
   <!-- ------------------------------------------------------------ игра -->
   <section id="play">
     <h2><span class="num">01</span>Сборка</h2>
-    <p class="hint">Игра встроена ниже. Если она не загрузится — останется кадр-скриншот и ссылки: пустого экрана не будет.</p>
 
     <div class="stage" id="stage">
       <img class="poster" id="poster" src="screenshots/01-start.png" alt="Кадр из игры GRAVITY: VOID">
@@ -210,8 +200,7 @@
     </div>
 
     <div class="btnrow" style="margin-top:12px">
-      <a class="btn ghost" href="screenshots/01-start.png" target="_blank" rel="noopener">Скриншот старта</a>
-      <a class="btn ghost" href="README.md">README и CHANGELOG</a>
+      <a class="btn ghost" href="README.md">CHANGELOG</a>
       <a class="btn ghost" href="tools/verify.mjs">tools/verify.mjs</a>
     </div>
   </section>
@@ -219,7 +208,6 @@
   <!-- ------------------------------------------------------------ что работает -->
   <section id="works">
     <h2><span class="num">02</span>Что работает</h2>
-    <p class="hint">По каждому пункту есть автоматическая проверка (45/45) и кадр на скриншоте.</p>
 
     <div class="grid g2">
       <div class="card ok">
@@ -271,38 +259,32 @@
   <!-- ------------------------------------------------------------ дефекты -->
   <section id="defects">
     <h2><span class="num">03</span>Что не работает / где неприятно</h2>
-    <p class="hint">Честно, с указанием, что уже видно на скриншотах.</p>
 
     <div class="grid g2">
       <div class="card bad">
         <h3><span class="dot"></span>ЛКМ у ног перехватывает дроп</h3>
         <ul class="tight">
-          <li>Приоритет отдан телу: нажатие по дропу — это телекинез, а не копание.</li>
-          <li>Логично, но когда дропов много и они лежат у ног, копание под собой становится капризным.</li>
-          <li><b>Решение за вами:</b> развести копание на ЛКМ, телекинез на ПКМ, толчок на Shift+ПКМ.</li>
+          <li>Приоритет у тела: клик по дропу — телекинез, а не копание. Под собой копать капризно.</li>
+          <li>Развести: копать — ЛКМ, телекинез — ПКМ, толчок — Shift+ПКМ.</li>
         </ul>
       </div>
       <div class="card bad">
         <h3><span class="dot"></span>Дропы слипаются в полосу</h3>
         <ul class="tight">
-          <li>На 50+ дропах они лежат вплотную друг к другу и читаются как одна серая лента.</li>
-          <li><code>DIRT</code>-дропы почти сливаются с землёй того же цвета.</li>
-          <li>Кандидат: светлая обводка 1 px + магнит подбора в радиусе 1.5 тайла.</li>
+          <li>50+ дропов лежат вплотную и читаются как серая лента; <code>DIRT</code> сливается с землёй.</li>
+          <li>Обводка 1 px + магнит подбора 1.5 тайла.</li>
         </ul>
       </div>
       <div class="card warn">
         <h3><span class="dot"></span>Дропы копятся на потолке</h3>
         <ul class="tight">
-          <li>После переворота гравитации ресурс падает вверх и остаётся там до второго переворота.</li>
-          <li>Это физически правильно, но ресурс фактически теряется.</li>
-          <li>Нужно ваше решение: оставить или включить магнит подбора.</li>
+          <li>После переворота ресурс падает вверх и остаётся там — физика честная, ресурс теряется.</li>
         </ul>
       </div>
       <div class="card warn">
-        <h3><span class="dot"></span>Тяжёлые тайлы ощущаются так же, как земля</h3>
+        <h3><span class="dot"></span>Тяжёлые тайлы не отличаются на ощупь</h3>
         <ul class="tight">
-          <li><code>STONE</code> и <code>FERRITE</code> просто дольше — нет тактильного отличия.</li>
-          <li>Кандидат: микро-тряска камеры на последних 20 % и другой звук (звук — отдельная итерация).</li>
+          <li><code>STONE</code> и <code>FERRITE</code> просто дольше. Нужна микро-тряска на последних 20 %.</li>
         </ul>
       </div>
     </div>
@@ -332,11 +314,6 @@
           <td>Прогресс-бар и радиус без пояснения читались не сразу; кольцо показывается 0.9 с после переворота.</td>
           <td>Если лишнее — убрать <code>drawRadius</code> и подписи у курсора.</td>
         </tr>
-        <tr>
-          <td><b>Вне скоупа сделано не было</b></td>
-          <td>Нет крафта, врагов, сохранений, смены мировой гравитации, звука, UI-библиотек.</td>
-          <td><span class="pill ok">ок</span></td>
-        </tr>
       </tbody>
     </table>
   </section>
@@ -344,25 +321,24 @@
   <!-- ------------------------------------------------------------ до 1B -->
   <section id="mustfix">
     <h2><span class="num">05</span>Чинить до 1B</h2>
-    <p class="hint">Иначе 1B унаследует эти вещи: стройка работает по тайлам и по ЛКМ — ровно там же, где сейчас конфликт.</p>
     <table>
       <thead><tr><th>Приоритет</th><th>Задача</th><th>Почему до 1B</th></tr></thead>
       <tbody>
         <tr><td><span class="pill bad">must</span></td>
-          <td>Решить раскладку ЛКМ/ПКМ<br><span class="muted sm">копать / телекинез / толчок</span></td>
-          <td>В 1B на ЛКМ добавляется ещё и постановка блока — на одном крючке станет три действия.</td></tr>
+          <td>Развести ЛКМ / ПКМ</td>
+          <td>В 1B на ЛКМ добавится постановка блока — станет три действия на одной кнопке.</td></tr>
         <tr><td><span class="pill bad">must</span></td>
-          <td>Магнит подбора 1.5 тайла + обводка дропа</td>
-          <td>Убирает и «ленту» дропов, и потерю ресурса на потолке.</td></tr>
+          <td>Магнит подбора 1.5 тайла + обводка</td>
+          <td>Убирает «ленту» дропов и потерю ресурса на потолке.</td></tr>
         <tr><td><span class="pill warn">should</span></td>
-          <td>Развести визуально <code>DIRT</code>-дроп и землю</td>
-          <td>Иначе накопленное не видно на фоне породы.</td></tr>
+          <td><code>DIRT</code>-дроп не видно на земле</td>
+          <td>Накопленное теряется на фоне породы.</td></tr>
         <tr><td><span class="pill warn">should</span></td>
-          <td>Подтвердить радиус и ощущение тяжести</td>
-          <td>От радиуса копания зависит и радиус стройки в 1B (по заданию 5 тайлов).</td></tr>
+          <td>Подтвердить радиус копания</td>
+          <td>В 1B радиус стройки 5 — мерить так же.</td></tr>
         <tr><td><span class="pill">nice</span></td>
-          <td>Микро-тряска на <code>STONE</code>/<code>FERRITE</code>, звук</td>
-          <td>Звук — отдельная итерация, требует ассетов.</td></tr>
+          <td>Микро-тряска, звук</td>
+          <td>Звук — отдельная итерация, нужны ассеты.</td></tr>
       </tbody>
     </table>
   </section>
@@ -373,31 +349,23 @@
     <div class="grid g2">
       <div class="card">
         <h3>1. Сколько тайлов по горизонтали?</h3>
-        <p class="sm muted">Сейчас ≈20 (1280 px / (32 px × 2)). Больше — мельче персонаж, меньше — теснее при копании и стройке.
-        Это <code>CFG.camera.zoom</code>, меняется одной цифрой.</p>
+        <p class="sm muted">Сейчас ≈20. <code>CFG.camera.zoom</code>.</p>
       </div>
       <div class="card">
-        <h3>2. Нужно ли «провисание» породы?</h3>
-        <p class="sm muted">Если да — это отдельная подсистема, и 1B надо строить с опорой у стены. Если нет — фиксируем статичные тайлы.</p>
+        <h3>2. Провисание породы?</h3>
+        <p class="sm muted">Если да — 1B придётся строить с опорой у стены.</p>
       </div>
       <div class="card">
-        <h3>3. Дропы на потолке — терпим?</h3>
-        <p class="sm muted">Физика честная, но ресурс теряется. Магнит подбора решает, но это уже «качество жизни», а не механика.</p>
+        <h3>3. Дропы на потолке терпим?</h3>
+        <p class="sm muted">Магнит подбора решает, но это уже качество жизни.</p>
       </div>
       <div class="card">
         <h3>4. Радиус от центра или от ног?</h3>
-        <p class="sm muted">Сейчас от центра игрока: под собой достаётся больше, чем на 4 тайла.
-        В 1B радиус стройки 5 — мерить так же?</p>
+        <p class="sm muted">Сейчас от центра. В 1B стройка — 5 тайлов: мерить так же?</p>
       </div>
       <div class="card">
         <h3>5. Блок в воздухе?</h3>
-        <p class="sm muted">Главный вопрос к 1B: можно ли ставить тайл, который ни к чему не примыкает?
-        От этого зависит, станет ли стройка лестницами в небо.</p>
-      </div>
-      <div class="card">
-        <h3>6. «3 удара» = 0.5 с?</h3>
-        <p class="sm muted">В задании были и удары, и секунды. Сделано одно удержание, удары показаны ростом трещин.
-        Если нужны настоящие клики — переделывать ввод.</p>
+        <p class="sm muted">Главный вопрос к 1B: ставить тайл без опоры можно?</p>
       </div>
     </div>
   </section>
@@ -405,43 +373,42 @@
   <!-- ------------------------------------------------------------ скриншоты -->
   <section id="shots">
     <h2><span class="num">07</span>Скриншоты</h2>
-    <p class="hint">Сняты из реального рендера игры (<code>tools/screenshots.mjs</code>), не макеты.</p>
     <div class="shots" id="shot-grid">
       <figure class="shot">
         <img src="screenshots/01-start.png" alt="Старт: арена, ящики, HUD" loading="lazy">
-        <figcaption><b>Старт</b>Земля, уступы, три ящика для телекинеза, HUD справа сверху.</figcaption>
+        <figcaption><b>Старт</b>Арена, три ящика, HUD.</figcaption>
       </figure>
       <figure class="shot">
         <img src="screenshots/02-digging.png" alt="Копание тайла земли" loading="lazy">
-        <figcaption><b>Копание</b>Тайл под игроком: заливка, трещины, полоса прогресса.</figcaption>
+        <figcaption><b>Копание</b>Заливка, трещины, полоса прогресса.</figcaption>
       </figure>
       <figure class="shot">
         <img src="screenshots/02b-digging-crop.png" alt="Крупный план прогресса копания" loading="lazy">
-        <figcaption><b>Копание — крупно</b>Видно, что прогресс читается без инструкции.</figcaption>
+        <figcaption><b>Копание — крупно</b>Прогресс читается без инструкции.</figcaption>
       </figure>
       <figure class="shot">
         <img src="screenshots/03-hud.png" alt="HUD с накопленными ресурсами" loading="lazy">
-        <figcaption><b>HUD</b>DIRT / STONE / FERRITE с иконками и пульсацией цифры.</figcaption>
+        <figcaption><b>HUD</b>Иконки и пульсация цифры.</figcaption>
       </figure>
       <figure class="shot">
         <img src="screenshots/04-drops.png" alt="55 физических тел на полу" loading="lazy">
-        <figcaption><b>Худший кадр</b>55 тел на полу: здесь видно, как дропы слипаются в полосу.</figcaption>
+        <figcaption><b>Худший кадр</b>55 тел: дропы слипаются в полосу.</figcaption>
       </figure>
       <figure class="shot">
         <img src="screenshots/05-telekinesis.png" alt="Захват ящика телекинезом" loading="lazy">
-        <figcaption><b>Телекинез</b>Трос до тела и подсветка — видно, что это захват, а не копание.</figcaption>
+        <figcaption><b>Телекинез</b>Трос и подсветка захвата.</figcaption>
       </figure>
       <figure class="shot">
         <img src="screenshots/06-ceiling.png" alt="Игрок на потолке после переворота гравитации" loading="lazy">
-        <figcaption><b>Потолок</b>Гравитация перевёрнута: игрок стоит на плите, дропы ушли вверх.</figcaption>
+        <figcaption><b>Потолок</b>Игрок на плите, дропы ушли вверх.</figcaption>
       </figure>
       <figure class="shot">
         <img src="screenshots/07-too-far.png" alt="Курсор вне радиуса копания" loading="lazy">
-        <figcaption><b>Слишком далеко</b>Красный прицел и подпись «далеко» вне радиуса 4 тайла.</figcaption>
+        <figcaption><b>Слишком далеко</b>Вне радиуса 4 тайла.</figcaption>
       </figure>
       <figure class="shot">
         <img src="screenshots/08-cave.png" alt="Пещера после раскопок" loading="lazy">
-        <figcaption><b>После раскопок</b>Мир реально меняется: провал в земле и порода вокруг.</figcaption>
+        <figcaption><b>После раскопок</b>Мир меняется по-настоящему.</figcaption>
       </figure>
     </div>
   </section>
@@ -449,7 +416,6 @@
   <!-- ------------------------------------------------------------ как проверено -->
   <section id="verify">
     <h2><span class="num">08</span>Как проверено</h2>
-    <p class="hint">Воспроизводится без браузера: Node + заглушки DOM/Canvas.</p>
     <pre><span class="c"># 45 автопроверок логики и физики</span>
 cd tools
 npm i @napi-rs/canvas      <span class="c"># только для скриншотов; игра зависимостей не имеет</span>
@@ -470,11 +436,10 @@ node screenshots.mjs       <span class="c"># → 9 кадров в ../screenshot
         </ul>
       </div>
       <div class="card">
-        <h3>Чем это не является</h3>
+        <h3>Чего проверки не делают</h3>
         <ul class="tight sm">
-          <li>Не браузерный замер FPS: цифры — время JS+draw в headless-среде.</li>
-          <li>Не проверка ощущения: «щёлкает» ли копание — только руками.</li>
-          <li>Не покрытие рендера: скриншоты снимаются, но не сравниваются попиксельно.</li>
+          <li>Не браузерный FPS: цифры — время JS+draw в headless.</li>
+          <li>Не ощущение: «щёлкает» ли копание — только руками.</li>
         </ul>
       </div>
     </div>
@@ -485,8 +450,7 @@ node screenshots.mjs       <span class="c"># → 9 кадров в ../screenshot
       <a class="btn ghost" href="gravity-void.html">Открыть игру</a>
       <a class="btn ghost" href="README.md">README</a>
     </div>
-    <p>Ветка <code>arena/b1bb672b-game1</code>. Задел под 1B: <code>CFG.hud.active</code>,
-      <code>World.set</code> + <code>TileLayer.flush</code>, <code>game.mineTile</code>, свободные клавиши 1–4.</p>
+    <p>Ветка <code>arena/b1bb672b-game1</code> · задел под 1B: <code>CFG.hud.active</code>, <code>World.set</code>, <code>mineTile</code>, клавиши 1–4.</p>
   </footer>
 </main>
 
