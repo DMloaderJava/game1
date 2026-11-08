@@ -53,6 +53,9 @@
    ============================================================ */
 const TILE = { EMPTY: 0, DIRT: 1, STONE: 2, FERRITE: 3 };
 
+// Режимы ЛКМ: 1-3 материал, 4 копать, 5 снос, 6 якорь
+const MODE = { DIRT: TILE.DIRT, STONE: TILE.STONE, FERRITE: TILE.FERRITE, DIG: 4, DEMOLISH: 5, ANCHOR: 6 };
+
 /* ============================================================
    CFG — все числа прототипа собраны здесь
    ============================================================ */
@@ -93,6 +96,49 @@ const CFG = {
   ],
 
   spawn: { playerTileX: 16, cratesTileX: [22, 26, 31] },
+
+  // 1B: постройка и снос
+  build: {
+    radius: 5,            // тайлов от центра игрока
+    popTime: 0.1,         // анимация появления тайла
+    ghostAlpha: 0.35,
+    denyHold: 0.35        // сколько держится красный фидбэк «нельзя»
+  },
+
+  // M2: гравитационный якорь
+  anchor: {
+    cost: { 3: 5, 2: 3 },     // 5 FERRITE + 3 STONE
+    range: 8,                 // радиус купола, тайлов (по Евклиду)
+    placeRadius: 5,           // на каком расстоянии можно поставить
+    pulse: 1.6,               // период пульсации, с
+    domeAlpha: 0.12,
+    color: '#44aaff'
+  },
+
+  // M2: цикл гравитационного прилива
+  tide: {
+    // Для приёмки: поставить true — STABLE станет 15 с, чтобы быстро увидеть цикл
+    quickTest: false,
+    phases: [
+      { id: 'STABLE', sec: 100, label: 'СТАБИЛЬНО', color: '#8b949e' },
+      { id: 'WARNING', sec: 20, label: 'ТРЕВОГА', color: '#d29922' },
+      { id: 'CATASTROPHE', sec: 25, label: 'ПРИЛИВ', color: '#f85149' },
+      { id: 'AFTERMATH', sec: 35, label: 'ПОСЛЕДСТВИЯ', color: '#d29922' }
+    ],
+    skyStable: [10, 15, 26],
+    skyWarning: [46, 18, 44],
+    skyCatastrophe: [58, 14, 20],
+    shakeWarning: 2,
+    shakeCatastrophe: 4,
+    wreckInterval: 5,        // волна разрушения, с
+    wreckPerWave: 1,         // тайлов за волну
+    aftermatterFerrite: [5, 10],
+    aftermatterRadius: [30, 50],
+    dropCullInterval: 0.5,
+    cullMargin: 64
+  },
+
+  save: { key: 'gravity-void-save-v1', autosave: 10 },
 
   // Ресурсы: цвет используется и в тайлах, и в дропах, и в HUD
   resources: [
@@ -144,6 +190,7 @@ const CFG = {
   render: {
     dprMax: 2,
     detailBudgetMs: 3,        // бюджет на дорисовку текстур за кадр
+    detailMaxPerFrame: 48,    // и жёсткий лимит тайлов, чтобы не ловить всплески
     font: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
     bgTop: '#0a0f1a', bgBottom: '#04060b',
     dust: 70, dustParallax: 0.25, dustTile: 512
@@ -153,9 +200,10 @@ const CFG = {
   // В 1A режимов нет — поле всегда null.
   hud: { w: 176, rowH: 26, pad: 12, pulse: 0.2, margin: 18, active: null },
 
-  particles: { max: 520, digMin: 3, digMax: 5, pickup: 6, life: 0.4, flip: 10 },
+  particles: { max: 300, digMin: 3, digMax: 5, pickup: 6, life: 0.4, flip: 10 },
 
-  binds: ['KeyA', 'KeyD', 'Space', 'KeyF']
+  binds: ['KeyA', 'KeyD', 'Space', 'KeyF', 'Digit1', 'Digit2', 'Digit3',
+          'Digit4', 'Digit5', 'Digit6', 'Escape', 'Backspace']
 };
 
 const TS = CFG.tile;
@@ -168,6 +216,8 @@ for (const r of CFG.resources) RES[r.id] = r;
    Утилиты
    ============================================================ */
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const mixRgb = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+const rgb = (r, g, b) => 'rgb(' + Math.round(clamp(r, 0, 255)) + ',' + Math.round(clamp(g, 0, 255)) + ',' + Math.round(clamp(b, 0, 255)) + ')';
 
 function mulberry32(seed) {
   let a = seed >>> 0;
@@ -213,6 +263,7 @@ class World {
     this.cols = cfg.world.cols;
     this.rows = cfg.world.rows;
     this.tiles = new Uint8Array(this.cols * this.rows);
+    this.placed = new Uint8Array(this.cols * this.rows);   // 1 = поставлено игроком
     this.dirty = [];        // индексы изменённых тайлов
     this.surfaceRow = 0;
     this.solidPx = 0;       // для отладки: сколько тайлов не пусто
@@ -232,12 +283,18 @@ class World {
     return this.get(x, y) !== TILE.EMPTY;
   }
 
-  set(x, y, type) {
+  set(x, y, type, placed) {
     if (!this.inBounds(x, y)) return;
     const i = y * this.cols + x;
-    if (this.tiles[i] === type) return;
+    if (this.tiles[i] === type && !!this.placed[i] === !!placed) return;
     this.tiles[i] = type;
+    this.placed[i] = placed ? 1 : 0;
     this.dirty.push(i);
+  }
+
+  isPlaced(x, y) {
+    if (!this.inBounds(x, y)) return false;
+    return this.placed[y * this.cols + x] === 1;
   }
 
   generate(cfg) {
@@ -269,6 +326,7 @@ class World {
       }
     }
 
+    this.placed.fill(0);
     this.dirty.length = 0;
     return this;
   }
@@ -347,12 +405,15 @@ class TileLayer {
       return (ax * ax + ay * ay) - (bx * bx + by * by);
     });
 
+    // Бюджет по времени плюс жёсткий лимит тайлов за кадр:
+    // таймер может «врать» на прогреве JIT и давать всплески на первой отрисовке
     const t0 = performance.now();
-    for (let k = 0; k < list.length; k++) {
+    const maxTiles = CFG.render.detailMaxPerFrame;
+    for (let k = 0; k < list.length && k < maxTiles; k++) {
       const i = list[k];
       this.drawDetail(i % cols, Math.floor(i / cols));
       this.detailed[i] = 1;
-      if ((k & 7) === 7 && performance.now() - t0 > CFG.render.detailBudgetMs) break;
+      if ((k & 3) === 3 && performance.now() - t0 > CFG.render.detailBudgetMs) break;
     }
   }
 
@@ -567,8 +628,13 @@ class PhysBody {
   }
 
   step(dt, world, gsign) {
+    // Смена мировой гравитации (прилив) будит даже спящие тела
+    if (this.gravitySign !== gsign) {
+      this.gravitySign = gsign;
+      this.sleeping = false;
+      this.sleepTimer = 0;
+    }
     if (this.sleeping) { this.onGround = true; return; }
-    this.gravitySign = gsign;
     this.vy = clamp(this.vy + CFG.physics.gravity * gsign * this.gravityScale * dt,
                     -CFG.physics.maxFall, CFG.physics.maxFall);
     const impactVy = this.vy;
@@ -615,6 +681,134 @@ class Drop extends PhysBody {
 }
 
 /* ============================================================
+   Сохранение: тайлы + постройки + якоря + инвентарь + фаза
+   ============================================================ */
+const Save = {
+  // Компактно: тайлы и маску построек упаковываем в RLE-пары
+  packTiles(world) {
+    const out = [];
+    let run = 1, prev = world.tiles[0], prevPlaced = world.placed[0];
+    for (let i = 1; i < world.tiles.length; i++) {
+      const t = world.tiles[i], pl = world.placed[i];
+      if (t === prev && pl === prevPlaced) { run++; continue; }
+      out.push([run, prev, prevPlaced]);
+      prev = t; prevPlaced = pl; run = 1;
+    }
+    out.push([run, prev, prevPlaced]);
+    return out;
+  },
+
+  unpackTiles(world, rle) {
+    let i = 0;
+    for (const [run, t, pl] of rle) {
+      for (let k = 0; k < run && i < world.tiles.length; k++, i++) {
+        world.tiles[i] = t;
+        world.placed[i] = pl;
+      }
+    }
+    world.dirty.length = 0;
+    for (let k = 0; k < world.tiles.length; k++) world.dirty.push(k);
+  },
+
+  write(game) {
+    try {
+      const data = {
+        v: 2,
+        tiles: this.packTiles(game.world),
+        anchors: game.anchors.map(a => ({ x: a.x, y: a.y })),
+        inventory: game.inventory.counts,
+        player: { x: game.player.x, y: game.player.y, g: game.player.gravityTarget },
+        drops: game.drops.map(d => ({ x: d.x, y: d.y, t: d.type })),
+        crates: game.crates.map(c => ({ x: c.x, y: c.y })),
+        cycle: { phase: game.tide.id, timeLeft: game.tide.left }
+      };
+      localStorage.setItem(CFG.save.key, JSON.stringify(data));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  },
+
+  read() {
+    try {
+      const raw = localStorage.getItem(CFG.save.key);
+      if (!raw) return null;
+      const d = JSON.parse(raw);
+      return d && d.v === 2 ? d : null;
+    } catch (e) {
+      return null;
+    }
+  },
+
+  clear() {
+    try { localStorage.removeItem(CFG.save.key); } catch (e) { /* приватный режим */ }
+  }
+};
+
+/* ============================================================
+   Цикл гравитационного прилива
+   ============================================================ */
+class Tide {
+  constructor() {
+    this.phaseIndex = 0;
+    this.t = 0;                 // время в текущей фазе
+    this.cycle = 0;             // номер цикла
+    this.worldGravity = 1;      // мировая гравитация для физики
+    this.nextInt = 0;           // следующая волна разрушения
+    this.shakeSeed = 0;
+  }
+
+  get phase() { return CFG.tide.phases[this.phaseIndex]; }
+
+  // Длительность фазы с учётом тестового режима
+  get durationOf() {
+    const ph = this.phase;
+    if (CFG.tide.quickTest && ph.id === 'STABLE') return 15;
+    return ph.sec;
+  }
+  get id() { return this.phase.id; }
+  get duration() { return this.durationOf; }
+  get left() { return Math.max(0, this.duration - this.t); }
+  get progress() { return clamp(this.t / this.duration, 0, 1); }
+
+  setPhase(index) {
+    this.phaseIndex = index % CFG.tide.phases.length;
+    this.t = 0;
+    this.nextInt = this.id === 'CATASTROPHE' ? CFG.tide.wreckInterval : 0;
+  }
+
+  // Возвращает события кадра: смену фазы, волны разрушения
+  update(dt, game) {
+    const events = { changed: false, wrecked: 0, phases: [] };
+    this.t += dt;
+
+    // Волны разрушения внутри катастрофы
+    if (this.id === 'CATASTROPHE') {
+      while (this.t >= this.nextInt && this.nextInt > 0 && this.nextInt <= this.duration) {
+        events.wrecked += game.wreckWave();
+        this.nextInt += CFG.tide.wreckInterval;
+      }
+    }
+
+    if (this.t >= this.duration) {
+      const overflow = this.t - this.duration;
+      this.setPhase(this.phaseIndex + 1);
+      if (this.phaseIndex === 0) this.cycle++;
+      this.t = overflow;
+      events.changed = true;
+      game.onPhaseChanged(this.id);
+    }
+    return events;
+  }
+
+  // Мировая гравитация по фазе
+  applyPhase(phaseId) {
+    if (phaseId === 'CATASTROPHE') this.worldGravity = -1;
+    else this.worldGravity = 1;
+  }
+}
+
+/* ============================================================
    Игрок
    ============================================================ */
 class Player {
@@ -635,7 +829,8 @@ class Player {
   get cx() { return this.x + this.w / 2; }
   get cy() { return this.y + this.h / 2; }
 
-  update(dt, input, world, crates) {
+  update(dt, input, world, crates, worldGravity) {
+    const wg = worldGravity === undefined ? 1 : worldGravity;
     // --- горизонталь ---
     const dir = (input.down('KeyD') ? 1 : 0) - (input.down('KeyA') ? 1 : 0);
     if (dir !== 0) this.facing = dir;
@@ -673,10 +868,13 @@ class Player {
     }
 
     // --- гравитация и перемещение ---
-    this.vy = clamp(this.vy + CFG.physics.gravity * this.gravitySign * dt,
+    // При катастрофе мировая гравитация тянет вверх; F даёт личный +1 (контр-манипуляция)
+    const personal = this.gravityTarget;          // куда игрок хочет «падать»
+    const gEff = wg < 0 ? (personal > 0 ? 0.15 : -1) : this.gravitySign;
+    this.vy = clamp(this.vy + CFG.physics.gravity * gEff * dt,
                     -CFG.physics.maxFall, CFG.physics.maxFall);
     this.onGround = false;
-    moveAndCollide(world, this, dt, this.gravitySign);
+    moveAndCollide(world, this, dt, gEff >= 0 ? 1 : -1);
 
     // --- ящики твёрдые для игрока ---
     for (const c of crates) this.pushOutOf(c, world);
@@ -720,9 +918,9 @@ class Player {
 class Particles {
   constructor() { this.list = []; }
 
-  add(x, y, vx, vy, size, color, life) {
+  add(x, y, vx, vy, size, color, life, noGravity) {
     if (this.list.length >= CFG.particles.max) this.list.shift();
-    this.list.push({ x, y, vx, vy, size, color, life, maxLife: life });
+    this.list.push({ x, y, vx, vy, size, color, life, maxLife: life, noGravity: !!noGravity });
   }
 
   dig(tileType, cx, cy, rnd) {
@@ -750,6 +948,30 @@ class Particles {
     }
   }
 
+  deny(cx, cy) {
+    for (let i = 0; i < 5; i++) {
+      const a = -Math.PI / 2 + (i - 2) * 0.35;
+      this.add(cx, cy, Math.cos(a) * 70, Math.sin(a) * 70, 2, '#ff6b6b', 0.3);
+    }
+  }
+
+  place(cx, cy) {
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      this.add(cx, cy, Math.cos(a) * 110, Math.sin(a) * 110, 3, '#66d9ff', 0.5);
+    }
+  }
+
+  wreck(type, cx, cy, rnd) {
+    const m = RES[type];
+    for (let i = 0; i < 8; i++) {
+      const a = rnd() * Math.PI * 2;
+      const sp = 60 + rnd() * 140;
+      this.add(cx, cy, Math.cos(a) * sp, Math.sin(a) * sp, 3 + Math.floor(rnd() * 3),
+               i % 2 ? m.color : m.light, 0.6);
+    }
+  }
+
   flip(cx, cy) {
     for (let i = 0; i < CFG.particles.flip; i++) {
       const a = (i / CFG.particles.flip) * Math.PI * 2;
@@ -763,7 +985,7 @@ class Particles {
       const p = this.list[i];
       p.life -= dt;
       if (p.life <= 0) { this.list.splice(i, 1); continue; }
-      p.vy += g * dt;
+      if (!p.noGravity) p.vy += g * dt;
       p.vx *= Math.exp(-2 * dt);
       p.x += p.vx * dt;
       p.y += p.vy * dt;
@@ -794,9 +1016,19 @@ class Inventory {
   }
 
   add(id, n) {
-    this.counts[id] += n;
-    this.pulse[id] = CFG.hud.pulse;
+    this.counts[id] = Math.max(0, this.counts[id] + n);
+    if (n > 0) this.pulse[id] = CFG.hud.pulse;
   }
+
+  // Трата без ухода в минус
+  spend(id, n) {
+    if ((this.counts[id] || 0) < n) return false;
+    this.counts[id] -= n;
+    this.pulse[id] = CFG.hud.pulse;
+    return true;
+  }
+
+  has(id, n) { return (this.counts[id] || 0) >= n; }
 
   update(dt) {
     for (const k in this.pulse) {
@@ -960,8 +1192,15 @@ class Game {
     this.digDustT = 0;
     this.tooFarT = 0;
     this.grab = null;
-    this.leftAction = null;        // 'dig' | 'grab' | null
+    this.mode = MODE.DIG;          // текущий режим ЛКМ
     this.prevLeft = false;
+    this.prevRight = false;
+    this.holdAnchor = false;
+    this.anchors = [];
+    this.demolishT = 0;
+    this.denyT = 0;
+    this.anchorCd = 0;
+    this.popAnims = [];            // анимация появления построенных тайлов
     this.radiusEcho = 0;
     this.pushCd = 0;
     this.gravitySign = 1;
@@ -969,6 +1208,20 @@ class Game {
     this.accum = 0;
     this.fps = 60;
     this.stars = this.makeDust();
+
+    // M2: прилив
+    this.tide = new Tide();
+    this.saveT = CFG.save.autosave;
+    this.loadedSave = this.applySave();
+    this.warnT = 0;                // таймер предвестников и частиц
+    this.catT = 0;
+    this.cullT = 0;
+    this.rewardT = 0;
+    this.skyWarn = 0;              // 0..1 переход неба в фиолетовый
+    this.skyCat = 0;               // 0..1 переход неба в багровый
+    this.flashT = 0;               // вспышка телепорта
+    this.lastGround = { x: this.player.x, y: this.player.y };
+    this.tideEvents = [];
 
     this.resize();
     window.addEventListener('resize', () => this.resize());
@@ -1061,8 +1314,176 @@ class Game {
 
   /* ---------- действия ---------- */
 
+  setMode(m) {
+    this.mode = m;
+    this.dig = null;
+    this.holdAnchor = false;
+    this.demolishT = 0;
+  }
+
+  // ---------- 1B: постройка ----------
+  placeBlock(mw, type) {
+    const tx = Math.floor(mw.x / TS);
+    const ty = Math.floor(mw.y / TS);
+    const res = RES[type];
+    if (!this.canPlaceAt(tx, ty, res)) {
+      this.denyT = CFG.build.denyHold;
+      this.particles.deny(tx * TS + TS / 2, ty * TS + TS / 2);
+      return;
+    }
+    this.world.set(tx, ty, type, true);
+    this.tiles.flush();
+    this.inventory.spend(type, 1);
+    this.popAnims.push({ tx, ty, t: 0 });
+    this.camera.shake(0.12);
+    // Разбудить тела рядом: поставленный тайл может их задеть
+    this.wakeNear(tx, ty);
+  }
+
+  canPlaceAt(tx, ty, res) {
+    const deny = (why) => { this.lastDeny = why; return false; };
+    if (!this.world.inBounds(tx, ty)) return deny('границы мира');
+    if (this.world.solid(tx, ty)) return deny('занято');
+    if (this.anchorAt(tx, ty)) return deny('якорь');
+    if (this.tileDistance(tx, ty) > CFG.build.radius) return deny('далеко');
+    if ((this.inventory.counts[res.id] || 0) <= 0) return deny('нет ' + res.name);
+    // не строим внутрь игрока
+    if (tx * TS < this.player.x + this.player.w && (tx + 1) * TS > this.player.x &&
+        ty * TS < this.player.y + this.player.h && (ty + 1) * TS > this.player.y) return deny('игрок на клетке');
+    this.lastDeny = '';
+    return true;
+  }
+
+  // ---------- снос: построенное — в инвентарь, природное — только копать ----------
+  demolishAt(mw, dt) {
+    const a = this.anchorAtWorld(mw.x, mw.y);
+    if (a) {
+      this.removeAnchor(a);
+      return;
+    }
+    const tx = Math.floor(mw.x / TS);
+    const ty = Math.floor(mw.y / TS);
+    if (!this.world.inBounds(tx, ty)) return;
+
+    if (this.world.solid(tx, ty)) {
+      if (!this.world.isPlaced(tx, ty)) {
+        this.denyT = CFG.build.denyHold;   // природный тайл — не сносится
+        return;
+      }
+      const type = this.world.get(tx, ty);
+      this.world.set(tx, ty, TILE.EMPTY, false);
+      this.tiles.flush();
+      this.inventory.add(type, 1);
+      this.particles.dig(type, tx * TS + TS / 2, ty * TS + TS / 2, this.rnd);
+      this.wakeNear(tx, ty);
+      return;
+    }
+  }
+
+  // ---------- M2: якорь ----------
+  anchorAt(tx, ty) {
+    for (const a of this.anchors) if (a.x === tx && a.y === ty) return a;
+    return null;
+  }
+
+  anchorAtWorld(wx, wy) {
+    const tx = Math.floor(wx / TS), ty = Math.floor(wy / TS);
+    return this.anchorAt(tx, ty);
+  }
+
+  canAffordAnchor() {
+    const c = CFG.anchor.cost;
+    for (const id in c) if ((this.inventory.counts[id] || 0) < c[id]) return false;
+    return true;
+  }
+
+  placeAnchor(mw) {
+    if (this.anchorCd > 0) return;
+    const tx = Math.floor(mw.x / TS);
+    const ty = Math.floor(mw.y / TS);
+    if (!this.world.inBounds(tx, ty)) return;
+    if (this.anchorAt(tx, ty)) return;
+    if (this.tileDistance(tx, ty) > CFG.anchor.placeRadius) return;
+    if (!this.canAffordAnchor()) { this.denyT = CFG.build.denyHold; return; }
+
+    // Якорь встаёт в EMPTY или «врастает» в породу
+    const under = this.world.get(tx, ty);
+    if (under === TILE.EMPTY) {
+      // на воздух — только если под ним есть опора, иначе он «врастает» в пустоту
+      if (!this.world.solid(tx, ty + 1) && !this.world.solid(tx, ty - 1)) { this.denyT = CFG.build.denyHold; return; }
+    }
+
+    for (const id in CFG.anchor.cost) this.inventory.spend(Number(id), CFG.anchor.cost[id]);
+    this.anchors.push({ x: tx, y: ty, born: this.time });
+    this.anchorCd = 0.25;
+    this.camera.shake(0.3);
+    this.particles.place(tx * TS + TS / 2, ty * TS + TS / 2);
+  }
+
+  removeAnchor(a) {
+    const i = this.anchors.indexOf(a);
+    if (i < 0) return;
+    this.anchors.splice(i, 1);
+    for (const id in CFG.anchor.cost) this.inventory.add(Number(id), CFG.anchor.cost[id]);
+    this.particles.dig(TILE.FERRITE, a.x * TS + TS / 2, a.y * TS + TS / 2, this.rnd);
+  }
+
+  // Подсветка защищённых построек внутри купола: важно видеть, что именно спасёт якорь
+  drawProtected(ctx) {
+    if (!this.anchors.length) return;
+    const cam = this.camera;
+    const w = this.world;
+    const tx0 = Math.max(0, Math.floor(cam.x / TS) - 1);
+    const tx1 = Math.min(w.cols - 1, Math.ceil((cam.x + cam.w) / TS) + 1);
+    const ty0 = Math.max(0, Math.floor(cam.y / TS) - 1);
+    const ty1 = Math.min(w.rows - 1, Math.ceil((cam.y + cam.h) / TS) + 1);
+    const pulse = 0.25 + 0.15 * Math.sin(this.time * 3);
+
+    for (let y = ty0; y <= ty1; y++) {
+      for (let x = tx0; x <= tx1; x++) {
+        if (!w.solid(x, y)) continue;
+        if (!this.isProtected(x, y)) continue;
+        const px = x * TS, py = y * TS;
+        // Лёгкий синий ободок только у построенного игроком
+        if (w.isPlaced(x, y)) {
+          ctx.globalAlpha = pulse;
+          ctx.strokeStyle = CFG.anchor.color;
+          ctx.lineWidth = 1.5;
+          ctx.strokeRect(px + 1, py + 1, TS - 2, TS - 2);
+          ctx.globalAlpha = 1;
+        }
+      }
+    }
+  }
+
+  // Защищён ли тайл куполом хотя бы одного якоря (Евклидово расстояние)
+  isProtected(tx, ty) {
+    const r = CFG.anchor.range;
+    const cx = tx + 0.5, cy = ty + 0.5;
+    for (const a of this.anchors) {
+      const dx = cx - (a.x + 0.5), dy = cy - (a.y + 0.5);
+      if (dx * dx + dy * dy <= r * r) return true;
+    }
+    return false;
+  }
+
+  inAnyDome(wx, wy) {
+    const r = CFG.anchor.range * TS;
+    for (const a of this.anchors) {
+      const dx = wx - (a.x * TS + TS / 2), dy = wy - (a.y * TS + TS / 2);
+      if (dx * dx + dy * dy <= r * r) return true;
+    }
+    return false;
+  }
+
   flipGravity() {
-    this.player.gravityTarget *= -1;
+    const p = this.player;
+    if (this.tide.id === 'CATASTROPHE') {
+      // Контр-манипуляция: пока прилив активен, F прижимает к потолку (личная +1)
+      p.gravityTarget = p.gravityTarget > 0 ? -1 : 1;
+    } else {
+      p.gravityTarget *= -1;
+    }
     this.particles.flip(this.player.cx, this.player.cy);
     this.camera.shake(CFG.camera.flipShake);
     this.radiusEcho = CFG.dig.radiusEcho;
@@ -1079,43 +1500,48 @@ class Game {
     const left = inp.mouse.left;
     const right = inp.mouse.right;
 
-    // Нажатие ЛКМ: решаем один раз — тянем тело или копаем тайл
-    if (left && !this.prevLeft) {
-      const body = this.bodyAt(mw.x, mw.y);
-      if (body && this.inTeleRange(body)) {
-        this.leftAction = 'grab';
-        this.grab = body;
-        body.wake();
-        body.gravityScale = 0;
-        this.dig = null;
-      } else {
-        this.leftAction = 'dig';
-        this.dig = null;
-      }
-    }
+    // ЛКМ — одно действие по текущему режиму (1..6).
+    // Телекинез переехал на ПКМ: ЛКМ больше не делится между копанием и захватом.
+    if (left && !this.prevLeft) this.press(mw);
 
     if (!left) {
-      if (this.leftAction === 'grab') this.releaseGrab();
-      this.leftAction = null;
       this.dig = null;
+      this.holdAnchor = false;
     }
+    if (this.holdAnchor && left) this.placeAnchor(mw);
 
-    if (this.leftAction === 'grab') this.updateGrab(dt, mw);
-    else if (this.leftAction === 'dig') this.updateDig(dt, mw);
+    if (left && this.mode === MODE.DIG) this.updateDig(dt, mw);
+    else if (left && this.mode === MODE.DEMOLISH) this.demolishAt(mw, dt);
 
-    // ПКМ — импульс от игрока
-    this.pushCd = Math.max(0, this.pushCd - dt);
-    if (right && this.pushCd <= 0) {
-      const body = this.bodyAt(mw.x, mw.y);
-      if (body && this.inTeleRange(body)) {
-        this.pushBody(body);
-        this.pushCd = CFG.tele.pushCooldown;
-      }
+    // ПКМ — телекинез: тянем тело, пока кнопка зажата.
+    // Если ПКМ уже держали до нажатия (или отпускание не пришло) — захват не начинаем.
+    if (!right) {
+      if (this.prevRight) this.releaseGrab();
+    } else if (this.grab) {
+      this.updateGrab(dt, mw);
+    } else if (!this.prevRight) {
+      this.startGrab(mw);
+    } else {
+      this.prevRight = right;
+      this.prevLeft = left;
+      this.tooFarT = Math.max(0, this.tooFarT - dt);
+      this.radiusEcho = Math.max(0, this.radiusEcho - dt);
+      return;
     }
 
     this.tooFarT = Math.max(0, this.tooFarT - dt);
     this.radiusEcho = Math.max(0, this.radiusEcho - dt);
     this.prevLeft = left;
+    this.prevRight = right;
+  }
+
+  // Нажатие ЛКМ: действие зависит только от выбранного режима
+  press(mw) {
+    const m = this.mode;
+    if (m === MODE.DIG) { this.dig = null; return; }
+    if (m === MODE.DEMOLISH) { this.demolishAt(mw, 1); return; }
+    if (m === MODE.ANCHOR) { this.placeAnchor(mw); this.holdAnchor = true; return; }
+    this.placeBlock(mw, m);
   }
 
   releaseGrab() {
@@ -1152,6 +1578,14 @@ class Game {
       b.vy *= CFG.tele.maxSpeed / sp;
     }
     b.sleeping = false;
+  }
+
+  startGrab(mw) {
+    const body = this.bodyAt(mw.x, mw.y);
+    if (!body || !this.inTeleRange(body)) return;
+    this.grab = body;
+    body.wake();
+    body.gravityScale = 0;
   }
 
   pushBody(b) {
@@ -1249,23 +1683,290 @@ class Game {
     this.time += dt;
     const inp = this.input;
 
+    // Переключение режимов: 1-3 материал, 4 копать, 5 снос, 6 якорь
+    if (inp.consume('Digit1')) this.setMode(MODE.DIRT);
+    if (inp.consume('Digit2')) this.setMode(MODE.STONE);
+    if (inp.consume('Digit3')) this.setMode(MODE.FERRITE);
+    if (inp.consume('Digit4')) this.setMode(MODE.DIG);
+    if (inp.consume('Digit5')) this.setMode(MODE.DEMOLISH);
+    if (inp.consume('Digit6')) this.setMode(MODE.ANCHOR);
+
     if (inp.consume('KeyF')) this.flipGravity();
 
-    this.player.update(dt, inp, this.world, this.crates);
+    this.updateTide(dt);
+
+    // Физика: мировая гравитация из фазы прилива применяется к телам и игроку
+    const g = this.tide.worldGravity;
+    this.player.update(dt, inp, this.world, this.crates, g);
     this.gravitySign = this.player.gravitySign;
 
-    for (const c of this.crates) c.step(dt, this.world, this.gravitySign);
-    for (const d of this.drops) d.step(dt, this.world, this.gravitySign);
+    // Прилив управляет телами жёстко: при катастрофе они летят вверх
+    // Тела полностью подчинены мировой гравитации прилива
+    for (const c of this.crates) c.step(dt, this.world, g);
+    for (const d of this.drops) d.step(dt, this.world, g);
 
     this.updateMouse(dt);
     this.collectDrops();
 
-    this.particles.update(dt, this.gravitySign);
+    this.particles.update(dt, g);
     this.inventory.update(dt);
     this.camera.update(this.player, dt);
 
+    this.updateWreckFx(dt);
+
+    // Автосохранение раз в N секунд + сброс мира по Backspace
+    this.saveT -= dt;
+    if (this.saveT <= 0) {
+      this.saveT = CFG.save.autosave;
+      this.doSave();
+    }
+    this.saveNoticeT = Math.max(0, (this.saveNoticeT || 0) - dt);
+    if (inp.consume('Backspace')) this.resetWorld();
     this.tiles.flush();
     inp.endFrame();
+  }
+
+  resetWorld() {
+    Save.clear();
+    this.world.generate(CFG);
+    this.tiles = new TileLayer(this.world);
+    this.anchors = [];
+    this.drops = [];
+    for (const r of CFG.resources) this.inventory.counts[r.id] = 0;
+    const px = CFG.spawn.playerTileX * TS + (TS - CFG.player.w) / 2;
+    this.player.x = px;
+    this.player.y = this.world.surfaceRow * TS - CFG.player.h;
+    this.player.vx = 0;
+    this.player.vy = 0;
+    this.player.gravityTarget = 1;
+    this.tide.setPhase(0);
+    this.tide.applyPhase('STABLE');
+    this.camera.snap(this.player);
+  }
+
+  /* ---------- M2: прилив ---------- */
+
+  updateTide(dt) {
+    const tide = this.tide;
+
+    // Таймеры переходов неба и тряски
+    const k = 1 - Math.exp(-dt * 2.2);
+    this.skyWarn += ((tide.id === 'WARNING' ? 1 : 0) - this.skyWarn) * k;
+    this.skyCat += ((tide.id === 'CATASTROPHE' ? 1 : 0.02) - this.skyCat) * k;
+
+    // Экранная тряска по фазе
+    if (tide.id === 'WARNING') this.camera.shake(CFG.tide.shakeWarning / 80);
+    if (tide.id === 'CATASTROPHE') this.camera.shake(CFG.tide.shakeCatastrophe / 80);
+
+    this.warnT -= dt;
+    this.catT -= dt;
+    this.cullT -= dt;
+    this.flashT = Math.max(0, this.flashT - dt);
+
+    // Предвестники: камни падают вверх
+    if (tide.id === 'WARNING' && this.warnT <= 0) {
+      this.warnT = 0.5;
+      for (let i = 0; i < 2; i++) {
+        // Предвестники: камни уже падают ВВЕРХ — намёк, что будет
+        this.particles.add(this.player.cx + (this.rnd() - 0.5) * this.camera.w,
+                           this.player.cy + this.camera.h * 0.45,
+                           (this.rnd() - 0.5) * 10, -45 - this.rnd() * 15, 4, '#aa5555', 2.4, true);
+      }
+      // Дропы «дрожат» перед приливом
+      for (const d of this.drops) if (d.sleeping) d.sleeping = false;
+      for (const d of this.drops) d.vy -= 30;
+    }
+
+    // Катастрофа: частицы вверх каждые 0.1 с
+    if (tide.id === 'CATASTROPHE' && this.catT <= 0) {
+      this.catT = 0.1;
+      this.particles.add(this.camera.x + this.rnd() * this.camera.w,
+                         this.camera.y + this.camera.h * (0.4 + this.rnd() * 0.6),
+                         0, -140, 2, '#ff5555', 0.8);
+    }
+
+    // Удаление вылетевших дропов — раз в 0.5 с, не каждый кадр
+    if (this.cullT <= 0) {
+      this.cullT = CFG.tide.dropCullInterval;
+      const m = CFG.tide.cullMargin;
+      const wH = this.world.rows * TS;
+      for (let i = this.drops.length - 1; i >= 0; i--) {
+        const d = this.drops[i];
+        if (d.y + d.h < -m || d.y > wH + m || d.x + d.w < -m || d.x > this.world.cols * TS + m) {
+          this.drops.splice(i, 1);
+        }
+      }
+    }
+
+    // Награда после катастрофы — один раз за фазу
+    if (tide.id === 'AFTERMATH' && !this.rewardGiven) {
+      this.rewardGiven = true;
+      this.spawnAftermathLoot();
+    }
+    if (tide.id !== 'AFTERMATH') this.rewardGiven = false;
+
+    // Телепорт игрока, если улетел за верх мира
+    if (this.player.y + this.player.h < 0) this.rescuePlayer();
+
+    const events = tide.update(dt, this);
+    tide.applyPhase(tide.id);
+
+  }
+
+  // ---------- сохранение ----------
+  applySave() {
+    const d = Save.read();
+    if (!d) return false;
+
+    Save.unpackTiles(this.world, d.tiles);
+    this.tiles.flush();
+
+    this.anchors = (d.anchors || []).map(a => ({ x: a.x, y: a.y, born: 0 }));
+    for (const r of CFG.resources) this.inventory.counts[r.id] = (d.inventory && d.inventory[r.id]) || 0;
+
+    if (d.player) {
+      this.player.x = d.player.x;
+      this.player.y = d.player.y;
+      this.player.gravityTarget = d.player.g || 1;
+    }
+    this.drops = (d.drops || []).map(s => {
+      const dr = new Drop(s.x, s.y, s.t);
+      dr.sleeping = true;
+      return dr;
+    });
+    if (d.crates && d.crates.length === this.crates.length) {
+      d.crates.forEach((c, i) => { this.crates[i].x = c.x; this.crates[i].y = c.y; });
+    }
+
+    // Фаза: WARNING/CATASTROPHE не восстанавливаем — сбрасываем в STABLE
+    const cycle = d.cycle || { phase: 'STABLE', timeLeft: 100 };
+    const idx = CFG.tide.phases.findIndex(p => p.id === cycle.phase);
+    const risky = cycle.phase === 'WARNING' || cycle.phase === 'CATASTROPHE';
+    this.tide.setPhase(risky ? 0 : idx);
+    if (!risky) this.tide.t = Math.max(0, this.tide.duration - (cycle.timeLeft || 0));
+    this.tide.applyPhase(this.tide.id);
+
+    this.camera.snap(this.player);
+    return true;
+  }
+
+  doSave() {
+    Save.write(this);
+    this.saveNoticeT = 1.2;
+  }
+
+  onPhaseChanged(phaseId) {
+    const g = phaseId === 'CATASTROPHE' ? -1 : 1;
+    this.tide.worldGravity = g;
+    for (const b of this.bodies()) {
+      b.gravitySign = g;
+      b.sleeping = false;
+      b.sleepTimer = 0;
+      b.vx = 0;
+      b.vy = 0;
+      if (b.gravityScale === 0) b.gravityScale = 1;   // телекинез не должен держать тело в приливе
+    }
+    if (this.grab) this.grab = null;
+    if (phaseId === 'CATASTROPHE') {
+      // Мир тянет вверх: игрок тоже летит, если не среагирует на F
+      this.player.gravityTarget = -1;
+      this.camera.shake(1);
+    }
+    if (phaseId === 'AFTERMATH') {
+      for (const b of this.bodies()) { b.vx = 0; b.vy = 0; }
+      this.player.vy = 0;
+      this.player.gravityTarget = 1;      // личная гравитация вернулась вниз
+    }
+    if (phaseId === 'STABLE') {
+      this.warnT = 0;
+      this.catT = 0;
+    }
+  }
+
+  // Одна волна разрушения: по одному незащищённому построенному тайлу за волну
+  wreckWave() {
+    const candidates = [];
+    const w = this.world;
+    for (let i = 0; i < w.tiles.length; i++) {
+      if (!w.placed[i] || w.tiles[i] === TILE.EMPTY) continue;
+      const tx = i % w.cols, ty = Math.floor(i / w.cols);
+      if (this.isProtected(tx, ty)) continue;
+      candidates.push({ tx, ty, i });
+    }
+    if (!candidates.length) return 0;
+
+    // Вне кадра тоже ломаем: прилив не должен зависеть от камеры
+    let broken = 0;
+    const n = Math.min(candidates.length, CFG.tide.wreckPerWave);
+    for (let k = 0; k < n; k++) {
+      const pick = candidates[Math.floor(this.rnd() * candidates.length)];
+      if (!pick) break;
+      const idx = candidates.indexOf(pick);
+      candidates.splice(idx, 1);
+      const type = this.world.get(pick.tx, pick.ty);
+      this.world.set(pick.tx, pick.ty, TILE.EMPTY, false);
+      this.tiles.flush();
+      this.particles.wreck(type, pick.tx * TS + TS / 2, pick.ty * TS + TS / 2, this.rnd);
+      // Дроп летит вверх — при инверсии он скорее всего потерян
+      const d = new Drop(pick.tx * TS + TS / 2 - CFG.drop.size / 2,
+                         pick.ty * TS + TS / 2 - CFG.drop.size / 2, type);
+      d.vx = (this.rnd() - 0.5) * 90;
+      d.vy = -220;
+      this.drops.push(d);
+      broken++;
+    }
+    if (broken) this.camera.shake(0.5);
+    return broken;
+  }
+
+  // Новые ресурсы после прилива: на поверхности в 30-50 тайлах от игрока
+  spawnAftermathLoot() {
+    const [minN, maxN] = CFG.tide.aftermatterFerrite;
+    const count = minN + Math.floor(this.rnd() * (maxN - minN + 1));
+    const [rMin, rMax] = CFG.tide.aftermatterRadius;
+    const pTx = Math.floor(this.player.cx / TS);
+    let placed = 0, tries = 0;
+
+    while (placed < count && tries < 400) {
+      tries++;
+      const dist = rMin + this.rnd() * (rMax - rMin);
+      const ang = this.rnd() * Math.PI * 2;
+      const tx = Math.round(pTx + Math.cos(ang) * dist);
+      if (tx < 1 || tx >= this.world.cols - 1) continue;
+
+      // Ищем поверхность: первый EMPTY, под которым есть опора
+      for (let ty = 1; ty < this.world.rows - 1; ty++) {
+        if (this.world.get(tx, ty) !== TILE.EMPTY) continue;
+        if (!this.world.solid(tx, ty + 1)) continue;
+        const d = new Drop(tx * TS + TS / 2 - CFG.drop.size / 2,
+                           (ty + 1) * TS - CFG.drop.size - 2, TILE.FERRITE);
+        d.fresh = 1.2;
+        this.drops.push(d);
+        placed++;
+        break;
+      }
+    }
+  }
+
+  rescuePlayer() {
+    const p = this.player;
+    p.x = this.lastGround.x;
+    p.y = this.lastGround.y;
+    p.vx = 0; p.vy = 0;
+    p.gravityTarget = 1;
+    this.flashT = 0.2;
+    this.camera.snap(p);
+  }
+
+  updateWreckFx(dt) {
+    if (this.player.onGround) { this.lastGround.x = this.player.x; this.lastGround.y = this.player.y; }
+    for (const d of this.drops) if (d.fresh > 0) d.fresh -= dt;
+    for (let i = this.popAnims.length - 1; i >= 0; i--) {
+      this.popAnims[i].t += dt;
+      if (this.popAnims[i].t >= CFG.build.popTime) this.popAnims.splice(i, 1);
+    }
+    this.denyT = Math.max(0, this.denyT - dt);
+    this.anchorCd = Math.max(0, this.anchorCd - dt);
   }
 
   /* ---------- рендер ---------- */
@@ -1291,9 +1992,12 @@ class Game {
     this.drawCrates(ctx);
     this.drawDrops(ctx);
     this.drawPlayer(ctx);
-    this.particles.draw(ctx);
+    this.particles.draw(ctx, this.camera);
+    this.drawAnchors(ctx);
+    this.drawProtected(ctx);
     this.drawRadius(ctx);
     this.drawDig(ctx);
+    this.drawGhost(ctx);
     this.drawCursor(ctx);
 
     ctx.restore();
@@ -1323,9 +2027,15 @@ class Game {
   }
 
   drawBackground(ctx) {
+    const T = CFG.tide;
+    const base = mixRgb(T.skyStable, T.skyWarning, this.skyWarn);
+    const sky = mixRgb(base, T.skyCatastrophe, this.skyCat);
+    const top = rgb(sky[0] + 8, sky[1] + 8, sky[2] + 12);
+    const bottom = rgb(sky[0] * 0.35, sky[1] * 0.35, sky[2] * 0.45);
+
     const g = ctx.createLinearGradient(0, 0, 0, this.vh);
-    g.addColorStop(0, CFG.render.bgTop);
-    g.addColorStop(1, CFG.render.bgBottom);
+    g.addColorStop(0, top);
+    g.addColorStop(1, bottom);
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, this.vw, this.vh);
 
@@ -1390,6 +2100,13 @@ class Game {
   drawDrops(ctx) {
     for (const d of this.drops) {
       const m = RES[d.type];
+      if (d.fresh > 0) {
+        const a = 0.35 + 0.35 * Math.sin(this.time * 7);
+        ctx.globalAlpha = a;
+        ctx.fillStyle = m.light;
+        ctx.fillRect(Math.round(d.x) - 3, Math.round(d.y) - 3, d.w + 6, d.h + 6);
+        ctx.globalAlpha = 1;
+      }
       const x = Math.round(d.x), y = Math.round(d.y);
       ctx.fillStyle = m.shade;
       ctx.fillRect(x, y, d.w, d.h);
@@ -1436,6 +2153,54 @@ class Game {
     ctx.fill();
 
     ctx.restore();
+  }
+
+  // Якоря и куполы защиты
+  drawAnchors(ctx) {
+    const R = CFG.anchor.range * TS;
+    for (const a of this.anchors) {
+      const cx = a.x * TS + TS / 2;
+      const cy = a.y * TS + TS / 2;
+      const pulse = 0.5 + 0.5 * Math.sin(this.time * (Math.PI * 2 / CFG.anchor.pulse) + a.x);
+
+      // Купол: одна окружность с alpha (не per-tile заливка)
+      const g = ctx.createRadialGradient(cx, cy, R * 0.55, cx, cy, R);
+      g.addColorStop(0, 'rgba(68,170,255,0.03)');
+      g.addColorStop(0.85, 'rgba(68,170,255,' + (CFG.anchor.domeAlpha * (0.75 + 0.25 * pulse)).toFixed(3) + ')');
+      g.addColorStop(1, 'rgba(68,170,255,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(cx, cy, R, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = 'rgba(120,210,255,' + (0.22 + 0.18 * pulse).toFixed(2) + ')';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([8, 8]);
+      ctx.beginPath();
+      ctx.arc(cx, cy, R, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Тело якоря
+      const bob = Math.sin(this.time * 2 + a.x) * 1.5;
+      const x = a.x * TS, y = a.y * TS;
+      ctx.fillStyle = '#0b1f3a';
+      rr(ctx, x + 2, y + 2 + bob, TS - 4, TS - 4, 5);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(120,210,255,' + (0.6 + 0.4 * pulse).toFixed(2) + ')';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      // ⌖
+      ctx.strokeStyle = '#eaf6ff';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(cx, y + 8 + bob); ctx.lineTo(cx, y + TS - 8 + bob);
+      ctx.moveTo(x + 8, cy + bob); ctx.lineTo(x + TS - 8, cy + bob);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy + bob, 5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
   }
 
   // Кольцо радиуса копания — показывается коротко после переворота гравитации, обучения ради
@@ -1513,6 +2278,38 @@ class Game {
     ctx.fillRect(bx + 1 + fillW - 1, by + 1, 1, 4);
   }
 
+  // Призрак постройки: зелёный — можно, красный — нельзя
+  drawGhost(ctx) {
+    const m = this.mode;
+    if (m === MODE.DIG) return;
+    const mw = this.mouseW;
+    const tx = Math.floor(mw.x / TS);
+    const ty = Math.floor(mw.y / TS);
+    if (!this.world.inBounds(tx, ty)) return;
+    const px = tx * TS, py = ty * TS;
+
+    let ok = false;
+    if (m === MODE.ANCHOR) {
+      ok = !this.anchorAt(tx, ty) && this.tileDistance(tx, ty) <= CFG.anchor.placeRadius;
+      if (ok && this.world.get(tx, ty) === TILE.EMPTY &&
+          !this.world.solid(tx, ty + 1) && !this.world.solid(tx, ty - 1)) ok = false;
+    } else if (m === MODE.DEMOLISH) {
+      const a = this.anchorAt(tx, ty);
+      ok = a ? true : this.world.isPlaced(tx, ty);
+    } else {
+      ok = this.canPlaceAt(tx, ty, RES[m]);
+    }
+
+    const col = ok ? 'rgba(86,209,143,0.9)' : 'rgba(255,90,90,0.9)';
+    ctx.globalAlpha = 0.28;
+    ctx.fillStyle = ok ? (m === MODE.ANCHOR ? CFG.anchor.color : RES[m].color) : '#ff5a5a';
+    ctx.fillRect(px, py, TS, TS);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(px + 0.75, py + 0.75, TS - 1.5, TS - 1.5);
+  }
+
   drawCursor(ctx) {
     const mw = this.mouseW;
     const tx = Math.floor(mw.x / TS);
@@ -1532,15 +2329,18 @@ class Game {
       this.drawTether(ctx, this.grab, 0.5);
     } else if (body && this.inTeleRange(body)) {
       color = 'rgba(120,210,255,0.75)';
-      label = 'тянуть';
+      label = 'ПКМ — тянуть';
       labelColor = '#9fdcff';
       ctx.strokeStyle = color;
       ctx.lineWidth = 1.5;
       ctx.strokeRect(body.x - 2.5, body.y - 2.5, body.w + 5, body.h + 5);
+    } else if (this.mode !== MODE.DIG) {
+      color = 'rgba(160,180,205,0.35)';
+      label = '';
     } else if (this.world.solid(tx, ty)) {
       if (this.tileDistance(tx, ty) <= CFG.dig.radius) {
         color = 'rgba(255,255,255,0.85)';
-        label = this.leftAction === 'dig' ? '' : 'копать';
+        label = 'копать';
       } else {
         color = 'rgba(255,90,90,0.9)';
         label = 'далеко';
@@ -1666,7 +2466,132 @@ class Game {
     ctx.fillStyle = 'rgba(170,195,225,0.55)';
     ctx.fillText(Math.round(this.fps) + ' FPS · тел ' + (this.drops.length + this.crates.length), 16, 14);
 
+    this.drawPhasePanel(ctx);
+    this.drawGravityArrow(ctx);
+    this.drawModeBar(ctx);
     this.drawControls(ctx);
+    if (this.flashT > 0) {
+      ctx.globalAlpha = this.flashT / 0.2 * 0.6;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, this.vw, this.vh);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // Панель фазы прилива справа снизу
+  drawPhasePanel(ctx) {
+    const tide = this.tide;
+    const W = 210, H = 62;
+    const x = this.vw - W - 16;
+    const y = this.vh - H - 52;
+    const ph = tide.phase;
+    const blink = ph.id === 'WARNING'
+      ? 0.5 + 0.5 * Math.sin(this.time * Math.PI * 4)
+      : ph.id === 'CATASTROPHE' ? 0.6 + 0.4 * Math.sin(this.time * Math.PI * 6) : 1;
+
+    ctx.globalAlpha = 0.82 + 0.18 * blink;
+    ctx.fillStyle = 'rgba(9,13,21,0.92)';
+    rr(ctx, x, y, W, H, 10);
+    ctx.fill();
+    ctx.strokeStyle = ph.color;
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 12px ' + CFG.render.font;
+    ctx.fillStyle = ph.color;
+    ctx.textAlign = 'left';
+    ctx.fillText(ph.id === 'STABLE' ? 'ПРИЛИВ ЧЕРЕЗ' : ph.label, x + 12, y + 20);
+
+    const mm = Math.floor(tide.left / 60);
+    const ss = Math.floor(tide.left % 60);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = ph.id === 'STABLE' ? 'rgba(200,214,232,0.8)' : ph.color;
+    ctx.font = 'bold 15px ' + CFG.render.font;
+    ctx.fillText(mm.toString().padStart(2, '0') + ':' + ss.toString().padStart(2, '0'), x + W - 12, y + 20);
+
+    // Прогресс-бар фазы
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    ctx.fillRect(x + 12, y + 36, W - 24, 4);
+    ctx.fillStyle = ph.color;
+    ctx.fillRect(x + 12, y + 36, (W - 24) * tide.progress, 4);
+
+    // В CATASTROPHE — сколько построек ещё под угрозой
+    if (ph.id === 'CATASTROPHE' || ph.id === 'WARNING') {
+      let danger = 0;
+      for (let i = 0; i < this.world.tiles.length; i++) {
+        if (!this.world.placed[i] || this.world.tiles[i] === TILE.EMPTY) continue;
+        if (!this.isProtected(i % this.world.cols, Math.floor(i / this.world.cols))) danger++;
+      }
+      ctx.font = '11px ' + CFG.render.font;
+      ctx.textAlign = 'left';
+      ctx.fillStyle = danger ? '#ff9c9c' : 'rgba(86,209,143,0.9)';
+      ctx.fillText(danger ? 'без защиты: ' + danger : 'всё защищено', x + 12, y + 50);
+    }
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+  }
+
+  // Большая стрелка направления мировой гравитации
+  drawGravityArrow(ctx) {
+    if (this.tide.id !== 'CATASTROPHE') return;
+    const cx = this.vw - 60;
+    const cy = this.vh - 130;
+    const a = 0.65 + 0.35 * Math.sin(this.time * 8);
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.globalAlpha = a;
+    ctx.fillStyle = '#f85149';
+    ctx.beginPath();
+    ctx.moveTo(0, -26);
+    ctx.lineTo(16, -4);
+    ctx.lineTo(6, -4);
+    ctx.lineTo(6, 24);
+    ctx.lineTo(-6, 24);
+    ctx.lineTo(-6, -4);
+    ctx.lineTo(-16, -4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Выбранный режим: 1-3 материал, 4 копать, 5 снос, 6 якорь
+  drawModeBar(ctx) {
+    const items = [
+      { key: '1', mode: MODE.DIRT, color: RES[TILE.DIRT].color },
+      { key: '2', mode: MODE.STONE, color: RES[TILE.STONE].color },
+      { key: '3', mode: MODE.FERRITE, color: RES[TILE.FERRITE].color },
+      { key: '4', mode: MODE.DIG, color: '#dfe8f6' },
+      { key: '5', mode: MODE.DEMOLISH, color: '#e0a0a0' },
+      { key: '6', mode: MODE.ANCHOR, color: CFG.anchor.color }
+    ];
+    const sw = 30, gap = 6;
+    const total = items.length * sw + (items.length - 1) * gap;
+    const x0 = (this.vw - total) / 2;
+    const y = 14;
+
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const x = x0 + i * (sw + gap);
+      const on = this.mode === it.mode;
+      ctx.fillStyle = on ? 'rgba(120,190,255,0.2)' : 'rgba(9,13,21,0.72)';
+      rr(ctx, x, y, sw, 26, 7);
+      ctx.fill();
+      ctx.strokeStyle = on ? '#7fd4ff' : 'rgba(150,180,220,0.2)';
+      ctx.lineWidth = on ? 1.6 : 1;
+      ctx.stroke();
+      ctx.fillStyle = it.color;
+      ctx.globalAlpha = on ? 1 : 0.65;
+      ctx.fillRect(x + sw / 2 - 4, y + 8, 8, 8);
+      ctx.globalAlpha = 1;
+      ctx.font = '9px ' + CFG.render.font;
+      ctx.fillStyle = on ? '#cfe8ff' : 'rgba(180,200,225,0.55)';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(it.key, x + sw / 2, y + 19);
+    }
+    ctx.textAlign = 'left';
   }
 
   // Плашка управления: слева снизу, клавиши в рамках — видно без инструкции
@@ -1675,8 +2600,8 @@ class Game {
       ['A', 'D', 'идти'],
       ['Space', 'прыжок'],
       ['F', 'гравитация'],
-      ['ЛКМ', 'копать / тянуть'],
-      ['ПКМ', 'толчок']
+      ['ЛКМ', this.modeLabel()],
+      ['ПКМ', 'телекинез']
     ];
     ctx.font = '11px ' + CFG.render.font;
     ctx.textBaseline = 'middle';
@@ -1730,6 +2655,14 @@ class Game {
     }
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
+  }
+
+  modeLabel() {
+    const m = this.mode;
+    if (m === MODE.DIG) return 'копать';
+    if (m === MODE.DEMOLISH) return 'снос';
+    if (m === MODE.ANCHOR) return 'якорь';
+    return 'строить ' + RES[m].name;
   }
 
   /* ---------- цикл ---------- */
