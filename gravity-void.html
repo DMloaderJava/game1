@@ -7,10 +7,44 @@
 <style>
   html, body { margin: 0; height: 100%; background: #05070c; overflow: hidden; }
   #view { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+
+  /* Экран отказа: игра не должна оставлять пустоту, если что-то не запустилось */
+  #fallback {
+    position: fixed; inset: 0; display: none; place-items: center;
+    padding: 24px; overflow: auto;
+    background: radial-gradient(900px 500px at 50% 0%, #131c2c 0%, #05070c 70%);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    color: #dfe8f6; z-index: 10;
+  }
+  #fallback.show { display: grid; }
+  #fallback .box { max-width: 560px; }
+  #fallback h1 { font-size: 20px; margin: 0 0 10px; }
+  #fallback p { color: #9fb0c8; margin: 0 0 12px; font-size: 14px; }
+  #fallback pre {
+    background: #0a1120; border: 1px solid rgba(150,180,220,0.18); border-radius: 10px;
+    padding: 12px 14px; overflow: auto; font: 12px/1.6 ui-monospace, Menlo, Consolas, monospace;
+    color: #ffb4b4; white-space: pre-wrap; margin: 0 0 14px;
+  }
+  #fallback a { color: #63c8ff; }
+  #fallback ul { color: #9fb0c8; font-size: 13px; padding-left: 18px; margin: 0; }
 </style>
 </head>
 <body>
 <canvas id="view"></canvas>
+
+<div id="fallback" role="alert">
+  <div class="box">
+    <h1>Игра не запустилась</h1>
+    <p>Экран не должен оставаться пустым: ниже — причина и что делать.</p>
+    <pre id="fallback-msg"></pre>
+    <ul>
+      <li>Откройте файл в современном браузере (Chrome, Firefox, Edge, Safari 16+).</li>
+      <li>Проверьте, что JS не отключён расширением.</li>
+      <li>Ревью и скриншоты лежат отдельно: <a href="index.html">index.html</a>.</li>
+    </ul>
+  </div>
+</div>
+
 <script>
 "use strict";
 
@@ -899,6 +933,7 @@ class Game {
   constructor(canvas) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d', { alpha: false });
+    if (!this.ctx) throw new Error('Canvas 2D недоступен в этом браузере');
     this.rnd = mulberry32(CFG.seed ^ 0x9e3779b9);
 
     this.world = new World(CFG).generate(CFG);
@@ -1665,10 +1700,27 @@ class Game {
 }
 
 /* ============================================================
-   Запуск
+   Запуск. Ошибки не должны приводить к пустому экрану:
+   любое исключение показывает диагностику прямо на странице.
    ============================================================ */
-const game = new Game(document.getElementById('view'));
-game.start();
+function showFallback(message) {
+  const box = document.getElementById('fallback');
+  const msg = document.getElementById('fallback-msg');
+  if (msg) msg.textContent = String(message || 'неизвестная ошибка');
+  if (box) box.classList.add('show');
+}
+
+window.addEventListener('error', (e) => {
+  showFallback((e.message || 'ошибка') + '\n' + (e.filename || '') + ':' + (e.lineno || 0));
+});
+
+let game = null;
+try {
+  game = new Game(document.getElementById('view'));
+  game.start();
+} catch (e) {
+  showFallback((e && e.stack) || e);
+}
 </script>
 </body>
 </html>
