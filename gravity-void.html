@@ -972,6 +972,13 @@ class Game {
 
     this.resize();
     window.addEventListener('resize', () => this.resize());
+
+    // Клавиатура должна работать сразу, в том числе внутри iframe:
+    // забираем фокус и по наведению, и по клику, и просто при запуске
+    const grabFocus = () => { try { window.focus(); } catch (e) { /* не критично */ } };
+    canvas.addEventListener('mouseenter', grabFocus);
+    canvas.addEventListener('mousedown', grabFocus);
+    grabFocus();
     this.camera.snap(this.player);
   }
 
@@ -1659,17 +1666,70 @@ class Game {
     ctx.fillStyle = 'rgba(170,195,225,0.55)';
     ctx.fillText(Math.round(this.fps) + ' FPS · тел ' + (this.drops.length + this.crates.length), 16, 14);
 
-    // Подсказка по управлению
-    ctx.fillStyle = 'rgba(170,195,225,0.42)';
+    this.drawControls(ctx);
+  }
+
+  // Плашка управления: слева снизу, клавиши в рамках — видно без инструкции
+  drawControls(ctx) {
+    const items = [
+      ['A', 'D', 'идти'],
+      ['Space', 'прыжок'],
+      ['F', 'гравитация'],
+      ['ЛКМ', 'копать / тянуть'],
+      ['ПКМ', 'толчок']
+    ];
     ctx.font = '11px ' + CFG.render.font;
-    ctx.fillStyle = 'rgba(178,202,232,0.6)';
-    ctx.fillText('A / D  идти', 16, this.vh - 46);
-    ctx.fillText('Space  прыжок', 16, this.vh - 30);
-    ctx.fillText('F  гравитация', 16, this.vh - 14);
-    ctx.textAlign = 'right';
-    ctx.fillText('ЛКМ  копать / тянуть', this.vw - 16, this.vh - 30);
-    ctx.fillText('ПКМ  толчок', this.vw - 16, this.vh - 14);
+    ctx.textBaseline = 'middle';
+
+    const keyH = 18;
+    const gapX = 6;
+    const gapItem = 14;
+    const pad = 10;
+    const y = this.vh - 16 - keyH / 2;
+
+    // сначала измеряем, потом рисуем подложку
+    let width = pad * 2;
+    const layout = [];
+    for (const it of items) {
+      const keys = it.slice(0, it.length - 1);
+      const label = it[it.length - 1];
+      const keyWidths = keys.map(k => Math.max(20, ctx.measureText(k).width + 12));
+      const labelWidth = ctx.measureText(label).width;
+      const w = keyWidths.reduce((a, b) => a + b, 0) + gapX * (keys.length - 1) + 6 + labelWidth;
+      layout.push({ keys, keyWidths, label, w });
+      width += w + gapItem;
+    }
+    width -= gapItem;
+
+    ctx.fillStyle = 'rgba(9,13,21,0.72)';
+    rr(ctx, 14, y - keyH / 2 - 6, width, keyH + 12, 9);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(150,180,220,0.14)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    let x = 14 + pad;
+    for (const row of layout) {
+      for (let i = 0; i < row.keys.length; i++) {
+        const kw = row.keyWidths[i];
+        ctx.fillStyle = 'rgba(120,170,230,0.16)';
+        rr(ctx, x, y - keyH / 2, kw, keyH, 5);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(160,200,240,0.35)';
+        ctx.stroke();
+        ctx.fillStyle = '#cfe4ff';
+        ctx.textAlign = 'center';
+        ctx.fillText(row.keys[i], x + kw / 2, y + 0.5);
+        x += kw + gapX;
+      }
+      x += 6 - gapX;
+      ctx.fillStyle = 'rgba(196,214,236,0.72)';
+      ctx.textAlign = 'left';
+      ctx.fillText(row.label, x, y + 0.5);
+      x += ctx.measureText(row.label).width + gapItem;
+    }
     ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
   }
 
   /* ---------- цикл ---------- */
