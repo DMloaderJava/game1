@@ -766,30 +766,174 @@ g3.damagePlayer(20, 'тест');
 ok('M3: неуязвимость блокирует урон', P3.health === 100, `hp=${P3.health}`);
 P3.invuln = 0;
 
-// --- хищник: состояния, погоня, укус, побег
-g3.tide.setPhase(0); g3.tide.applyPhase('STABLE');   // выходим из прилива предыдущего теста
-const cw0 = g3.crawlers[0];
-g3.crawlers.length = 0;
-g3.crawlers.push(cw0);
-P3.health = 100; P3.invuln = 0;
-P3.x = cw0.x + 2 * TS; P3.y = cw0.y;
-P3.gravityTarget = 1;
-cw0.vx = 0;
-stepG(g3, 2);
-ok('M3: хищник рядом агрится', cw0.state === ST.AGGRO, cw0.state);
-const hpBeforeBite = P3.health;
-for (let i = 0; i < 70; i++) {          // держим игрока вплотную: проверяем укус, а не полёт
-  P3.x = cw0.x + 10; P3.y = cw0.y; P3.vx = 0; P3.vy = 0;
-  stepG(g3, 1);
+// --- M3.5: арена для честных тестов ИИ. Игрок НЕ телепортируется к жуку:
+// сцена ставится один раз, дальше оба живут своей физикой
+function arena(build) {
+  const g = new (sandbox.__cls.Game)(view);
+  const W2 = g.world;
+  const surface = W2.surfaceRow;
+  // ровный зал: убираем уступы в рабочей зоне
+  for (let x = 90; x <= 130; x++) for (let y = 6; y < surface; y++) W2.set(x, y, TILE.EMPTY, false);
+  if (build) build(W2, surface, TILE);
+  g.tiles.flush();
+  g.crawlers.length = 0;
+  return g;
 }
-ok('M3: хищник кусает', P3.health < hpBeforeBite, `hp=${P3.health.toFixed(0)}`);
-ok('M3: укус снимает 10', hpBeforeBite - P3.health <= 20, `dmg=${hpBeforeBite - P3.health}`);
-ok('M3: у хищника пауза между укусами', CFG.crawler.biteCooldown === 1);
+function putCrawler(g, tx, ty) {
+  const cw = new Crawler(tx * TS, ty * TS - CFG.crawler.h);
+  cw.home = { x: cw.cx, y: cw.cy };
+  g.crawlers.push(cw);
+  return cw;
+}
+function putPlayer(g, tx, ty) {
+  const p = g.player;
+  p.x = tx * TS; p.y = ty * TS - p.h;
+  p.vx = 0; p.vy = 0; p.gravityTarget = 1; p.health = 100; p.invuln = 0;
+  g.camera.snap(p);
+  return p;
+}
+const distTiles = (cw, p) => Math.hypot(cw.cx - p.cx, cw.cy - p.cy) / TS;
 
-cw0.hp = 4;
-P3.health = 100; P3.invuln = 0;
-stepG(g3, 2);
-ok('M3: раненый хищник убегает', cw0.state === ST.FLEE, cw0.state);
+// 1. Жук на платформе на 3 тайла выше, игрок на земле в 5 тайлах по горизонтали
+{
+  const g = arena((W2, s, T) => { for (let x = 100; x <= 112; x++) W2.set(x, s - 3, T.STONE, true); });
+  const p = putPlayer(g, 107, 17);
+  const cw = putCrawler(g, 112, 13);
+  const d0 = distTiles(cw, p);
+  ok('M3.5: старт — жук на платформе, игрок на земле', d0 > 4.5 && d0 < 7, `d0=${d0.toFixed(2)}`);
+  let bit = false, minD = d0;
+  for (let i = 0; i < 300; i++) {
+    stepG(g, 1);
+    const d = distTiles(cw, p);
+    if (d < minD) minD = d;
+    if (p.health < 100) bit = true;
+  }
+  const d1 = distTiles(cw, p);
+  ok('M3.5: жук спрыгнул с платформы', cw.cy > 14 * TS, `cy=${(cw.cy / TS).toFixed(2)}`);
+  ok('M3.5: за 300 кадров жук физически приблизился', d1 < d0 - 3 || d1 < 1.5,
+     `d0=${d0.toFixed(2)} d1=${d1.toFixed(2)} min=${minD.toFixed(2)}`);
+  ok('M3.5: жук догнал и укусил', bit, `hp=${p.health} minD=${minD.toFixed(2)}`);
+}
+
+// 2. Игрок стоит на платформе в 2 тайла над жуком: жук подходит и запрыгивает
+{
+  const g = arena((W2, s, T) => { for (let x = 100; x <= 112; x++) W2.set(x, s - 2, T.STONE, true); });
+  const p = putPlayer(g, 110, 15);
+  const cw = putCrawler(g, 104, 17);
+  const d0 = distTiles(cw, p);
+  let minD = d0;
+  for (let i = 0; i < 300; i++) {
+    stepG(g, 1);
+    const d = distTiles(cw, p);
+    if (d < minD) minD = d;
+  }
+  ok('M3.5: жук подошёл к подножию платформы', minD < 2.5,
+     `d0=${d0.toFixed(2)} min=${minD.toFixed(2)} cy=${(cw.cy / TS).toFixed(2)}`);
+  ok('M3.5: жук прыгает вверх к игроку', cw.y < 17 * TS, `cy=${(cw.cy / TS).toFixed(2)}`);
+}
+
+// 3. Препятствие: игрок сам ставит блок в 5 тайлах от жука
+{
+  const g = arena();
+  const p = putPlayer(g, 107, 17);
+  const cw = putCrawler(g, 112, 17);
+  const bx = 109;
+  const by = Math.floor((p.y + p.h) / TS) - 1;      // блок в один тайл над полом
+  g.world.set(bx, by, TILE.DIRT, true);             // поставлено «игроком» — помечено placed
+  g.world.set(bx, by + 1, TILE.DIRT, true);
+  g.tiles.flush();
+  ok('M3.5: блок стоит на пути жука', g.world.solid(bx, by) && g.world.isPlaced(bx, by));
+  const d0 = distTiles(cw, p);
+  let minD = d0, bit = false;
+  for (let i = 0; i < 300; i++) {
+    stepG(g, 1);
+    const d = distTiles(cw, p);
+    if (d < minD) minD = d;
+    if (p.health < 100) bit = true;
+  }
+  ok('M3.5: жук перепрыгнул двухтайловую стену', minD < 1.5 && bit,
+     `d0=${d0.toFixed(2)} min=${minD.toFixed(2)} hp=${p.health}`);
+}
+
+// 4. Яма глубиной 4 тайла — ловушка из спеки M3: жук не вылезает и не телепортируется
+{
+  const g = arena((W2, s, T) => {
+    for (let y = s; y < s + 4; y++) { W2.set(104, y, T.EMPTY, false); W2.set(108, y, T.EMPTY, false); }
+    for (let x = 104; x <= 108; x++) W2.set(x, s + 4, T.EMPTY, false);
+  });
+  const p = putPlayer(g, 100, 17);
+  const cw = putCrawler(g, 106, 21);
+  const d0 = distTiles(cw, p);
+  let minD = d0;
+  for (let i = 0; i < 300; i++) {
+    stepG(g, 1);
+    const d = distTiles(cw, p);
+    if (d < minD) minD = d;
+  }
+  ok('M3.5: в глубокой яме жук остаётся (ловушка работает)', cw.cy > 19 * TS,
+     `cy=${(cw.cy / TS).toFixed(2)}`);
+  ok('M3.5: из глубокой ямы жук не телепортируется к игроку', minD > 3,
+     `d0=${d0.toFixed(2)} min=${minD.toFixed(2)}`);
+}
+
+// 4b. Жук в яме 2 тайла — выбирается, потому что это по силам прыжку
+{
+  const g = arena((W2, s, T) => {
+    for (let y = s; y < s + 2; y++) { W2.set(104, y, T.EMPTY, false); W2.set(108, y, T.EMPTY, false); }
+    for (let x = 104; x <= 108; x++) W2.set(x, s + 2, T.EMPTY, false);
+  });
+  const p = putPlayer(g, 100, 17);
+  const cw = putCrawler(g, 106, 19);
+  let minD = distTiles(cw, p);
+  for (let i = 0; i < 300; i++) {
+    stepG(g, 1);
+    const d = distTiles(cw, p);
+    if (d < minD) minD = d;
+  }
+  ok('M3.5: из мелкой ямы жук выбирается', minD < 6.2,
+     `min=${minD.toFixed(2)} cy=${(cw.cy / TS).toFixed(2)}`);
+}
+
+// 5. Тупик: стена выше прыжка — жук не телепортируется и не застревает в вечном прыжке
+{
+  const g = arena((W2, s, T) => { for (let y = s - 4; y < s; y++) W2.set(110, y, T.STONE, true); });
+  const p = putPlayer(g, 107, 17);
+  const cw = putCrawler(g, 112, 17);
+  let jumps = 0, lastGround = true;
+  for (let i = 0; i < 300; i++) {
+    const before = cw.onGround;
+    stepG(g, 1);
+    if (before && !cw.onGround) jumps++;
+  }
+  ok('M3.5: у стены выше прыжка нет бесконечных скачков', jumps <= 12, `прыжков=${jumps}`);
+  ok('M3.5: жук не проходит сквозь высокую стену', cw.x > 110 * TS, `cx=${(cw.cx / TS).toFixed(2)}`);
+}
+
+// 6. Укус вплотную: обычная погоня, без перестановки игрока каждый кадр
+{
+  const g = arena();
+  const p = putPlayer(g, 107, 17);
+  const cw = putCrawler(g, 112, 17);
+  const d0 = distTiles(cw, p);
+  ok('M3.5: на одном уровне жук сразу в AGGRO', (stepG(g, 2), cw.state === ST.AGGRO), cw.state);
+  const hpBeforeBite = p.health;
+  for (let i = 0; i < 180; i++) stepG(g, 1);
+  ok('M3.5: жук дошёл до игрока сам и укусил', p.health < hpBeforeBite,
+     `d0=${d0.toFixed(2)} hp=${p.health}`);
+  ok('M3.5: укус снимает 10 за раз', hpBeforeBite - p.health >= 10 && (hpBeforeBite - p.health) % 10 === 0,
+     `dmg=${hpBeforeBite - p.health}`);
+  ok('M3.5: у хищника пауза между укусами', CFG.crawler.biteCooldown === 1);
+}
+
+// 7. Побег при низком HP
+{
+  const g = arena();
+  const p = putPlayer(g, 107, 17);
+  const cw = putCrawler(g, 112, 17);
+  cw.hp = 4;
+  stepG(g, 3);
+  ok('M3.5: раненый хищник убегает', cw.state === ST.FLEE, cw.state);
+}
 
 // --- смерть хищника от ящика
 const g4 = new (sandbox.__cls.Game)(view);

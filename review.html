@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>GRAVITY: VOID — ревью M3 «Жизнь и смерть»</title>
+<title>GRAVITY: VOID — ревью M3.5 «Мозги хищнику»</title>
 <style>
   :root {
     --bg: #070910;
@@ -153,17 +153,17 @@
 
 <header class="hero">
   <div class="wrap">
-    <div class="eyebrow">GRAVITY: VOID · протокол ревью · M3</div>
-    <h1>Жизнь и смерть <span class="sub">— ревью</span></h1>
+    <div class="eyebrow">GRAVITY: VOID · протокол ревью · M3.5 хотфикс</div>
+    <h1>Мозги хищнику <span class="sub">— ревью</span></h1>
     <div class="verdict">
       <span class="tag">ПРИНЯТА С ЗАМЕЧАНИЯМИ</span>
-      <p>Здоровье, хищник, BIOGEL и ускоренный прилив в игре. Главный риск: прилив теперь съедает 10 % построек в секунду — за 25 с от незащищённой базы остаётся 7 %.</p>
+      <p>Жук сам спрыгивает с платформы, перепрыгивает двухтайловую стену и не телепортируется. Стена выше 2 тайлов по-прежнему тупик — это физика, а не баг.</p>
     </div>
 
     <div class="chips" id="chips">
       <span class="chip" id="chip-shots"><span class="led"></span><span>скриншоты: проверяю…</span></span>
       <span class="chip" id="chip-game"><span class="led"></span><span>игра: не проверена</span></span>
-      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>автопроверки: 129 / 129</span></span>
+      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>автопроверки: 142 / 142</span></span>
       <span class="chip"><span class="led" style="background:var(--ok)"></span><span>зависимостей: 0</span></span>
     </div>
   </div>
@@ -171,7 +171,7 @@
 
 <nav class="toc wrap">
   <a href="#play">▶ Играть</a>
-  <a href="#criteria">Критерии M3</a>
+  <a href="#criteria">Критерии M3.5</a>
   <a href="#works">Что работает</a>
   <a href="#defects">Дефекты</a>
   <a href="#scope">Скоуп</a>
@@ -188,7 +188,7 @@
     <div class="stage" id="stage">
       <img class="poster" id="poster" src="screenshots/13-hud-health.png" alt="Кадр из игры GRAVITY: VOID">
       <div class="veil" id="veil">
-        <h3>GRAVITY: VOID — M3</h3>
+        <h3>GRAVITY: VOID — M3.5</h3>
         <p>A / D — идти · Space — прыжок · F — гравитация · H — биогель ·
            ЛКМ — действие режима · ПКМ — телекинез · 1–6 — режимы</p>
         <div class="btnrow">
@@ -200,25 +200,28 @@
 
     <div class="btnrow" style="margin-top:12px">
       <a class="btn ghost" href="M3.md">M3.md</a>
+      <a class="btn ghost" href="M35.md">M35.md</a>
       <a class="btn ghost" href="tools/verify.mjs">tools/verify.mjs</a>
     </div>
   </section>
 
   <section id="criteria">
-    <h2><span class="num">02</span>Критерии M3</h2>
+    <h2><span class="num">02</span>Критерии M3.5</h2>
     <table>
       <thead><tr><th>Критерий</th><th>Как сделано</th><th></th></tr></thead>
       <tbody>
-        <tr><td>Полоска здоровья в HUD</td><td>Красная шкала под инвентарём, цифры <code>HP / 100</code>, сердце, вспышка при уроне</td><td><span class="pill ok">да</span></td></tr>
-        <tr><td>Урон от падения</td><td><code>vy &gt; 800</code> → <code>(vy − 800) / 10</code>; удар о плиту в приливе не считается падением</td><td><span class="pill ok">да</span></td></tr>
-        <tr><td>Урон от прилива</td><td>Вылет за верх мира без укрытия → −30; под куполом с потолком над головой → 0</td><td><span class="pill ok">да</span></td></tr>
-        <tr><td>Смерть и респавн</td><td>Красный экран, −50 % ресурсов (floor), респавн на старте, HP 100, лог в консоль</td><td><span class="pill ok">да</span></td></tr>
-        <tr><td>Хищник спавнится, ползёт, агрится, кусает</td><td>3 шт. в пещерах, 32×24, IDLE / AGGRO (8 тайлов) / FLEE (&lt; 20 % HP), укус 10 / 1 с</td><td><span class="pill ok">да</span></td></tr>
-        <tr><td>Хищник умирает от ящика</td><td>Удар летящего ящика 15, HP 30 → два удара; яма с заваливанием тоже работает</td><td><span class="pill ok">да</span></td></tr>
-        <tr><td>BIOGEL с хищника</td><td>50 % с трупа, 4 шт. предразмещены в пещерах</td><td><span class="pill ok">да</span></td></tr>
-        <tr><td><code>H</code> лечит</td><td>1 BIOGEL → +40 HP, четвёртая зелёная строка инвентаря</td><td><span class="pill ok">да</span></td></tr>
-        <tr><td>Разрушение 10 %/с</td><td><code>max(2, floor(placed × 0.1))</code> раз в секунду вместо 1 тайла за 5 с</td><td><span class="pill ok">да</span></td></tr>
-        <tr><td>review.html под M3</td><td>Эта страница</td><td><span class="pill ok">да</span></td></tr>
+        <tr><td>Жук спрыгивает с платформы, если игрок внизу</td>
+            <td><code>findEdge</code> ищет край по опоре под колонкой; у «губы» платформы короткий подскок <code>hopPower</code></td>
+            <td><span class="pill ok">да</span></td></tr>
+        <tr><td>Жук перепрыгивает препятствие</td>
+            <td><code>wallAhead</code> + <code>blockTop</code>: уступ до 2 тайлов берётся прыжком с разбега 1.25× скорости</td>
+            <td><span class="pill ok">да</span></td></tr>
+        <tr><td>Тесты проверяют физическое сближение, а не телепорт</td>
+            <td>Игрок ставится один раз в сцене, дальше 300 кадров его никто не двигает; проверяется дистанция и укус</td>
+            <td><span class="pill ok">да</span></td></tr>
+        <tr><td>FPS не упал</td>
+            <td>Только чтение тайлов, 6–10 проб на кадр, ни одной физической проверки</td>
+            <td><span class="pill ok">да</span></td></tr>
       </tbody>
     </table>
   </section>
@@ -279,52 +282,35 @@
   </section>
 
   <section id="defects">
-    <h2><span class="num">04</span>Дефекты и неприятности</h2>
+    <h2><span class="num">04</span>Дефекты и ограничения</h2>
 
     <div class="grid g2">
-      <div class="card bad">
-        <h3><span class="dot"></span>Прилив не убивает, а бьёт по 30</h3>
+      <div class="card warn">
+        <h3><span class="dot"></span>Стена выше 2 тайлов — тупик</h3>
         <ul class="tight">
-          <li>Вылет за мир = −30 и телепорт обратно. За одну катастрофу можно влететь 4 раза.</li>
-          <li>Два вылета подряд при HP 60 → смерть без шанса понять, что произошло.</li>
-          <li>Кандидат: −30 при первом вылете, дальше урон растёт (30 / 45 / 60).</li>
-        </ul>
-      </div>
-      <div class="card bad">
-        <h3><span class="dot"></span>Укрытие требует и купола, и потолка</h3>
-        <ul class="tight">
-          <li>По спеке: «под потолком внутри купола». На открытом полу купол не спасает.</li>
-          <li>Найти такое место в первую катастрофу почти нереально — нужно строить заранее.</li>
-          <li>Подсказка в HUD («под куполом» / «открыто») появилась, но её замечают поздно.</li>
+          <li>Жук встаёт у стены и прыгает на месте: это честно читается как «не вижу пути», но он не обходит.</li>
+          <li>Полноценный обход по сетке — это A*, а не raycast. Сейчас жук ищет проём только вперёд.</li>
         </ul>
       </div>
       <div class="card warn">
-        <h3><span class="dot"></span>Хищник в приливе почти безвреден</h3>
+        <h3><span class="dot"></span>Платформа выше 2 тайлов недостижима</h3>
         <ul class="tight">
-          <li>Он висит на потолке и рывком уходит вниз, но мировая гравитация тянет его обратно.</li>
-          <li>Укус возможен только в короткое окно касания.</li>
-          <li>Сейчас это атмосфера, а не угроза — решается отдельным «прилипанием» к игроку.</li>
+          <li>Прыжок даёт ровно 2 тайла. Против игрока на высокой башне работает только «спрыгнуть и ждать».</li>
+          <li>Это ограничение физики, а не навигации: лестницы и ступени решают.</li>
         </ul>
       </div>
       <div class="card warn">
-        <h3><span class="dot"></span>Ящик-оружие требует скорости</h3>
+        <h3><span class="dot"></span>Яма 4 тайла = ловушка</h3>
         <ul class="tight">
-          <li>Урон только если ящик летит быстрее 260 px/s, иначе жук невредим.</li>
-          <li>Попасть телекинезом по ползущему жуку — навык, но 2 удара из 3 теряются в молоко.</li>
-          <li>Кандидат: разрешить урон от брошенного ящика без разгона.</li>
+          <li>Жук не вылезает — так и задумано в спеке M3 (закопать хищника).</li>
+          <li>Из ямы в 2 тайла выбирается сам.</li>
         </ul>
       </div>
-      <div class="card warn">
-        <h3><span class="dot"></span>Смерть не возвращает на «последнюю землю»</h3>
+      <div class="card ok">
+        <h3><span class="dot"></span>Что стало лучше</h3>
         <ul class="tight">
-          <li>По спеке «старт / последняя точка респавна», но чекпоинтов нет — всегда старт.</li>
-          <li>В глубокой пещере смерть = долгая дорога обратно.</li>
-        </ul>
-      </div>
-      <div class="card warn">
-        <h3><span class="dot"></span>Нет звука</h3>
-        <ul class="tight">
-          <li>Укус, смерть, лечение — только визуальные сигналы. Звук требует ассетов.</li>
+          <li>Погоня, спуск с платформы, прыжок через блок и выход из мелкой ямы — всё физикой.</li>
+          <li>Потеряв игрока, жук 3 с помнит цель и идёт в её сторону, а не сразу домой.</li>
         </ul>
       </div>
     </div>
@@ -364,31 +350,21 @@
     <h2><span class="num">06</span>Запросы ревью</h2>
     <div class="grid g2">
       <div class="card">
-        <h3>1. AI: что было сложнее всего</h3>
-        <p class="sm muted">Не состояния, а прилив. Один и тот же жук должен ползти, лететь вверх и «падать» вниз.
-        Пришлось ввести HANG как пятое состояние и рывок.</p>
+        <h3>1. Нужен ли A* для обхода?</h3>
+        <p class="sm muted">Стена выше 2 тайлов останавливает жука. Raycast-навигация это не решает — нужен поиск пути по сетке
+        (дороже по кадру, но жук станет полностью самостоятельным).</p>
       </div>
       <div class="card">
-        <h3>2. Смерть — «моя вина»?</h3>
-        <p class="sm muted">В пещере — да: полез к жуку без геля. От прилива — нет: вылет за мир выглядит как баг,
-        даже когда это правило.</p>
+        <h3>2. Прыжок 2 тайла — хватает?</h3>
+        <p class="sm muted">Выше игрок недостижим. Может, дать жуку «лазание по стенам» в приливе?</p>
       </div>
       <div class="card">
-        <h3>3. 10 %/с убивает стройку?</h3>
-        <p class="sm muted">Незащищённую — да, за 25 с остаётся 7 %. С якорем — нет. Так и задумано, но это уже
-        не «подлатать», а «строить заново».</p>
+        <h3>3. Ловушка на 4 тайла — это баг или фича?</h3>
+        <p class="sm muted">Сейчас фича (спека M3: «закопать»). Оставляем?</p>
       </div>
       <div class="card">
-        <h3>4. Нужен ли чекпоинт?</h3>
-        <p class="sm muted">Сейчас респавн только на старте. В пещере это 30 с дороги.</p>
-      </div>
-      <div class="card">
-        <h3>5. Ящик как оружие — хватает?</h3>
-        <p class="sm muted">2 удара по 15 требуют попасть дважды. Может, дать 30 за удар, но раз в 3 с?</p>
-      </div>
-      <div class="card">
-        <h3>6. Три хищника или один?</h3>
-        <p class="sm muted">Сейчас 3 в 200×100 тайлов — встреча редкая. Больше — страшнее, но и награда выше.</p>
+        <h3>4. Три хищника на арену — читаемо?</h3>
+        <p class="sm muted">Стали агрессивнее, встреч больше. Не перебор?</p>
       </div>
     </div>
   </section>
@@ -413,6 +389,14 @@
         <figcaption><b>Прилив</b>Жук на потолке, HUD: «открыто».</figcaption>
       </figure>
       <figure class="shot">
+        <img src="screenshots/15-crawler-platform.png" alt="Жук на платформе над игроком" loading="lazy">
+        <figcaption><b>M3.5</b>Жук ищет край платформы, игрок внизу.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/15b-crawler-jump.png" alt="Жук перед поставленным блоком" loading="lazy">
+        <figcaption><b>M3.5</b>Игрок поставил блок — жук готовится прыгать.</figcaption>
+      </figure>
+      <figure class="shot">
         <img src="screenshots/14-death.png" alt="Экран смерти" loading="lazy">
         <figcaption><b>Смерть</b>Красный экран и список потерь.</figcaption>
       </figure>
@@ -435,7 +419,7 @@
     <h2><span class="num">08</span>Как проверено</h2>
     <pre><span class="c"># 129 автопроверок логики, физики и критериев M3</span>
 cd tools
-node verify.mjs            <span class="c"># → 129/129 проверок пройдено</span>
+node verify.mjs            <span class="c"># → 142/142 проверок пройдено</span>
 node screenshots.mjs       <span class="c"># → кадры в ../screenshots</span>
 node perf.mjs              <span class="c"># → p50 6.3 мс, p95 7.2 мс на кадр</span></pre>
 
@@ -447,6 +431,8 @@ node perf.mjs              <span class="c"># → p50 6.3 мс, p95 7.2 мс на
           <li>Прилив: −30 без укрытия, 0 под куполом с потолком.</li>
           <li>Смерть: −50 % ресурсов, респавн, неуязвимость, красный экран.</li>
           <li>Хищник: спавн в пещерах, IDLE → AGGRO → FLEE, укус, урон от ящика, смерть.</li>
+          <li>M3.5: спуск с платформы, подъём по уступу, прыжок через блок игрока, мелкая яма,
+              честная ловушка на 4 тайла, отсутствие бесконечных скачков у высокой стены.</li>
           <li>BIOGEL: 4 на карте, <code>H</code> лечит на 40, без геля не лечит.</li>
           <li>Прилив: 2 тайла на малой базе и 10 % на 60 постройках.</li>
           <li>Регрессия M2: якорь, защита, сейв, цикл фаз, купол дугой.</li>
@@ -468,7 +454,7 @@ node perf.mjs              <span class="c"># → p50 6.3 мс, p95 7.2 мс на
       <a class="btn ghost" href="README.md">README</a>
       <a class="btn ghost" href="M3.md">M3.md</a>
     </div>
-    <p>Ветка <code>arena/b1bb672b-game1</code> · M3: здоровье, хищник, BIOGEL, прилив 10 %/с.</p>
+    <p>Ветка <code>arena/b1bb672b-game1</code> · M3.5: навигация хищника без телепортов.</p>
   </footer>
 </main>
 <script>

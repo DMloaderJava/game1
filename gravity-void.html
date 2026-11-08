@@ -176,6 +176,17 @@ const CFG = {
     gelOnMap: 4,           // сколько геля лежит в пещерах
     ceilingHang: 1.2,      // сколько висит на потолке при приливе
     lungeSpeed: 340,       // рывок с потолка в сторону игрока
+
+    // M3.5: навигация. Все проверки — чтение тайлов, не физика
+    jump: 520,             // сила прыжка через препятствие
+    hopPower: 250,         // короткий подскок, чтобы сойти с края платформы
+    maxClimb: 5,           // стену какой высоты ещё пробуем брать
+    wallJumpCd: 0.35,      // пауза между прыжками по стене
+    maxDrop: 10,           // обрыв глубже — не считаем, что там есть пол
+    stepScan: 6,           // на сколько тайлов ищем ступеньку
+    edgeScan: 10,          // на сколько тайлов ищем край платформы
+    lostHop: 1.1,          // «не вижу пути»: подскок на месте, с
+    memoryTime: 3,         // сколько помнит игрока, потеряв его из виду
     gravity: 0.75          // доля обычной гравитации для хищника
   },
 
@@ -741,9 +752,16 @@ class Crawler extends PhysBody {
     this.wanderT = 0;
     this.wanderDir = 1;
     this.legPhase = Math.random() * 6;
-    this.gravityScale = CFG.crawler.gravity;
+    this.gravityScale = CFG.crawler.gravity;   // хватка чуть слабее игрока
     this.hurtFlash = 0;
     this.stuckHang = 0;
+
+    // M3.5: навигация
+    this.jumpCd = 0;
+    this.hopT = 0;              // подскок «потерял путь»
+    this.chaseDir = 1;          // куда реально идём (с учётом стены/пропасти)
+    this.lost = false;
+    this.memory = 0;            // сколько ещё помним игрока, потеряв из виду
   }
 
   // Урон хищнику; возвращает true, если он умер
@@ -760,28 +778,247 @@ class Crawler extends PhysBody {
     return false;
   }
 
+  /* ---------------- M3.5: дешёвые пробы мира (только чтение тайлов) ---------------- */
+
+  // Твёрдо ли в тайле под точкой (x — мировой, ty — ряд)
+  solidAt(world, x, ty) {
+    return world.solid(Math.floor(x / TS), ty);
+  }
+
+  // Ближайшая твёрдая поверхность вниз от ряда row (включая сам ряд)
+  floorBelow(world, tx, row) {
+    for (let ty = row; ty < row + CFG.crawler.maxDrop + 2; ty++) {
+      if (world.solid(tx, ty)) return ty;
+    }
+    return null;
+  }
+
+  // Верх препятствия в колонке: первый свободный ряд над стеной.
+  // null — на нашем уровне стены нет.
+  blockTop(world, tx, fromRow) {
+    let ty = fromRow, n = 0;
+    const lim = CFG.crawler.maxClimb + 2;
+    while (ty >= 0 && world.solid(tx, ty) && n <= lim) { ty--; n++; }
+    if (n === 0) return null;
+    if (n > lim) return -1;                 // стена выше, чем вообще смотрим
+    return ty + 1;                           // ряд, на который встанешь, прыгнув
+  }
+
+  // Ряд пола, на котором стоит тело (ноги на границе тайла)
+  feetRow() {
+    return Math.floor((this.y + this.h + 1) / TS);
+  }
+
+  // Препятствие впереди: первый твёрдый ряд в колонке по направлению dir
+  wallAhead(world, dir) {
+    const tx = Math.floor((this.cx + dir * (this.w / 2 + 3)) / TS);
+    const top = Math.floor((this.y + 2) / TS);
+    const bottom = Math.floor((this.y + this.h - 3) / TS);
+    for (let ty = top; ty <= bottom; ty++) if (world.solid(tx, ty)) return { tx, ty };
+    return null;
+  }
+
+  // Есть ли под колонкой опора на нашей высоте (в пределах 2 тайлов ниже ног)
+  standableAt(world, tx, row) {
+    const f = this.floorBelow(world, tx, row);
+    return f !== null && f <= row + 2;
+  }
+
+  // Пропасть впереди: под точкой впереди нет опоры на нашей высоте
+  gapAhead(world, dir) {
+    const tx = Math.floor((this.cx + dir * (this.w / 2 + 4)) / TS);
+    return !this.standableAt(world, tx, this.feetRow());
+  }
+
+  /* ---------------- M3.5: планирование шага ---------------- */
+
+  // Ближайший уступ впереди, на который можно запрыгнуть: { tx, rise } или null
+  findLedge(world, dir) {
+    const c = CFG.crawler;
+    const row = this.feetRow();
+    for (let k = 1; k <= c.stepScan; k++) {
+      const tx = Math.floor((this.cx + dir * k * TS) / TS);
+      const top = this.blockTop(world, tx, row - 1);
+      if (top === null) return null;                  // дальше проход свободен — уступа нет
+      if (top < 0) return null;                       // стена выше прыжка — не наш путь
+      const rise = row - top;                         // на сколько тайлов вверх край
+      if (rise >= 1 && rise <= 2) {
+        // над уступом должно быть место под самого жука
+        if (!world.solid(tx, top - 1) && !world.solid(tx, top - 2)) return { tx, rise };
+        return null;
+      }
+    }
+    return null;
+  }
+
+  // Уступ выше головы: жук стоит у подножия платформы и не видит её как «стену».
+  // Ищем впереди твёрдый тайл в полосе от головы до 2 тайлов вверх, у которого сверху воздух.
+  findLedgeUp(world, dir) {
+    const c = CFG.crawler;
+    const row = this.feetRow();
+    const headRow = Math.floor(this.y / TS);
+    for (let k = 1; k <= c.stepScan; k++) {
+      const tx = Math.floor((this.cx + dir * k * TS) / TS);
+      for (let ty = headRow; ty >= row - 2; ty--) {
+        if (!world.solid(tx, ty)) continue;
+        const top = this.blockTop(world, tx, ty);
+        if (top === null || top < 0) break;
+        const rise = row - top;
+        if (rise >= 1 && rise <= 2 && !world.solid(tx, top - 1) && !world.solid(tx, top - 2)) {
+          return { tx, rise, dist: k };
+        }
+        break;                                  // стена выше — не наш уступ
+      }
+    }
+    return null;
+  }
+
+  // Ближайший край платформы в заданном направлении: расстояние в тайлах или null.
+  // Край = под колонкой нет опоры на нашей высоте (земля глубоко внизу — тоже край).
+  findEdge(world, dir, maxTiles) {
+    const row = this.feetRow();
+    for (let k = 1; k <= maxTiles; k++) {
+      const tx = Math.floor((this.cx + dir * k * TS) / TS);
+      if (!this.standableAt(world, tx, row)) return k;
+    }
+    return null;
+  }
+
+  // Решение на кадр: { dir, jump, jumpDir }
+  planChase(world, player) {
+    const c = CFG.crawler;
+    const wantDir = Math.sign(player.cx - this.cx) || 1;
+    const dy = player.cy - this.cy;
+    const below = dy > TS * 1.2;      // игрок ниже уровня ног
+    const above = dy < -TS * 1.2;     // игрок выше
+
+    // 1. Игрок ниже, а мы на платформе: идём к ближайшему краю и падаем с него
+    if (below) {
+      if (!this.onGround) return { dir: wantDir, jump: false };      // уже падаем — рулим в полёте
+      if (this.gapAhead(world, wantDir)) return { dir: wantDir, jump: false };
+      // край вплотную: перешагнуть «губу» платформы можно только подскоком
+      const lip = this.findEdge(world, wantDir, 2);
+      if (lip !== null) return { dir: wantDir, jump: true, jumpDir: wantDir, hop: true };
+      const near = this.findEdge(world, wantDir, c.edgeScan);
+      if (near !== null) return { dir: wantDir, jump: false };
+      const far = this.findEdge(world, -wantDir, c.edgeScan);
+      if (far !== null) return { dir: -wantDir, jump: false };
+      // края нет (замкнутая комната) — просто идём в сторону игрока
+      return { dir: wantDir, jump: false };
+    }
+
+    // 2. Стена или уступ впереди: прыжок с разбега в его сторону
+    if (this.onGround) {
+      const wall = this.wallAhead(world, wantDir);
+      if (wall) {
+        const ledge = this.findLedge(world, wantDir);
+        if (ledge) return { dir: wantDir, jump: true, jumpDir: wantDir };
+        // Стена выше прыжка: обходим, если рядом есть проход. Нет — стоим у стены
+        // и пробуем подпрыгнуть по откату: видно, что жук «не видит пути», но не дёргается вечно
+        const detour = this.findDetour(world, wantDir);
+        if (detour !== null && detour !== wantDir) return { dir: detour, jump: false };
+        return { dir: 0, jump: this.jumpCd <= 0, jumpDir: wantDir };
+      }
+    }
+
+    // 3. Игрок выше — лезем на уступ
+    if (above && this.onGround) {
+      const up = this.findLedgeUp(world, wantDir);
+      if (up) {
+        // Прыгаем вплотную к уступу: в воздухе жук доберёт горизонталь и зацепится за край
+        const dx = Math.abs((up.tx + 0.5) * TS - this.cx) / TS;
+        return { dir: wantDir, jump: dx <= 1.6, jumpDir: wantDir };
+      }
+      for (const s of [wantDir, -wantDir]) {
+        const ledge = this.findLedge(world, s);
+        if (ledge) return { dir: s, jump: true, jumpDir: s };
+      }
+      return { dir: wantDir, jump: false };
+    }
+
+    // 4. Обычная погоня. Через пропасть — прыжок, если игрок не ниже
+    if (this.onGround && this.gapAhead(world, wantDir)) {
+      return { dir: wantDir, jump: true, jumpDir: wantDir };
+    }
+
+    return { dir: wantDir, jump: false };
+  }
+
+  // Есть ли впереди, за стеной, место, где можно пройти (проём или низкий уступ).
+  // Только вперёд: пятиться от стены — это не обход, а потеря игрока.
+  findDetour(world, dir) {
+    const c = CFG.crawler;
+    const row = this.feetRow();
+    let blockedRun = 0;
+    for (let k = 1; k <= c.edgeScan; k++) {
+      const tx = Math.floor((this.cx + dir * k * TS) / TS);
+      const top = this.blockTop(world, tx, row - 1);
+      if (top === null) {
+        if (blockedRun >= 2) return dir;            // стена кончилась — идём вперёд
+        continue;                                   // стены пока не было — это не обход
+      }
+      if (top >= 0 && row - top <= 2) return dir;   // уступ, который возьмём
+      blockedRun++;
+    }
+    return null;
+  }
+
+  // Потеряли игрока из виду: что-то осмысленное, но без прыжков в стену
+  planSearch(dt, world) {
+    const c = CFG.crawler;
+    this.hopT = Math.max(0, this.hopT - dt);
+    this.wanderT -= dt;
+    if (this.wanderT <= 0) {
+      this.wanderT = 1 + Math.random() * 1.5;
+      this.wanderDir = Math.random() < 0.5 ? -1 : 1;
+      // ближе к дому
+      if (Math.abs(this.cx - this.home.x) > c.idleRadius * TS) {
+        this.wanderDir = Math.sign(this.home.x - this.cx);
+      }
+    }
+    const dir = this.wanderDir;
+    if (this.hunting && (this.wallAhead(world, dir) || this.gapAhead(world, dir))) {
+      this.wanderDir = -dir;
+      // не видим пути к игроку — короткий подскок на месте
+      if (this.hopT <= 0 && this.onGround) {
+        this.hopT = c.lostHop;
+        return { dir: -dir, jump: true, hop: true, lostHop: true };
+      }
+      return { dir: -dir, jump: false, lostHop: true };
+    }
+    return { dir, jump: false };
+  }
+
   update(dt, game) {
     const c = CFG.crawler;
     const p = game.player;
     const g = game.tide.worldGravity;
+    const world = game.world;
 
     this.biteT = Math.max(0, this.biteT - dt);
     this.crateCd = Math.max(0, this.crateCd - dt);
     this.hitT = Math.max(0, this.hitT - dt);
     this.hurtFlash = Math.max(0, this.hurtFlash - dt);
+    this.jumpCd = Math.max(0, this.jumpCd - dt);
+    this.memory = Math.max(0, this.memory - dt);
 
     const distTiles = Math.hypot(p.cx - this.cx, p.cy - this.cy) / TS;
     const hpRatio = this.hp / this.maxHp;
 
     // --- состояние ---
     const canSee = distTiles <= c.aggroRadius;
+    if (canSee) this.memory = c.memoryTime;           // помним игрока, даже если он ушёл за угол
+    const hunting = canSee || (this.memory > 0 && distTiles <= c.aggroRadius * 2.2);
     if (hpRatio < c.fleeHp && canSee) this.state = CRAWLER_STATE.FLEE;
-    else if (canSee && !p.dead) this.state = CRAWLER_STATE.AGGRO;
+    else if (hunting && !p.dead) this.state = CRAWLER_STATE.AGGRO;
     else this.state = CRAWLER_STATE.IDLE;
+    this.lost = this.state === CRAWLER_STATE.AGGRO && !canSee;
+    this.hunting = this.state === CRAWLER_STATE.AGGRO;
+
 
     // Прилив: хищник улетает вверх и цепляется за потолок
     if (game.tide.id === 'CATASTROPHE') {
-      const ceiling = this.findCeiling(game.world);
+      const ceiling = this.findCeiling(world);
       if (ceiling !== null && Math.abs(this.y - ceiling) < 26) {
         this.state = CRAWLER_STATE.HANG;
         this.stuckHang = c.ceilingHang;
@@ -794,35 +1031,44 @@ class Crawler extends PhysBody {
       this.state = CRAWLER_STATE.IDLE;
     }
 
-    // --- движение ---
+    // --- куда идти ---
     let wantVx = 0;
+    let jump = false;
+    let jumpDir = 0;
+    let hop = false;
     if (this.state === CRAWLER_STATE.HANG) {
-      // Держится за потолок и подтягивается в сторону игрока: потом свалится на него
       wantVx = Math.sign(p.cx - this.cx) * c.speed * 0.45;
       this.stuckHang = Math.max(0, this.stuckHang - dt);
       if (this.stuckHang <= 0) {
-        // Отцепляется и бросается на игрока — «падает» на него, даже если мир тянет вверх
         this.state = CRAWLER_STATE.AGGRO;
         this.vx = Math.sign(p.cx - this.cx) * c.speed;
         this.vy = Math.sign(p.cy - this.cy) * c.lungeSpeed;
       }
     } else if (this.state === CRAWLER_STATE.AGGRO) {
-      wantVx = Math.sign(p.cx - this.cx) * c.speed;
+      // Цель — не позиция игрока, а точка рядом с ним: иначе жук стоит вплотную и дёргается
+      const plan = this.planChase(world, p);
+      wantVx = plan.dir * c.speed;
+      jump = plan.jump;
+      jumpDir = plan.jumpDir || plan.dir;
+      hop = !!plan.hop;
+      this.chaseDir = plan.dir;
+      // укус с места: на одном уровне не перебегаем игрока и не дёргаемся
+      if (Math.abs(p.cy - this.cy) < TS * 1.2 && Math.abs(p.cx - this.cx) < TS * 0.9) wantVx = 0;
     } else if (this.state === CRAWLER_STATE.FLEE) {
       wantVx = -Math.sign(p.cx - this.cx) * c.speed * 1.15;
+      // убегая, тоже не шагаем в стену
+      if (this.onGround && this.wallAhead(world, Math.sign(wantVx))) wantVx = 0;
     } else {
-      // IDLE: случайное блуждание в радиусе от дома
-      this.wanderT -= dt;
-      if (this.wanderT <= 0) {
-        this.wanderT = 1.2 + Math.random() * 2;
-        this.wanderDir = Math.random() < 0.5 ? -1 : 1;
-        if (Math.abs(this.cx - this.home.x) > c.idleRadius * TS) {
-          this.wanderDir = Math.sign(this.home.x - this.cx);
-        }
-      }
-      wantVx = this.wanderDir * c.idleSpeed;
+      const plan = this.planSearch(dt, world);
+      wantVx = plan.dir * c.idleSpeed;
+      jump = plan.jump;
+      hop = !!plan.hop;
     }
 
+    this.lastWantVx = wantVx;
+
+
+    // --- разгон ---
     if (this.state !== CRAWLER_STATE.HANG) {
       const accel = this.onGround ? 900 : 400;
       const dv = wantVx - this.vx;
@@ -830,15 +1076,15 @@ class Crawler extends PhysBody {
       if (Math.abs(this.vx) > 4) this.dir = Math.sign(this.vx);
     }
 
-    // Прыжок через препятствие, если упёрлись
-    if (Math.abs(wantVx) > 1 && Math.abs(this.vx) < 6 && this.onGround) {
-      this.jumpT = (this.jumpT || 0) + dt;
-      if (this.jumpT > 0.35) {
-        this.vy = -520 * (g < 0 ? -1 : 1);
-        this.jumpT = 0;
-      }
-    } else {
-      this.jumpT = 0;
+    // --- прыжок по решению навигации ---
+    if (jump && this.onGround && this.jumpCd <= 0) {
+      this.jumpCd = c.wallJumpCd;
+      const jd = jumpDir || this.chaseDir || this.dir;
+      // Подскок с края — короткий: цель не прыгнуть выше, а перешагнуть «губу» платформы
+      const power = hop ? c.hopPower : c.jump;
+      this.vx = jd * c.speed * (hop ? 1 : 1.25);
+      this.vy = -power * (g < 0 ? -1 : 1);
+      this.onGround = false;
     }
 
     // --- укус ---
@@ -848,7 +1094,7 @@ class Crawler extends PhysBody {
       game.particles.bite(p.cx, p.cy);
     }
 
-    this.step(dt, game.world, g);
+    this.step(dt, world, g);
     if (this.onGround) this.legPhase += dt * (Math.abs(this.vx) > 10 ? 12 : 2);
   }
 
@@ -2629,6 +2875,15 @@ class Game {
       ctx.stroke();
 
       ctx.restore();
+
+      // «Не вижу пути»: короткая жёлтая дуга над панцирем
+      if (c.lost && c.state === CRAWLER_STATE.AGGRO) {
+        ctx.strokeStyle = 'rgba(240,187,92,0.85)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(x + w / 2, y - 4, 7, Math.PI * 1.1, Math.PI * 1.9);
+        ctx.stroke();
+      }
 
       // Полоска здоровья хищника — только если он ранен
       if (c.hp < c.maxHp) {

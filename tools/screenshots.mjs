@@ -256,4 +256,41 @@ P.health = 5; P.invuln = 0;
 game.damagePlayer(20, 'тест');
 frames(3);
 shot('14-death');
+// ---------- M3.5: навигация хищника ----------
+game.resetWorld();
+frames(20);
+{
+  const Wr = game.world, s2 = Wr.surfaceRow;
+  for (let x = 96; x <= 124; x++) for (let y = 6; y < s2; y++) Wr.set(x, y, sandbox.__TILE.EMPTY, false);
+  for (let x = 100; x <= 112; x++) Wr.set(x, s2 - 3, sandbox.__TILE.STONE, true);
+  game.tiles.flush();
+  P.x = 107 * 32; P.y = s2 * 32 - P.h; P.vx = P.vy = 0; P.gravityTarget = 1; P.health = 100;
+  game.crawlers.length = 0;
+  const cw = new sandbox.__clsM3.Crawler(112 * 32, (s2 - 3) * 32 - 24);
+  cw.home = { x: cw.cx, y: cw.cy };
+  game.crawlers.push(cw);
+  game.camera.snap(P);
+  frames(40);
+  game.camera.snap(P);
+  frames(1);
+  shot('15-crawler-platform');
+}
+{
+  const Wr = game.world, s2 = Wr.surfaceRow;
+  for (let x = 96; x <= 124; x++) for (let y = 6; y < s2; y++) Wr.set(x, y, sandbox.__TILE.EMPTY, false);
+  const bx = 110;
+  Wr.set(bx, s2 - 1, sandbox.__TILE.DIRT, true);
+  Wr.set(bx, s2 - 2, sandbox.__TILE.DIRT, true);
+  game.tiles.flush();
+  P.x = 106 * 32; P.y = s2 * 32 - P.h; P.vx = P.vy = 0; P.health = 100;
+  game.crawlers.length = 0;
+  const cw = new sandbox.__clsM3.Crawler(114 * 32, s2 * 32 - 24);
+  cw.home = { x: cw.cx, y: cw.cy };
+  game.crawlers.push(cw);
+  game.camera.snap(P);
+  frames(26);
+  game.camera.snap(P);
+  frames(1);
+  shot('15b-crawler-jump');
+}
 console.log('done');
