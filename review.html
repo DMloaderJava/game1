@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>GRAVITY: VOID — ревью итерации 1A</title>
+<title>GRAVITY: VOID — ревью M3 «Жизнь и смерть»</title>
 <style>
   :root {
     --bg: #070910;
@@ -153,17 +153,17 @@
 
 <header class="hero">
   <div class="wrap">
-    <div class="eyebrow">GRAVITY: VOID · протокол ревью · итерация 1A</div>
-    <h1>Добыча и инвентарь <span class="sub">— ревью</span></h1>
+    <div class="eyebrow">GRAVITY: VOID · протокол ревью · M3</div>
+    <h1>Жизнь и смерть <span class="sub">— ревью</span></h1>
     <div class="verdict">
       <span class="tag">ПРИНЯТА С ЗАМЕЧАНИЯМИ</span>
-      <p>Скоуп закрыт, автотесты зелёные. До 1B починить: перекрытие ЛКМ у ног и тесноту дропов.</p>
+      <p>Здоровье, хищник, BIOGEL и ускоренный прилив в игре. Главный риск: прилив теперь съедает 10 % построек в секунду — за 25 с от незащищённой базы остаётся 7 %.</p>
     </div>
 
     <div class="chips" id="chips">
       <span class="chip" id="chip-shots"><span class="led"></span><span>скриншоты: проверяю…</span></span>
       <span class="chip" id="chip-game"><span class="led"></span><span>игра: не проверена</span></span>
-      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>автопроверки: 45 / 45</span></span>
+      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>автопроверки: 129 / 129</span></span>
       <span class="chip"><span class="led" style="background:var(--ok)"></span><span>зависимостей: 0</span></span>
     </div>
   </div>
@@ -171,10 +171,10 @@
 
 <nav class="toc wrap">
   <a href="#play">▶ Играть</a>
+  <a href="#criteria">Критерии M3</a>
   <a href="#works">Что работает</a>
   <a href="#defects">Дефекты</a>
   <a href="#scope">Скоуп</a>
-  <a href="#mustfix">До 1B</a>
   <a href="#questions">Вопросы</a>
   <a href="#shots">Скриншоты</a>
   <a href="#verify">Как проверено</a>
@@ -182,16 +182,15 @@
 
 <main class="wrap">
 
-  <!-- ------------------------------------------------------------ игра -->
   <section id="play">
     <h2><span class="num">01</span>Сборка</h2>
 
     <div class="stage" id="stage">
-      <img class="poster" id="poster" src="screenshots/01-start.png" alt="Кадр из игры GRAVITY: VOID">
+      <img class="poster" id="poster" src="screenshots/13-hud-health.png" alt="Кадр из игры GRAVITY: VOID">
       <div class="veil" id="veil">
-        <h3>GRAVITY: VOID — итерация 1A</h3>
-        <p>Кликните «Запустить», затем кликните по картинке игры, чтобы клавиатура заработала.
-           <br>A / D — идти · Space — прыжок · F — гравитация · ЛКМ — копать или тянуть · ПКМ — толчок.</p>
+        <h3>GRAVITY: VOID — M3</h3>
+        <p>A / D — идти · Space — прыжок · F — гравитация · H — биогель ·
+           ЛКМ — действие режима · ПКМ — телекинез · 1–6 — режимы</p>
         <div class="btnrow">
           <button class="btn" id="play-btn" type="button">Запустить игру</button>
           <a class="btn ghost" href="gravity-void.html" target="_blank" rel="noopener">Открыть в новой вкладке</a>
@@ -200,246 +199,264 @@
     </div>
 
     <div class="btnrow" style="margin-top:12px">
-      <a class="btn ghost" href="README.md">CHANGELOG</a>
+      <a class="btn ghost" href="M3.md">M3.md</a>
       <a class="btn ghost" href="tools/verify.mjs">tools/verify.mjs</a>
     </div>
   </section>
 
-  <!-- ------------------------------------------------------------ что работает -->
+  <section id="criteria">
+    <h2><span class="num">02</span>Критерии M3</h2>
+    <table>
+      <thead><tr><th>Критерий</th><th>Как сделано</th><th></th></tr></thead>
+      <tbody>
+        <tr><td>Полоска здоровья в HUD</td><td>Красная шкала под инвентарём, цифры <code>HP / 100</code>, сердце, вспышка при уроне</td><td><span class="pill ok">да</span></td></tr>
+        <tr><td>Урон от падения</td><td><code>vy &gt; 800</code> → <code>(vy − 800) / 10</code>; удар о плиту в приливе не считается падением</td><td><span class="pill ok">да</span></td></tr>
+        <tr><td>Урон от прилива</td><td>Вылет за верх мира без укрытия → −30; под куполом с потолком над головой → 0</td><td><span class="pill ok">да</span></td></tr>
+        <tr><td>Смерть и респавн</td><td>Красный экран, −50 % ресурсов (floor), респавн на старте, HP 100, лог в консоль</td><td><span class="pill ok">да</span></td></tr>
+        <tr><td>Хищник спавнится, ползёт, агрится, кусает</td><td>3 шт. в пещерах, 32×24, IDLE / AGGRO (8 тайлов) / FLEE (&lt; 20 % HP), укус 10 / 1 с</td><td><span class="pill ok">да</span></td></tr>
+        <tr><td>Хищник умирает от ящика</td><td>Удар летящего ящика 15, HP 30 → два удара; яма с заваливанием тоже работает</td><td><span class="pill ok">да</span></td></tr>
+        <tr><td>BIOGEL с хищника</td><td>50 % с трупа, 4 шт. предразмещены в пещерах</td><td><span class="pill ok">да</span></td></tr>
+        <tr><td><code>H</code> лечит</td><td>1 BIOGEL → +40 HP, четвёртая зелёная строка инвентаря</td><td><span class="pill ok">да</span></td></tr>
+        <tr><td>Разрушение 10 %/с</td><td><code>max(2, floor(placed × 0.1))</code> раз в секунду вместо 1 тайла за 5 с</td><td><span class="pill ok">да</span></td></tr>
+        <tr><td>review.html под M3</td><td>Эта страница</td><td><span class="pill ok">да</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
   <section id="works">
-    <h2><span class="num">02</span>Что работает</h2>
+    <h2><span class="num">03</span>Что работает</h2>
 
     <div class="grid g2">
       <div class="card ok">
-        <h3><span class="dot"></span>Мир как тайловая сетка</h3>
+        <h3><span class="dot"></span>Здоровье</h3>
         <ul class="tight">
-          <li>200×100 тайлов по 32 px, слои: небо → потолочная плита → зал с уступами → <code>DIRT</code> → <code>STONE</code>.</li>
-          <li>Верхние 5 рядов гарантированно пустые, <code>FERRITE</code> — 5 % в породе.</li>
+          <li>100 HP, полоска под инвентарём, цвет зелёный → жёлтый → красный.</li>
+          <li>Урон: щелчок красной рамкой по краям экрана, тряска камеры, цифра мигает.</li>
+          <li>2 с неуязвимости после респавна — иначе хищник добивает на точке возрождения.</li>
         </ul>
       </div>
       <div class="card ok">
-        <h3><span class="dot"></span>Копание</h3>
+        <h3><span class="dot"></span>Смерть как урок</h3>
         <ul class="tight">
-          <li>ЛКМ по тайлу в радиусе 4 тайлов; <code>DIRT</code> 0.15 с, <code>STONE</code> 0.50 с, <code>FERRITE</code> 0.70 с.</li>
-          <li>Прогресс: заливка тайла + трещины + полоса. Отпустил ЛКМ — сброс.</li>
+          <li>Красный экран «СМЕРТЬ» и список потерь: <code>STONE −3 · FERRITE −4</code>.</li>
+          <li>Теряется ровно половина каждого ресурса с округлением вниз: 7 → 4.</li>
+          <li>Лог в консоль: <code>[M3] смерть (прилив), потеряно: …</code></li>
         </ul>
       </div>
       <div class="card ok">
-        <h3><span class="dot"></span>Дропы и подбор</h3>
+        <h3><span class="dot"></span>Хищник</h3>
         <ul class="tight">
-          <li>Физические 12×12: падают, сталкиваются с тайлами, отскакивают, засыпают.</li>
-          <li>Просыпаются от копания рядом и от переворота гравитации.</li>
-          <li>Автоподбор при касании игрока + burst из 6 частиц.</li>
+          <li>Жук 32×24, красные глаза светятся ярче в погоне, лапы перебирают по скорости.</li>
+          <li>Ползёт по пещерам в радиусе 5 тайлов от дома, перепрыгивает уступы.</li>
+          <li>Раненый (&lt; 20 %) убегает — догнать можно, но не стоя на месте.</li>
         </ul>
       </div>
       <div class="card ok">
-        <h3><span class="dot"></span>HUD и отклик</h3>
+        <h3><span class="dot"></span>Прилив и хищник</h3>
         <ul class="tight">
-          <li>Три строки с иконками 10×10, цифры пульсируют 200 мс.</li>
-          <li>Частицы копания и пыль в процессе, подсказки «копать / тянуть / далеко».</li>
+          <li>В катастрофе жук тоже улетает вверх и цепляется за потолок вверх ногами.</li>
+          <li>Через 1.2 с отцепляется и бросается на игрока.</li>
+          <li>Если спрятаться под куполом — жук остаётся снаружи, но кусает подошедшего.</li>
         </ul>
       </div>
       <div class="card ok">
-        <h3><span class="dot"></span>Производительность</h3>
+        <h3><span class="dot"></span>BIOGEL</h3>
         <ul class="tight">
-          <li>Тайлы — в offscreen-буфере: в простое 0 <code>fillRect</code> в буфер и 1 <code>drawImage</code> за кадр.</li>
-          <li>Кадр p50 ≈ 4.8 мс, p95 ≈ 5.2 мс при 300+ телах.</li>
+          <li>Ярко-зелёный куб 12×12 с пульсирующим ореолом и зелёная строка в HUD.</li>
+          <li>4 шт. лежат в пещерах — за ними надо спускаться, риск того стоит.</li>
+          <li><code>H</code> при полном здоровье не тратит гель, а пишет «здоровье полное».</li>
         </ul>
       </div>
       <div class="card ok">
-        <h3><span class="dot"></span>Гравитация Milestone 0</h3>
+        <h3><span class="dot"></span>Прилив стал настоящим</h3>
         <ul class="tight">
-          <li>Переворот работает: игрок встаёт на потолочную плиту, не застревает в ней.</li>
-          <li>Дропы и ящики тоже падают вверх и не проваливаются сквозь плиту.</li>
+          <li>10 % незащищённых построек в секунду, минимум 2: 20 блоков → 2/с, 100 блоков → 10/с.</li>
+          <li>В панели фазы видно «без защиты: N (−K/с)» — K это реальная скорость.</li>
+          <li>За 25 с катастрофы незащищённая база из 100 блоков теряет ~92 %.</li>
         </ul>
       </div>
     </div>
   </section>
 
-  <!-- ------------------------------------------------------------ дефекты -->
   <section id="defects">
-    <h2><span class="num">03</span>Что не работает / где неприятно</h2>
+    <h2><span class="num">04</span>Дефекты и неприятности</h2>
 
     <div class="grid g2">
       <div class="card bad">
-        <h3><span class="dot"></span>ЛКМ у ног перехватывает дроп</h3>
+        <h3><span class="dot"></span>Прилив не убивает, а бьёт по 30</h3>
         <ul class="tight">
-          <li>Приоритет у тела: клик по дропу — телекинез, а не копание. Под собой копать капризно.</li>
-          <li>Развести: копать — ЛКМ, телекинез — ПКМ, толчок — Shift+ПКМ.</li>
+          <li>Вылет за мир = −30 и телепорт обратно. За одну катастрофу можно влететь 4 раза.</li>
+          <li>Два вылета подряд при HP 60 → смерть без шанса понять, что произошло.</li>
+          <li>Кандидат: −30 при первом вылете, дальше урон растёт (30 / 45 / 60).</li>
         </ul>
       </div>
       <div class="card bad">
-        <h3><span class="dot"></span>Дропы слипаются в полосу</h3>
+        <h3><span class="dot"></span>Укрытие требует и купола, и потолка</h3>
         <ul class="tight">
-          <li>50+ дропов лежат вплотную и читаются как серая лента; <code>DIRT</code> сливается с землёй.</li>
-          <li>Обводка 1 px + магнит подбора 1.5 тайла.</li>
+          <li>По спеке: «под потолком внутри купола». На открытом полу купол не спасает.</li>
+          <li>Найти такое место в первую катастрофу почти нереально — нужно строить заранее.</li>
+          <li>Подсказка в HUD («под куполом» / «открыто») появилась, но её замечают поздно.</li>
         </ul>
       </div>
       <div class="card warn">
-        <h3><span class="dot"></span>Дропы копятся на потолке</h3>
+        <h3><span class="dot"></span>Хищник в приливе почти безвреден</h3>
         <ul class="tight">
-          <li>После переворота ресурс падает вверх и остаётся там — физика честная, ресурс теряется.</li>
+          <li>Он висит на потолке и рывком уходит вниз, но мировая гравитация тянет его обратно.</li>
+          <li>Укус возможен только в короткое окно касания.</li>
+          <li>Сейчас это атмосфера, а не угроза — решается отдельным «прилипанием» к игроку.</li>
         </ul>
       </div>
       <div class="card warn">
-        <h3><span class="dot"></span>Тяжёлые тайлы не отличаются на ощупь</h3>
+        <h3><span class="dot"></span>Ящик-оружие требует скорости</h3>
         <ul class="tight">
-          <li><code>STONE</code> и <code>FERRITE</code> просто дольше. Нужна микро-тряска на последних 20 %.</li>
+          <li>Урон только если ящик летит быстрее 260 px/s, иначе жук невредим.</li>
+          <li>Попасть телекинезом по ползущему жуку — навык, но 2 удара из 3 теряются в молоко.</li>
+          <li>Кандидат: разрешить урон от брошенного ящика без разгона.</li>
+        </ul>
+      </div>
+      <div class="card warn">
+        <h3><span class="dot"></span>Смерть не возвращает на «последнюю землю»</h3>
+        <ul class="tight">
+          <li>По спеке «старт / последняя точка респавна», но чекпоинтов нет — всегда старт.</li>
+          <li>В глубокой пещере смерть = долгая дорога обратно.</li>
+        </ul>
+      </div>
+      <div class="card warn">
+        <h3><span class="dot"></span>Нет звука</h3>
+        <ul class="tight">
+          <li>Укус, смерть, лечение — только визуальные сигналы. Звук требует ассетов.</li>
         </ul>
       </div>
     </div>
   </section>
 
-  <!-- ------------------------------------------------------------ скоуп -->
   <section id="scope">
-    <h2><span class="num">04</span>Не соответствует скоупу</h2>
+    <h2><span class="num">05</span>Скоуп</h2>
     <table>
-      <thead>
-        <tr><th>Что</th><th>Почему так</th><th>Что делать</th></tr>
-      </thead>
+      <thead><tr><th>Что</th><th>Почему так</th><th>Что делать</th></tr></thead>
       <tbody>
         <tr>
-          <td><b>Собран Milestone 0</b><br><span class="muted sm">персонаж, физика, переворот, телекинез, ящики</span></td>
-          <td>В репозитории лежал только <code>README.md</code> — прототипа 0 не было, расширять было нечего.
-              Без тайлового мира копать нечего, поэтому база вошла в 1A.</td>
-          <td>Либо принять как «1A с базой», либо прислать Milestone 0 — сведу управление и ощущение 1:1.</td>
+          <td><b>Урон от падения не работает в приливе</b><br><span class="muted sm">уточнение спеки</span></td>
+          <td>В катастрофе игрока швыряет о верхнюю плиту на 1100 px/s. Если считать это падением,
+              к 30 от прилива добавляется ещё 30 — смерть за один вылет.</td>
+          <td>Оставил: в приливе урон даёт только прилив. Прошу подтвердить.</td>
         </tr>
         <tr>
-          <td><b>Масштаб камеры 2×</b><br><span class="muted sm">параметр сверх задания</span></td>
-          <td>При 32 px и 1:1 на 1280 px видно 40 тайлов, мир читается мелкой сеткой. С 2× тайл становится клеткой.</td>
-          <td>Считаю обязательным, но это меняет «сколько мира видно». Решается одной константой <code>CFG.camera.zoom</code>.</td>
+          <td><b>Укрытие считается по последней точке на земле</b><br><span class="muted sm">иначе укрытие не сработает никогда</span></td>
+          <td>Игрока уже вынесло за мир, когда мы проверяем укрытие. По текущей позиции ответ всегда «нет».</td>
+          <td>Проверяю купол и потолок в точке, где он стоял. Это единственное прочтение, при котором правило работает.</td>
         </tr>
         <tr>
-          <td><b>Подсказки и кольцо радиуса</b><br><span class="muted sm">обучение в игре</span></td>
-          <td>Прогресс-бар и радиус без пояснения читались не сразу; кольцо показывается 0.9 с после переворота.</td>
-          <td>Если лишнее — убрать <code>drawRadius</code> и подписи у курсора.</td>
+          <td><b>Хищник «падает» на игрока сквозь прилив</b><br><span class="muted sm">4.2 против физики</span></td>
+          <td>Спека: «цепляется за потолок и падает на игрока». Мир при этом тянет всё вверх.</td>
+          <td>Через 1.2 с висения даю рывок вниз (340 px/s) — он реально достаёт игрока. Прошу подтвердить или заменить на «плюётся сверху».</td>
+        </tr>
+        <tr>
+          <td><b>BIOGEL как отдельный предмет, не тайл</b><br><span class="muted sm">техническое</span></td>
+          <td>Иначе зелёный куб можно копать и строить из него.</td>
+          <td>Ничего не нужно, просто фиксирую.</td>
         </tr>
       </tbody>
     </table>
   </section>
 
-  <!-- ------------------------------------------------------------ до 1B -->
-  <section id="mustfix">
-    <h2><span class="num">05</span>Чинить до 1B</h2>
-    <table>
-      <thead><tr><th>Приоритет</th><th>Задача</th><th>Почему до 1B</th></tr></thead>
-      <tbody>
-        <tr><td><span class="pill bad">must</span></td>
-          <td>Развести ЛКМ / ПКМ</td>
-          <td>В 1B на ЛКМ добавится постановка блока — станет три действия на одной кнопке.</td></tr>
-        <tr><td><span class="pill bad">must</span></td>
-          <td>Магнит подбора 1.5 тайла + обводка</td>
-          <td>Убирает «ленту» дропов и потерю ресурса на потолке.</td></tr>
-        <tr><td><span class="pill warn">should</span></td>
-          <td><code>DIRT</code>-дроп не видно на земле</td>
-          <td>Накопленное теряется на фоне породы.</td></tr>
-        <tr><td><span class="pill warn">should</span></td>
-          <td>Подтвердить радиус копания</td>
-          <td>В 1B радиус стройки 5 — мерить так же.</td></tr>
-        <tr><td><span class="pill">nice</span></td>
-          <td>Микро-тряска, звук</td>
-          <td>Звук — отдельная итерация, нужны ассеты.</td></tr>
-      </tbody>
-    </table>
-  </section>
-
-  <!-- ------------------------------------------------------------ вопросы -->
   <section id="questions">
     <h2><span class="num">06</span>Запросы ревью</h2>
     <div class="grid g2">
       <div class="card">
-        <h3>1. Сколько тайлов по горизонтали?</h3>
-        <p class="sm muted">Сейчас ≈20. <code>CFG.camera.zoom</code>.</p>
+        <h3>1. AI: что было сложнее всего</h3>
+        <p class="sm muted">Не состояния, а прилив. Один и тот же жук должен ползти, лететь вверх и «падать» вниз.
+        Пришлось ввести HANG как пятое состояние и рывок.</p>
       </div>
       <div class="card">
-        <h3>2. Провисание породы?</h3>
-        <p class="sm muted">Если да — 1B придётся строить с опорой у стены.</p>
+        <h3>2. Смерть — «моя вина»?</h3>
+        <p class="sm muted">В пещере — да: полез к жуку без геля. От прилива — нет: вылет за мир выглядит как баг,
+        даже когда это правило.</p>
       </div>
       <div class="card">
-        <h3>3. Дропы на потолке терпим?</h3>
-        <p class="sm muted">Магнит подбора решает, но это уже качество жизни.</p>
+        <h3>3. 10 %/с убивает стройку?</h3>
+        <p class="sm muted">Незащищённую — да, за 25 с остаётся 7 %. С якорем — нет. Так и задумано, но это уже
+        не «подлатать», а «строить заново».</p>
       </div>
       <div class="card">
-        <h3>4. Радиус от центра или от ног?</h3>
-        <p class="sm muted">Сейчас от центра. В 1B стройка — 5 тайлов: мерить так же?</p>
+        <h3>4. Нужен ли чекпоинт?</h3>
+        <p class="sm muted">Сейчас респавн только на старте. В пещере это 30 с дороги.</p>
       </div>
       <div class="card">
-        <h3>5. Блок в воздухе?</h3>
-        <p class="sm muted">Главный вопрос к 1B: ставить тайл без опоры можно?</p>
+        <h3>5. Ящик как оружие — хватает?</h3>
+        <p class="sm muted">2 удара по 15 требуют попасть дважды. Может, дать 30 за удар, но раз в 3 с?</p>
+      </div>
+      <div class="card">
+        <h3>6. Три хищника или один?</h3>
+        <p class="sm muted">Сейчас 3 в 200×100 тайлов — встреча редкая. Больше — страшнее, но и награда выше.</p>
       </div>
     </div>
   </section>
 
-  <!-- ------------------------------------------------------------ скриншоты -->
   <section id="shots">
     <h2><span class="num">07</span>Скриншоты</h2>
     <div class="shots" id="shot-grid">
       <figure class="shot">
-        <img src="screenshots/01-start.png" alt="Старт: арена, ящики, HUD" loading="lazy">
-        <figcaption><b>Старт</b>Арена, три ящика, HUD.</figcaption>
+        <img src="screenshots/13-hud-health.png" alt="Полоска здоровья в HUD" loading="lazy">
+        <figcaption><b>Здоровье</b>Раненый игрок, четвёртая строка BIOGEL.</figcaption>
       </figure>
       <figure class="shot">
-        <img src="screenshots/02-digging.png" alt="Копание тайла земли" loading="lazy">
-        <figcaption><b>Копание</b>Заливка, трещины, полоса прогресса.</figcaption>
+        <img src="screenshots/13b-crawler.png" alt="Два хищника на поверхности" loading="lazy">
+        <figcaption><b>Хищники</b>Погоня и побег: полоска HP у раненого.</figcaption>
       </figure>
       <figure class="shot">
-        <img src="screenshots/02b-digging-crop.png" alt="Крупный план прогресса копания" loading="lazy">
-        <figcaption><b>Копание — крупно</b>Прогресс читается без инструкции.</figcaption>
+        <img src="screenshots/13d-cave-crawler.png" alt="Хищник в пещере и биогель" loading="lazy">
+        <figcaption><b>Пещера</b>Там, где живёт жук и лежит BIOGEL.</figcaption>
       </figure>
       <figure class="shot">
-        <img src="screenshots/03-hud.png" alt="HUD с накопленными ресурсами" loading="lazy">
-        <figcaption><b>HUD</b>Иконки и пульсация цифры.</figcaption>
+        <img src="screenshots/13c-tide-hang.png" alt="Хищник на потолке во время прилива" loading="lazy">
+        <figcaption><b>Прилив</b>Жук на потолке, HUD: «открыто».</figcaption>
       </figure>
       <figure class="shot">
-        <img src="screenshots/04-drops.png" alt="55 физических тел на полу" loading="lazy">
-        <figcaption><b>Худший кадр</b>55 тел: дропы слипаются в полосу.</figcaption>
+        <img src="screenshots/14-death.png" alt="Экран смерти" loading="lazy">
+        <figcaption><b>Смерть</b>Красный экран и список потерь.</figcaption>
       </figure>
       <figure class="shot">
-        <img src="screenshots/05-telekinesis.png" alt="Захват ящика телекинезом" loading="lazy">
-        <figcaption><b>Телекинез</b>Трос и подсветка захвата.</figcaption>
+        <img src="screenshots/09-anchor.png" alt="Гравитационный якорь" loading="lazy">
+        <figcaption><b>M2</b>Купол якоря и защищённые постройки.</figcaption>
       </figure>
       <figure class="shot">
-        <img src="screenshots/06-ceiling.png" alt="Игрок на потолке после переворота гравитации" loading="lazy">
-        <figcaption><b>Потолок</b>Игрок на плите, дропы ушли вверх.</figcaption>
+        <img src="screenshots/11-catastrophe.png" alt="Катастрофа" loading="lazy">
+        <figcaption><b>M2</b>Прилив: гравитация вверх.</figcaption>
       </figure>
       <figure class="shot">
-        <img src="screenshots/07-too-far.png" alt="Курсор вне радиуса копания" loading="lazy">
-        <figcaption><b>Слишком далеко</b>Вне радиуса 4 тайла.</figcaption>
-      </figure>
-      <figure class="shot">
-        <img src="screenshots/08-cave.png" alt="Пещера после раскопок" loading="lazy">
-        <figcaption><b>После раскопок</b>Мир меняется по-настоящему.</figcaption>
+        <img src="screenshots/12-aftermath.png" alt="Последствия прилива" loading="lazy">
+        <figcaption><b>M2</b>Последствия и новый феррит.</figcaption>
       </figure>
     </div>
   </section>
 
-  <!-- ------------------------------------------------------------ как проверено -->
   <section id="verify">
     <h2><span class="num">08</span>Как проверено</h2>
-    <pre><span class="c"># 45 автопроверок логики и физики</span>
+    <pre><span class="c"># 129 автопроверок логики, физики и критериев M3</span>
 cd tools
-npm i @napi-rs/canvas      <span class="c"># только для скриншотов; игра зависимостей не имеет</span>
-node verify.mjs            <span class="c"># → 45/45 проверок пройдено</span>
-node screenshots.mjs       <span class="c"># → 9 кадров в ../screenshots</span></pre>
+node verify.mjs            <span class="c"># → 129/129 проверок пройдено</span>
+node screenshots.mjs       <span class="c"># → кадры в ../screenshots</span>
+node perf.mjs              <span class="c"># → p50 6.3 мс, p95 7.2 мс на кадр</span></pre>
 
     <div class="grid g2" style="margin-top:14px">
       <div class="card">
-        <h3>Что покрыто проверками</h3>
+        <h3>Что покрыто</h3>
         <ul class="tight sm">
-          <li>Генерация мира, пустые верхние ряды, потолочная плита.</li>
-          <li>Ходьба, прыжок, границы мира, отсутствие застревания в тайлах.</li>
-          <li>Тайминги копания по типам, сброс прогресса, «далеко».</li>
-          <li>Спавн, падение, сон, подбор на ходу, частицы, пульсация HUD.</li>
-          <li>Телекинез ящика и дропа, падение ящика без опоры.</li>
-          <li>Переворот гравитации: потолок, прыжок, дропы вверх и сквозь плиту.</li>
-          <li>Буфер тайлов: 0 перерисовок в простое, 1 <code>drawImage</code> за кадр.</li>
+          <li>Здоровье, урон от падения по формуле, мягкое падение без урона.</li>
+          <li>Прилив: −30 без укрытия, 0 под куполом с потолком.</li>
+          <li>Смерть: −50 % ресурсов, респавн, неуязвимость, красный экран.</li>
+          <li>Хищник: спавн в пещерах, IDLE → AGGRO → FLEE, укус, урон от ящика, смерть.</li>
+          <li>BIOGEL: 4 на карте, <code>H</code> лечит на 40, без геля не лечит.</li>
+          <li>Прилив: 2 тайла на малой базе и 10 % на 60 постройках.</li>
+          <li>Регрессия M2: якорь, защита, сейв, цикл фаз, купол дугой.</li>
         </ul>
       </div>
       <div class="card">
         <h3>Чего проверки не делают</h3>
         <ul class="tight sm">
           <li>Не браузерный FPS: цифры — время JS+draw в headless.</li>
-          <li>Не ощущение: «щёлкает» ли копание — только руками.</li>
+          <li>Не проверяют, страшно ли в пещере: это только руками.</li>
         </ul>
       </div>
     </div>
@@ -449,11 +466,11 @@ node screenshots.mjs       <span class="c"># → 9 кадров в ../screenshot
     <div class="btnrow">
       <a class="btn ghost" href="gravity-void.html">Открыть игру</a>
       <a class="btn ghost" href="README.md">README</a>
+      <a class="btn ghost" href="M3.md">M3.md</a>
     </div>
-    <p>Ветка <code>arena/b1bb672b-game1</code> · задел под 1B: <code>CFG.hud.active</code>, <code>World.set</code>, <code>mineTile</code>, клавиши 1–4.</p>
+    <p>Ветка <code>arena/b1bb672b-game1</code> · M3: здоровье, хищник, BIOGEL, прилив 10 %/с.</p>
   </footer>
 </main>
-
 <script>
 // Страница ревью не должна быть пустой и не должна зависеть от игры:
 // всё, что ниже — только косметика поверх статического HTML и картинок.

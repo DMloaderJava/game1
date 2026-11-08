@@ -37,7 +37,7 @@ const sandbox = {
 sandbox.window.window = sandbox.window;
 sandbox.globalThis = sandbox;
 const ctx = vm.createContext(sandbox);
-SRC += '\n;globalThis.__game = game; globalThis.__CFG = CFG; globalThis.__TILE = TILE; globalThis.__cls = { Drop, Crate };';
+SRC += '\n;globalThis.__game = game; globalThis.__CFG = CFG; globalThis.__TILE = TILE; globalThis.__cls = { Drop, Crate }; globalThis.__clsM3 = { Crawler, Drop };';
 vm.runInContext(SRC, ctx, { filename: 'gravity-void.html' });
 
 const game = sandbox.__game;
@@ -147,4 +147,113 @@ for (let i = 0; i < 40; i++) {
 }
 frames(10);
 shot('08-cave');
+// ---------- M2: якорь и купол ----------
+game.resetWorld();
+frames(30);
+game.inventory.counts[TILE.FERRITE] = 9;
+game.inventory.counts[TILE.STONE] = 9;
+game.inventory.counts[TILE.DIRT] = 6;
+const aTx = Math.floor(P.cx / TS) + 3;
+const aTy = Math.floor((P.y + P.h - 0.001) / TS) - 1;
+game.anchors.push({ x: aTx, y: aTy, born: 0 });
+for (let i = 0; i < 6; i++) game.world.set(aTx - 2 + i, aTy, TILE.STONE, true);
+game.world.set(aTx, aTy - 1, TILE.STONE, true);
+game.world.set(aTx + 1, aTy - 1, TILE.STONE, true);
+game.tiles.flush();
+game.mode = 6;
+game.camera.snap(P);
+frames(40);
+shot('09-anchor');
+
+// вид с куполом и защищёнными постройками
+game.mode = 2;
+game.inventory.counts[TILE.STONE] = 9;
+for (let i = 0; i < 4; i++) game.world.set(aTx - 3 + i, aTy - 3, TILE.STONE, true);
+game.tiles.flush();
+frames(20);
+shot('09b-dome');
+game.mode = 6;
+
+// ---------- M2: WARNING ----------
+game.tide.setPhase(1);
+game.tide.applyPhase('WARNING');
+for (let i = 0; i < 90; i++) { game.skyWarn = Math.min(1, game.skyWarn + 0.04); frames(1); }
+shot('10-warning');
+
+// ---------- M2: CATASTROPHE ----------
+game.tide.setPhase(2);
+game.tide.applyPhase('CATASTROPHE');
+game.onPhaseChanged('CATASTROPHE');
+for (let i = 0; i < 120; i++) { game.skyCat = Math.min(1, game.skyCat + 0.05); frames(1); }
+shot('11-catastrophe');
+
+// ---------- M2: AFTERMATH ----------
+game.tide.setPhase(3);
+game.tide.applyPhase('AFTERMATH');
+game.rewardGiven = false;
+frames(30);
+game.skyCat = 0.15;
+shot('12-aftermath');
+
+// ---------- M3: здоровье, хищник, биогель ----------
+game.resetWorld();
+frames(40);
+// раненый игрок: полоска здоровья в HUD
+P.health = 55;
+P.hurtT = 0.4;
+game.hurtScreen = 0.3;
+game.inventory.counts[4] = 2;
+frames(2);
+shot('13-hud-health');
+
+// хищник вблизи, агрится: двое, один раненый
+game.crawlers.length = 0;
+const cm = new sandbox.__clsM3.Crawler(P.x + 120, P.y + P.h - 24);
+cm.state = 'AGGRO'; cm.dir = -1;
+const cm2 = new sandbox.__clsM3.Crawler(P.x - 150, P.y + P.h - 24);
+cm2.state = 'FLEE'; cm2.dir = 1; cm2.hp = 5; cm2.dir = -1;
+game.crawlers.push(cm, cm2);
+P.health = 80;
+frames(6);
+game.camera.snap(P);
+frames(1);
+shot('13b-crawler');
+
+// пещера: хищник и биогель там, где они живут
+const cavePy = (CFG.layers.skyRows + CFG.layers.ceilingRows + 6) * TS;
+P.x = 60 * TS; P.y = cavePy - P.h; P.vx = 0; P.vy = 0;
+game.crawlers.length = 0;
+const cCave = new sandbox.__clsM3.Crawler(61 * TS, cavePy - 24);
+cCave.state = 'AGGRO';
+game.crawlers.push(cCave);
+const gel2 = new sandbox.__clsM3.Drop(58 * TS, cavePy - 14, 4);
+gel2.sleeping = true;
+game.drops.push(gel2);
+P.gravityTarget = 1;
+game.camera.snap(P);
+frames(1);
+shot('13d-cave-crawler');
+
+// прилив: хищник висит на потолке, игрок внизу
+P.x = 60 * TS; P.y = (CFG.layers.skyRows + CFG.layers.ceilingRows + 6) * TS - P.h;
+game.crawlers.length = 0;
+const ch = new sandbox.__clsM3.Crawler(P.x + 60, P.y - 150);
+ch.state = 'HANG';
+game.crawlers.push(ch);
+game.tide.setPhase(2); game.tide.applyPhase('CATASTROPHE');
+game.skyCat = 1;
+P.health = 40; P.invuln = 99;
+frames(2);
+game.camera.snap(P);
+frames(1);
+shot('13c-tide-hang');
+
+// смерть: красный экран и потеря ресурсов
+game.tide.setPhase(0); game.tide.applyPhase('STABLE');
+game.inventory.counts[TILE.FERRITE] = 9;
+game.inventory.counts[TILE.STONE] = 6;
+P.health = 5; P.invuln = 0;
+game.damagePlayer(20, 'тест');
+frames(3);
+shot('14-death');
 console.log('done');

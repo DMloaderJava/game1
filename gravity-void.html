@@ -53,6 +53,9 @@
    ============================================================ */
 const TILE = { EMPTY: 0, DIRT: 1, STONE: 2, FERRITE: 3 };
 
+// BIOGEL — не тайл, а только предмет: id выше диапазона тайлов
+const ITEM = { BIOGEL: 4 };
+
 // Режимы ЛКМ: 1-3 материал, 4 копать, 5 снос, 6 якорь
 const MODE = { DIRT: TILE.DIRT, STONE: TILE.STONE, FERRITE: TILE.FERRITE, DIG: 4, DEMOLISH: 5, ANCHOR: 6 };
 
@@ -130,8 +133,9 @@ const CFG = {
     skyCatastrophe: [58, 14, 20],
     shakeWarning: 2,
     shakeCatastrophe: 4,
-    wreckInterval: 5,        // волна разрушения, с
-    wreckPerWave: 1,         // тайлов за волну
+    wreckInterval: 1,        // волна разрушения, с
+    wreckPerWave: 2,         // минимум тайлов за волну
+    wreckRatio: 0.1,         // плюс 10% от числа незащищённых построек
     aftermatterFerrite: [5, 10],
     aftermatterRadius: [30, 50],
     dropCullInterval: 0.5,
@@ -140,11 +144,49 @@ const CFG = {
 
   save: { key: 'gravity-void-save-v1', autosave: 10 },
 
+  // M3: здоровье и смерть
+  health: {
+    max: 100,
+    fallSpeed: 800,        // с какой скорости приземления начинается урон
+    fallDivisor: 10,       // урон = (скорость - fallSpeed) / fallDivisor
+    tideDamage: 30,        // урон при вылете за мир во время прилива
+    respawnInvuln: 2,      // секунды неуязвимости после респавна
+    flashTime: 0.45,       // красная вспышка HUD
+    hurtScreen: 0.35,      // покраснение экрана
+    loseRatio: 0.5         // доля ресурсов, теряемая при смерти
+  },
+
+  // M3: грави-хищник
+  crawler: {
+    w: 32, h: 24,
+    hp: 30,
+    speed: 70,             // px/s в режиме погони
+    idleSpeed: 28,
+    aggroRadius: 8,        // тайлов
+    attackRadius: 1,       // тайлов
+    biteDamage: 10,
+    biteCooldown: 1,
+    fleeHp: 0.2,           // доля здоровья для побега
+    idleRadius: 5,         // тайлов от точки спавна
+    count: 3,
+    crateDamage: 15,       // урон от удара ящиком
+    crateHitSpeed: 260,    // минимальная скорость ящика для урона
+    crateHitCooldown: 0.4,
+    gelChance: 0.5,        // шанс BIOGEL с трупа
+    gelOnMap: 4,           // сколько геля лежит в пещерах
+    ceilingHang: 1.2,      // сколько висит на потолке при приливе
+    lungeSpeed: 340,       // рывок с потолка в сторону игрока
+    gravity: 0.75          // доля обычной гравитации для хищника
+  },
+
+  biogel: { heal: 40, tint: 0.5 },
+
   // Ресурсы: цвет используется и в тайлах, и в дропах, и в HUD
   resources: [
     { id: TILE.DIRT, name: 'DIRT', color: '#6b4a2b', shade: '#49301b', light: '#946a3c' },
     { id: TILE.STONE, name: 'STONE', color: '#7a7a85', shade: '#53535d', light: '#a4a4b0' },
-    { id: TILE.FERRITE, name: 'FERRITE', color: '#4a7fbf', shade: '#2c4f78', light: '#8fbcf0' }
+    { id: TILE.FERRITE, name: 'FERRITE', color: '#4a7fbf', shade: '#2c4f78', light: '#8fbcf0' },
+    { id: ITEM.BIOGEL, name: 'BIOGEL', color: '#3fd66b', shade: '#218a3f', light: '#9bf7b4' }
   ],
 
   physics: { gravity: 2200, maxFall: 1150, maxStepPx: 10 },
@@ -202,7 +244,7 @@ const CFG = {
 
   particles: { max: 300, digMin: 3, digMax: 5, pickup: 6, life: 0.4, flip: 10 },
 
-  binds: ['KeyA', 'KeyD', 'Space', 'KeyF', 'Digit1', 'Digit2', 'Digit3',
+  binds: ['KeyA', 'KeyD', 'Space', 'KeyF', 'KeyH', 'Digit1', 'Digit2', 'Digit3',
           'Digit4', 'Digit5', 'Digit6', 'Escape', 'Backspace']
 };
 
@@ -681,6 +723,145 @@ class Drop extends PhysBody {
 }
 
 /* ============================================================
+   M3: Грави-хищник (Crawler)
+   ============================================================ */
+const CRAWLER_STATE = { IDLE: 'IDLE', AGGRO: 'AGGRO', FLEE: 'FLEE', HANG: 'HANG' };
+
+class Crawler extends PhysBody {
+  constructor(x, y) {
+    super(x, y, CFG.crawler.w, CFG.crawler.h);
+    this.hp = CFG.crawler.hp;
+    this.maxHp = CFG.crawler.hp;
+    this.state = CRAWLER_STATE.IDLE;
+    this.home = { x: x + this.w / 2, y: y + this.h / 2 };
+    this.biteT = 0;
+    this.hitT = 0;              // подсветка попадания
+    this.crateCd = 0;
+    this.dir = 1;
+    this.wanderT = 0;
+    this.wanderDir = 1;
+    this.legPhase = Math.random() * 6;
+    this.gravityScale = CFG.crawler.gravity;
+    this.hurtFlash = 0;
+    this.stuckHang = 0;
+  }
+
+  // Урон хищнику; возвращает true, если он умер
+  hurt(n, fromX) {
+    if (this.dead) return false;
+    this.hp -= n;
+    this.hurtFlash = 0.25;
+    this.hitT = 0.3;
+    if (fromX !== undefined) this.vx += Math.sign(this.cx - fromX) * 70;
+    if (this.hp <= 0) {
+      this.dead = true;
+      return true;
+    }
+    return false;
+  }
+
+  update(dt, game) {
+    const c = CFG.crawler;
+    const p = game.player;
+    const g = game.tide.worldGravity;
+
+    this.biteT = Math.max(0, this.biteT - dt);
+    this.crateCd = Math.max(0, this.crateCd - dt);
+    this.hitT = Math.max(0, this.hitT - dt);
+    this.hurtFlash = Math.max(0, this.hurtFlash - dt);
+
+    const distTiles = Math.hypot(p.cx - this.cx, p.cy - this.cy) / TS;
+    const hpRatio = this.hp / this.maxHp;
+
+    // --- состояние ---
+    const canSee = distTiles <= c.aggroRadius;
+    if (hpRatio < c.fleeHp && canSee) this.state = CRAWLER_STATE.FLEE;
+    else if (canSee && !p.dead) this.state = CRAWLER_STATE.AGGRO;
+    else this.state = CRAWLER_STATE.IDLE;
+
+    // Прилив: хищник улетает вверх и цепляется за потолок
+    if (game.tide.id === 'CATASTROPHE') {
+      const ceiling = this.findCeiling(game.world);
+      if (ceiling !== null && Math.abs(this.y - ceiling) < 26) {
+        this.state = CRAWLER_STATE.HANG;
+        this.stuckHang = c.ceilingHang;
+        this.vy = 0;
+        this.vx *= 0.6;
+      } else {
+        this.wake();
+      }
+    } else if (this.state === CRAWLER_STATE.HANG) {
+      this.state = CRAWLER_STATE.IDLE;
+    }
+
+    // --- движение ---
+    let wantVx = 0;
+    if (this.state === CRAWLER_STATE.HANG) {
+      // Держится за потолок и подтягивается в сторону игрока: потом свалится на него
+      wantVx = Math.sign(p.cx - this.cx) * c.speed * 0.45;
+      this.stuckHang = Math.max(0, this.stuckHang - dt);
+      if (this.stuckHang <= 0) {
+        // Отцепляется и бросается на игрока — «падает» на него, даже если мир тянет вверх
+        this.state = CRAWLER_STATE.AGGRO;
+        this.vx = Math.sign(p.cx - this.cx) * c.speed;
+        this.vy = Math.sign(p.cy - this.cy) * c.lungeSpeed;
+      }
+    } else if (this.state === CRAWLER_STATE.AGGRO) {
+      wantVx = Math.sign(p.cx - this.cx) * c.speed;
+    } else if (this.state === CRAWLER_STATE.FLEE) {
+      wantVx = -Math.sign(p.cx - this.cx) * c.speed * 1.15;
+    } else {
+      // IDLE: случайное блуждание в радиусе от дома
+      this.wanderT -= dt;
+      if (this.wanderT <= 0) {
+        this.wanderT = 1.2 + Math.random() * 2;
+        this.wanderDir = Math.random() < 0.5 ? -1 : 1;
+        if (Math.abs(this.cx - this.home.x) > c.idleRadius * TS) {
+          this.wanderDir = Math.sign(this.home.x - this.cx);
+        }
+      }
+      wantVx = this.wanderDir * c.idleSpeed;
+    }
+
+    if (this.state !== CRAWLER_STATE.HANG) {
+      const accel = this.onGround ? 900 : 400;
+      const dv = wantVx - this.vx;
+      this.vx += clamp(dv, -accel * dt, accel * dt);
+      if (Math.abs(this.vx) > 4) this.dir = Math.sign(this.vx);
+    }
+
+    // Прыжок через препятствие, если упёрлись
+    if (Math.abs(wantVx) > 1 && Math.abs(this.vx) < 6 && this.onGround) {
+      this.jumpT = (this.jumpT || 0) + dt;
+      if (this.jumpT > 0.35) {
+        this.vy = -520 * (g < 0 ? -1 : 1);
+        this.jumpT = 0;
+      }
+    } else {
+      this.jumpT = 0;
+    }
+
+    // --- укус ---
+    if (this.state === CRAWLER_STATE.AGGRO && distTiles <= c.attackRadius && this.biteT <= 0) {
+      this.biteT = c.biteCooldown;
+      game.damagePlayer(c.biteDamage, 'укус хищника');
+      game.particles.bite(p.cx, p.cy);
+    }
+
+    this.step(dt, game.world, g);
+    if (this.onGround) this.legPhase += dt * (Math.abs(this.vx) > 10 ? 12 : 2);
+  }
+
+  findCeiling(world) {
+    const ty0 = Math.floor((this.y - 4) / TS);
+    for (let ty = ty0; ty >= 0; ty--) {
+      if (world.solid(Math.floor(this.cx / TS), ty)) return (ty + 1) * TS;
+    }
+    return null;
+  }
+}
+
+/* ============================================================
    Сохранение: тайлы + постройки + якоря + инвентарь + фаза
    ============================================================ */
 const Save = {
@@ -824,6 +1005,14 @@ class Player {
     this.jumpBuffer = 0;
     this.facing = 1;
     this.walkPhase = 0;
+
+    // M3
+    this.health = CFG.health.max;
+    this.maxHealth = CFG.health.max;
+    this.hurtT = 0;         // красная вспышка HUD
+    this.invuln = 0;        // неуязвимость после респавна
+    this.dead = false;
+    this.lastImpact = 0;
   }
 
   get cx() { return this.x + this.w / 2; }
@@ -867,6 +1056,10 @@ class Player {
       this.onGround = false;
     }
 
+    // Скорость перед шагом — по ней считаем силу удара о землю
+    const preVy = this.vy;
+    const wasOnGround = this.onGround;
+
     // --- гравитация и перемещение ---
     // При катастрофе мировая гравитация тянет вверх; F даёт личный +1 (контр-манипуляция)
     const personal = this.gravityTarget;          // куда игрок хочет «падать»
@@ -875,6 +1068,10 @@ class Player {
                     -CFG.physics.maxFall, CFG.physics.maxFall);
     this.onGround = false;
     moveAndCollide(world, this, dt, gEff >= 0 ? 1 : -1);
+
+    // Жёсткое приземление: скорость падения фиксируем до столкновения
+    this.lastImpact = 0;
+    if (!wasOnGround && this.onGround) this.lastImpact = Math.abs(preVy);
 
     // --- ящики твёрдые для игрока ---
     for (const c of crates) this.pushOutOf(c, world);
@@ -969,6 +1166,36 @@ class Particles {
       const sp = 60 + rnd() * 140;
       this.add(cx, cy, Math.cos(a) * sp, Math.sin(a) * sp, 3 + Math.floor(rnd() * 3),
                i % 2 ? m.color : m.light, 0.6);
+    }
+  }
+
+  hurt(cx, cy) {
+    for (let i = 0; i < 10; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 70 + Math.random() * 110;
+      this.add(cx, cy, Math.cos(a) * sp, Math.sin(a) * sp, 3, i % 2 ? '#ff5b5b' : '#ffb3b3', 0.45);
+    }
+  }
+
+  heal(cx, cy) {
+    for (let i = 0; i < 14; i++) {
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * 1.6;
+      this.add(cx, cy, Math.cos(a) * 60, Math.sin(a) * 120, 3, i % 2 ? '#9bf7b4' : '#3fd66b', 0.7, true);
+    }
+  }
+
+  kill(cx, cy, color) {
+    for (let i = 0; i < 16; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 80 + Math.random() * 160;
+      this.add(cx, cy, Math.cos(a) * sp, Math.sin(a) * sp, 3, i % 2 ? color : '#3fd66b', 0.6);
+    }
+  }
+
+  bite(cx, cy) {
+    for (let i = 0; i < 6; i++) {
+      const a = Math.random() * Math.PI * 2;
+      this.add(cx, cy, Math.cos(a) * 120, Math.sin(a) * 120, 2, '#ff8a3d', 0.28);
     }
   }
 
@@ -1188,6 +1415,16 @@ class Game {
     }
 
     this.drops = [];
+    this.crawlers = [];
+    this.deathT = 0;
+    this.deaths = 0;
+    this.hurtScreen = 0;
+    this.noticeT = 0;
+    this.noticeText = '';
+    this.noticeColor = '#e8f2ff';
+    this.lastDeathLost = null;
+    this.spawnCrawlers();
+    this.spawnCaveGel();
     this.dig = null;               // { tx, ty, type, progress, max }
     this.digDustT = 0;
     this.tooFarT = 0;
@@ -1476,6 +1713,192 @@ class Game {
     return false;
   }
 
+  /* ---------- M3: спавн хищников и биогеля ---------- */
+
+  // Свободное место в зале: есть твёрдый пол и 2 тайла воздуха над ним
+  freeCaveSpot(tx, ty) {
+    const w = this.world;
+    if (w.solid(tx, ty) || w.solid(tx, ty - 1) || w.solid(tx, ty - 2)) return false;
+    if (!w.solid(tx, ty + 1)) return false;
+    return true;
+  }
+
+  spawnCrawlers() {
+    const w = this.world;
+    const caveTop = CFG.layers.skyRows + CFG.layers.ceilingRows;
+    const caveBottom = caveTop + CFG.layers.caveRows;
+    let placed = 0;
+    let guard = 0;
+    while (placed < CFG.crawler.count && guard++ < 4000) {
+      const tx = 20 + Math.floor(this.rnd() * (w.cols - 40));
+      const ty = caveTop + 2 + Math.floor(this.rnd() * (caveBottom - caveTop - 3));
+      if (!this.freeCaveSpot(tx, ty)) continue;
+      // не рядом с точкой спавна игрока (не меньше 8 тайлов)
+      if (Math.abs(tx - CFG.spawn.playerTileX) < 12) continue;
+      const c = new Crawler(tx * TS + (TS - CFG.crawler.w) / 2, (ty + 1) * TS - CFG.crawler.h);
+      c.home = { x: c.cx, y: c.cy };
+      this.crawlers.push(c);
+      placed++;
+    }
+  }
+
+  spawnCaveGel() {
+    const w = this.world;
+    const caveTop = CFG.layers.skyRows + CFG.layers.ceilingRows;
+    const caveBottom = caveTop + CFG.layers.caveRows;
+    let placed = 0;
+    let guard = 0;
+    while (placed < CFG.crawler.gelOnMap && guard++ < 4000) {
+      const tx = 8 + Math.floor(this.rnd() * (w.cols - 16));
+      const ty = caveTop + 2 + Math.floor(this.rnd() * (caveBottom - caveTop - 3));
+      if (!this.freeCaveSpot(tx, ty)) continue;
+      const d = new Drop(tx * TS + (TS - CFG.drop.size) / 2, (ty + 1) * TS - CFG.drop.size, ITEM.BIOGEL);
+      d.sleeping = true;
+      this.drops.push(d);
+      placed++;
+    }
+  }
+
+  // Урон хищникам от летящих ящиков: сила удара = скорость ящика
+  updateCrawlerHits() {
+    const c = CFG.crawler;
+    for (const cr of this.crates) {
+      const sp = Math.hypot(cr.vx, cr.vy);
+      if (sp < c.crateHitSpeed) continue;
+      for (const cw of this.crawlers) {
+        if (cw.dead || cw.crateCd > 0) continue;
+        if (!overlap(cr, cw, 2)) continue;
+        cw.crateCd = c.crateHitCooldown;
+        const killed = cw.hurt(c.crateDamage, cr.cx);
+        cr.vx *= 0.4;
+        cr.vy *= 0.4;
+        this.particles.bite(cw.cx, cw.cy);
+        if (killed) this.onCrawlerKilled(cw);
+      }
+    }
+  }
+
+  onCrawlerKilled(cw) {
+    this.particles.kill(cw.cx, cw.cy, RES[TILE.FERRITE].color);
+    this.camera.shake(1);
+    if (this.rnd() < CFG.crawler.gelChance) {
+      const d = new Drop(cw.cx - CFG.drop.size / 2, cw.cy - CFG.drop.size / 2, ITEM.BIOGEL);
+      d.vx = (this.rnd() - 0.5) * 90;
+      d.vy = -160;
+      d.fresh = 2.5;
+      this.drops.push(d);
+    }
+  }
+
+  updateCrawlers(dt) {
+    for (const cw of this.crawlers) {
+      if (cw.dead) continue;
+      cw.update(dt, this);
+      // За пределы мира хищника не пускаем — иначе он улетает навсегда
+      cw.x = clamp(cw.x, 0, this.world.cols * TS - cw.w);
+      if (cw.y < -TS * 2) { cw.y = -TS * 2; cw.vy = Math.max(cw.vy, 0); }
+    }
+    this.crawlers = this.crawlers.filter((c) => !c.dead);
+    this.updateCrawlerHits();
+  }
+
+  /* ---------- M3: здоровье и смерть ---------- */
+
+  damagePlayer(amount, source) {
+    const p = this.player;
+    if (p.invuln > 0 || p.dead || amount <= 0) return;
+    p.health = Math.max(0, p.health - amount);
+    p.hurtT = CFG.health.flashTime;
+    this.hurtScreen = CFG.health.hurtScreen;
+    this.camera.shake(Math.min(1, amount / 30));
+    this.particles.hurt(p.cx, p.cy);
+    this.lastDamage = source || 'урон';
+    if (p.health <= 0) this.killPlayer(source);
+  }
+
+  killPlayer(source) {
+    const p = this.player;
+    p.dead = true;
+    this.deathT = 1.2;               // экран красный, короткая пауза
+    this.deaths = (this.deaths || 0) + 1;
+
+    // Половина ресурсов теряется — округление вниз
+    const lost = {};
+    for (const r of CFG.resources) {
+      const c = this.inventory.counts[r.id] || 0;
+      const l = Math.floor(c * CFG.health.loseRatio);
+      if (l > 0) { this.inventory.counts[r.id] = c - l; lost[r.name] = l; }
+    }
+    this.lastDeathLost = lost;
+    const lostText = Object.keys(lost).map((k) => k + ' −' + lost[k]).join(' · ') || 'нет';
+    // Смерть — событие, которое обязано быть в консоли
+    console.log('[M3] смерть (' + (source || 'урон') + '), потеряно: ' + lostText + ', респавн на старте');
+    this.respawn();
+  }
+
+  respawn() {
+    const p = this.player;
+    p.health = p.maxHealth;
+    p.dead = false;
+    p.invuln = CFG.health.respawnInvuln;
+    p.vx = 0;
+    p.vy = 0;
+    p.gravityTarget = 1;
+    p.x = CFG.spawn.playerTileX * TS + (TS - p.w) / 2;
+    p.y = this.world.surfaceRow * TS - p.h;
+    this.camera.snap(p);
+    this.particles.place(p.cx, p.cy);
+  }
+
+  healPlayer(n) {
+    const p = this.player;
+    if (p.dead) return false;
+    if ((this.inventory.counts[ITEM.BIOGEL] || 0) <= 0) {
+      this.denyT = CFG.build.denyHold;
+      this.notice('нет BIOGEL', '#ff8a8a');
+      return false;
+    }
+    if (p.health >= p.maxHealth) {
+      this.notice('здоровье полное', '#9bf7b4');
+      return false;
+    }
+    this.inventory.spend(ITEM.BIOGEL, 1);
+    p.health = Math.min(p.maxHealth, p.health + CFG.biogel.heal);
+    this.particles.heal(p.cx, p.cy);
+    this.notice('+' + CFG.biogel.heal + ' HP', '#9bf7b4');
+    return true;
+  }
+
+  notice(text, color) {
+    this.noticeText = text;
+    this.noticeColor = color || '#e8f2ff';
+    this.noticeT = 1.4;
+  }
+
+  // Считается ли точка укрытой от прилива: под потолком внутри купола якоря
+  isShelteredAt(x, y, w, h) {
+    const p = this.player;
+    const bw = w === undefined ? p.w : w;
+    const bh = h === undefined ? p.h : h;
+    if (!this.anchors.length) return false;
+    if (!this.inAnyDome(x + bw / 2, y + bh / 2)) return false;
+    // ищем твёрдый тайл над головой в пределах 8 тайлов
+    const tx0 = Math.floor(x / TS);
+    const tx1 = Math.floor((x + bw) / TS);
+    const from = Math.floor(y / TS) - 1;
+    for (let ty = from; ty >= Math.max(0, from - 8); ty--) {
+      for (let tx = tx0; tx <= tx1; tx++) {
+        if (this.world.solid(tx, ty)) return true;
+      }
+    }
+    return false;
+  }
+
+  isSheltered() {
+    const p = this.player;
+    return this.isShelteredAt(p.x, p.y, p.w, p.h);
+  }
+
   flipGravity() {
     const p = this.player;
     if (this.tide.id === 'CATASTROPHE') {
@@ -1700,11 +2123,30 @@ class Game {
     this.player.update(dt, inp, this.world, this.crates, g);
     this.gravitySign = this.player.gravitySign;
 
+    // M3: урон от жёсткого приземления.
+    // В приливе удар о поверхность — это уже наказание прилива (30), иначе смерть была бы двойной
+    if (this.tide.id !== 'CATASTROPHE' && this.player.lastImpact > CFG.health.fallSpeed) {
+      const dmg = (this.player.lastImpact - CFG.health.fallSpeed) / CFG.health.fallDivisor;
+      this.damagePlayer(Math.round(dmg), 'падение');
+    }
+
+    // M3: таймеры урона/неуязвимости/смерти
+    const p = this.player;
+    p.hurtT = Math.max(0, p.hurtT - dt);
+    p.invuln = Math.max(0, p.invuln - dt);
+    this.hurtScreen = Math.max(0, this.hurtScreen - dt);
+    this.deathT = Math.max(0, this.deathT - dt);
+    this.noticeT = Math.max(0, this.noticeT - dt);
+
+    // H — выпить биогель
+    if (inp.consume('KeyH')) this.healPlayer(CFG.biogel.heal);
+
     // Прилив управляет телами жёстко: при катастрофе они летят вверх
     // Тела полностью подчинены мировой гравитации прилива
     for (const c of this.crates) c.step(dt, this.world, g);
     for (const d of this.drops) d.step(dt, this.world, g);
 
+    this.updateCrawlers(dt);
     this.updateMouse(dt);
     this.collectDrops();
 
@@ -1739,6 +2181,15 @@ class Game {
     this.player.vx = 0;
     this.player.vy = 0;
     this.player.gravityTarget = 1;
+    this.player.health = this.player.maxHealth;
+    this.player.dead = false;
+    this.player.invuln = CFG.health.respawnInvuln;
+    this.crawlers = [];
+    this.spawnCrawlers();
+    this.spawnCaveGel();
+    this.deaths = 0;
+    this.deathT = 0;
+    this.hurtScreen = 0;
     this.tide.setPhase(0);
     this.tide.applyPhase('STABLE');
     this.camera.snap(this.player);
@@ -1807,6 +2258,9 @@ class Game {
 
     // Телепорт игрока, если улетел за верх мира
     if (this.player.y + this.player.h < 0) this.rescuePlayer();
+
+    // M3: если прилив затянул игрока под купол — урона нет, но вылет всё равно лечим
+    if (this.player.y > this.world.rows * TS + TS * 4) this.rescuePlayer();
 
     const events = tide.update(dt, this);
     tide.applyPhase(tide.id);
@@ -1896,8 +2350,11 @@ class Game {
     if (!candidates.length) return 0;
 
     // Вне кадра тоже ломаем: прилив не должен зависеть от камеры
+    // M3: 10% от незащищённых построек за волну, но не меньше двух
     let broken = 0;
-    const n = Math.min(candidates.length, CFG.tide.wreckPerWave);
+    const quota = Math.max(CFG.tide.wreckPerWave,
+                           Math.floor(candidates.length * CFG.tide.wreckRatio));
+    const n = Math.min(candidates.length, quota);
     for (let k = 0; k < n; k++) {
       const pick = candidates[Math.floor(this.rnd() * candidates.length)];
       if (!pick) break;
@@ -1950,6 +2407,16 @@ class Game {
 
   rescuePlayer() {
     const p = this.player;
+    // M3: если игрока не укрыл купол, прилив бьёт на 30.
+    // Укрытие считаем по последней точке на земле — там игрок и был до вылета
+    const sheltered = this.isShelteredAt(this.lastGround.x, this.lastGround.y);
+    if (!sheltered) {
+      this.damagePlayer(CFG.health.tideDamage, 'прилив');
+      this.notice('-' + CFG.health.tideDamage + ' HP: прилив', '#ff8a8a');
+    } else {
+      this.notice('укрытие спасло', '#8fd8ff');
+    }
+    if (p.dead) return;
     p.x = this.lastGround.x;
     p.y = this.lastGround.y;
     p.vx = 0; p.vy = 0;
@@ -1990,6 +2457,7 @@ class Game {
 
     this.drawTiles(ctx, camX, camY);
     this.drawCrates(ctx);
+    this.drawCrawlers(ctx);
     this.drawDrops(ctx);
     this.drawPlayer(ctx);
     this.particles.draw(ctx, this.camera);
@@ -2093,6 +2561,82 @@ class Game {
         ctx.strokeStyle = 'rgba(120,210,255,0.8)';
         ctx.lineWidth = 2;
         ctx.strokeRect(x - 2, y - 2, c.w + 4, c.h + 4);
+      }
+    }
+  }
+
+  drawCrawlers(ctx) {
+    for (const c of this.crawlers) {
+      const x = Math.round(c.x), y = Math.round(c.y);
+      const w = c.w, h = c.h;
+
+      ctx.save();
+      ctx.translate(x + w / 2, y + h / 2);
+      // На потолке при приливе — висит вверх ногами
+      if (c.state === CRAWLER_STATE.HANG) ctx.rotate(Math.PI);
+      ctx.scale(c.dir < 0 ? -1 : 1, 1);
+
+      // Лапы
+      const step = Math.sin(c.legPhase) * 3;
+      ctx.strokeStyle = c.hurtFlash > 0 ? '#ffdede' : '#20242c';
+      ctx.lineWidth = 3;
+      for (let i = 0; i < 3; i++) {
+        const lx = -w / 2 + 7 + i * 9;
+        const sw = (i % 2 === 0 ? step : -step);
+        ctx.beginPath();
+        ctx.moveTo(lx, h / 2 - 4);
+        ctx.lineTo(lx - 3, h / 2 + 3 + sw);
+        ctx.stroke();
+      }
+
+      // Панцирь
+      ctx.fillStyle = c.hurtFlash > 0 ? '#f6c9c9' : '#3a2f45';
+      rr(ctx, -w / 2, -h / 2, w, h - 3, 8);
+      ctx.fill();
+      ctx.fillStyle = c.hurtFlash > 0 ? '#ffdada' : '#584a66';
+      rr(ctx, -w / 2 + 3, -h / 2 + 3, w - 6, 5, 3);
+      ctx.fill();
+
+      // Полоса-сегменты
+      ctx.strokeStyle = 'rgba(20,16,26,0.55)';
+      ctx.lineWidth = 1;
+      for (let i = 1; i < 3; i++) {
+        ctx.beginPath();
+        ctx.moveTo(-w / 2 + 8 + i * 7, -h / 2 + 8);
+        ctx.lineTo(-w / 2 + 8 + i * 7, h / 2 - 5);
+        ctx.stroke();
+      }
+
+      // Глаза
+      const eyeGlow = c.state === CRAWLER_STATE.AGGRO ? 1 : 0.55;
+      ctx.globalAlpha = eyeGlow;
+      ctx.fillStyle = '#ff2b3d';
+      ctx.beginPath(); ctx.arc(w / 2 - 9, -3, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(w / 2 - 9, 4, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#ffd0d0';
+      ctx.beginPath(); ctx.arc(w / 2 - 8, -4, 1.1, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(w / 2 - 8, 3, 1.1, 0, Math.PI * 2); ctx.fill();
+
+      // Жвала
+      ctx.strokeStyle = '#c9c2d4';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(w / 2 - 3, 0);
+      ctx.lineTo(w / 2 + 3, -3);
+      ctx.moveTo(w / 2 - 3, 1);
+      ctx.lineTo(w / 2 + 3, 4);
+      ctx.stroke();
+
+      ctx.restore();
+
+      // Полоска здоровья хищника — только если он ранен
+      if (c.hp < c.maxHp) {
+        const bw = w;
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(x, y - 7, bw, 3);
+        ctx.fillStyle = '#e03b3b';
+        ctx.fillRect(x, y - 7, bw * (c.hp / c.maxHp), 3);
       }
     }
   }
@@ -2464,12 +3008,55 @@ class Game {
     ctx.textBaseline = 'top';
     ctx.font = '11px ' + CFG.render.font;
     ctx.fillStyle = 'rgba(170,195,225,0.55)';
-    ctx.fillText(Math.round(this.fps) + ' FPS · тел ' + (this.drops.length + this.crates.length), 16, 14);
+    ctx.fillText(Math.round(this.fps) + ' FPS · тел ' + (this.drops.length + this.crates.length) +
+                 ' · хищников ' + this.crawlers.length, 16, 14);
 
+    this.drawHealthBar(ctx, x, y + h + 8);
     this.drawPhasePanel(ctx);
     this.drawGravityArrow(ctx);
     this.drawModeBar(ctx);
     this.drawControls(ctx);
+
+    // Уведомление (лечение, урон прилива)
+    if (this.noticeT > 0) {
+      ctx.globalAlpha = clamp(this.noticeT / 0.5, 0, 1);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = 'bold 15px ' + CFG.render.font;
+      ctx.fillStyle = this.noticeColor;
+      ctx.fillText(this.noticeText, this.vw / 2, 74);
+      ctx.globalAlpha = 1;
+    }
+
+    // Смерть: красный экран
+    if (this.deathT > 0) {
+      ctx.globalAlpha = clamp(this.deathT / 1.2, 0, 1) * 0.55;
+      ctx.fillStyle = '#a10f1a';
+      ctx.fillRect(0, 0, this.vw, this.vh);
+      ctx.globalAlpha = 1;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = 'bold 32px ' + CFG.render.font;
+      ctx.fillStyle = '#ffe3e3';
+      ctx.fillText('СМЕРТЬ', this.vw / 2, this.vh / 2 - 14);
+      const lost = this.lastDeathLost || {};
+      const parts = Object.keys(lost).map((k) => k + ' −' + lost[k]);
+      ctx.font = '14px ' + CFG.render.font;
+      ctx.fillStyle = 'rgba(255,220,220,0.9)';
+      ctx.fillText(parts.length ? 'потеряно: ' + parts.join(' · ') : 'ресурсы не потеряны',
+                   this.vw / 2, this.vh / 2 + 20);
+    }
+
+    // Красная рамка при получении урона
+    if (this.hurtScreen > 0) {
+      const a = clamp(this.hurtScreen / CFG.health.hurtScreen, 0, 1) * 0.5;
+      const g0 = ctx.createRadialGradient(this.vw / 2, this.vh / 2, Math.min(this.vw, this.vh) * 0.28,
+                                          this.vw / 2, this.vh / 2, Math.max(this.vw, this.vh) * 0.62);
+      g0.addColorStop(0, 'rgba(255,40,40,0)');
+      g0.addColorStop(1, 'rgba(255,30,30,' + a.toFixed(3) + ')');
+      ctx.fillStyle = g0;
+      ctx.fillRect(0, 0, this.vw, this.vh);
+    }
     if (this.flashT > 0) {
       ctx.globalAlpha = this.flashT / 0.2 * 0.6;
       ctx.fillStyle = '#ffffff';
@@ -2479,6 +3066,70 @@ class Game {
   }
 
   // Панель фазы прилива справа снизу
+  drawHealthBar(ctx, x, y) {
+    const H = CFG.hud;
+    const h = 16;
+    const p = this.player;
+    const ratio = clamp(p.health / p.maxHealth, 0, 1);
+
+    ctx.fillStyle = 'rgba(9,13,21,0.78)';
+    rr(ctx, x, y, H.w, h, 8);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(150,180,220,0.16)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Сама шкала
+    const pad = 4;
+    const bw = (H.w - pad * 2) * ratio;
+    const flash = p.hurtT > 0 ? 0.5 + 0.5 * Math.sin(this.time * 40) : 0;
+    ctx.fillStyle = ratio > 0.5 ? '#2ecc71' : ratio > 0.25 ? '#e6a417' : '#e03b3b';
+    if (flash > 0) ctx.fillStyle = '#ff5b5b';
+    // Свой путь: rr() ломает beginPath у вызывающего
+    const bx = x + pad, by = y + pad, bh2 = h - pad * 2, br = 5;
+    ctx.beginPath();
+    ctx.moveTo(bx + br, by);
+    ctx.lineTo(bx + Math.max(br, bw) - br, by);
+    ctx.arcTo(bx + Math.max(br, bw), by, bx + Math.max(br, bw), by + bh2, br);
+    ctx.lineTo(bx + Math.max(br, bw) - br, by + bh2);
+    ctx.lineTo(bx + br, by + bh2);
+    ctx.arcTo(bx, by + bh2, bx, by, br);
+    ctx.lineTo(bx + br, by);
+    ctx.closePath();
+    ctx.fill();
+
+    // Сердце-иконка
+    ctx.fillStyle = ratio > 0.25 ? '#ff6b81' : '#ff2f45';
+    const hx = x - 20, hy = y + h / 2;
+    ctx.beginPath();
+    ctx.moveTo(hx, hy + 5);
+    ctx.lineTo(hx - 6, hy - 1);
+    ctx.lineTo(hx - 6, hy - 5);
+    ctx.lineTo(hx - 3, hy - 7);
+    ctx.lineTo(hx, hy - 4);
+    ctx.lineTo(hx + 3, hy - 7);
+    ctx.lineTo(hx + 6, hy - 5);
+    ctx.lineTo(hx + 6, hy - 1);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 11px ' + CFG.render.font;
+    ctx.fillStyle = 'rgba(240,248,255,0.95)';
+    ctx.fillText(Math.round(p.health) + ' / ' + p.maxHealth, x + H.w / 2, y + h / 2 + 0.5);
+
+    // Укрытие: во время прилива это главный вопрос игрока «я в безопасности?»
+    if (this.tide.id === 'CATASTROPHE' || this.tide.id === 'WARNING') {
+      const safe = this.isSheltered();
+      ctx.textAlign = 'right';
+      ctx.font = '10px ' + CFG.render.font;
+      ctx.fillStyle = safe ? '#56d18f' : '#ff9c9c';
+      ctx.fillText(safe ? 'под куполом' : 'открыто', x + H.w, y - 6);
+    }
+    ctx.textAlign = 'left';
+  }
+
   drawPhasePanel(ctx) {
     const tide = this.tide;
     const W = 210, H = 62;
@@ -2526,8 +3177,11 @@ class Game {
       }
       ctx.font = '11px ' + CFG.render.font;
       ctx.textAlign = 'left';
+      // M3: 10% в секунду — прилив съест незащищённое за ~10 волн
       ctx.fillStyle = danger ? '#ff9c9c' : 'rgba(86,209,143,0.9)';
-      ctx.fillText(danger ? 'без защиты: ' + danger : 'всё защищено', x + 12, y + 50);
+      const perWave = Math.max(CFG.tide.wreckPerWave, Math.floor(danger * CFG.tide.wreckRatio));
+      ctx.fillText(danger ? 'без защиты: ' + danger + ' (−' + perWave + '/с)' : 'всё защищено',
+                   x + 12, y + 50);
     }
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
@@ -2600,6 +3254,7 @@ class Game {
       ['A', 'D', 'идти'],
       ['Space', 'прыжок'],
       ['F', 'гравитация'],
+      ['H', 'биогель'],
       ['ЛКМ', this.modeLabel()],
       ['ПКМ', 'телекинез']
     ];

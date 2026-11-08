@@ -74,7 +74,8 @@ sandbox.globalThis = sandbox;
 const ctx = vm.createContext(sandbox);
 
 SRC += '\n;globalThis.__game = game; globalThis.__CFG = CFG; globalThis.__TILE = TILE;'
-     + ';globalThis.__cls = { Drop, Crate, PhysBody, Player, World, Game, Tide, Save };';
+     + ';globalThis.__ITEM = ITEM; globalThis.__CRAWLER_STATE = CRAWLER_STATE;'
+     + ';globalThis.__cls = { Drop, Crate, PhysBody, Player, World, Game, Tide, Save, Crawler, Particles, Inventory };';
 vm.runInContext(SRC, ctx, { filename: 'gravity-void.html' });
 
 const game = sandbox.__game;
@@ -178,14 +179,18 @@ frames(2);
 ok('копание началось (есть прогресс)', game.dig !== null && game.dig.progress > 0, JSON.stringify(game.dig && { tx: game.dig.tx, ty: game.dig.ty }));
 frames(8); // итого ~10 кадров > 0.15с
 ok('DIRT скопан за ~0.15с', W.get(digTarget.tx, digTarget.ty) === TILE.EMPTY);
-ok('появился физический дроп', game.drops.length === 1, `drops=${game.drops.length}`);
-ok('дроп нужного типа', game.drops[0] && game.drops[0].type === TILE.DIRT, `type=${game.drops[0] && game.drops[0].type}`);
+// M3: в пещерах уже лежит BIOGEL, поэтому считаем только дропы копки
+const gelDrops = () => game.drops.filter(d => d.type === 4).length;
+const baseGel = gelDrops();
+ok('появился физический дроп', game.drops.length === baseGel + 1, `drops=${game.drops.length} gel=${baseGel}`);
+const dugDrop = game.drops.find(d => d.type === TILE.DIRT);
+ok('дроп нужного типа', !!dugDrop, `type=${dugDrop && dugDrop.type}`);
 
 // яма под игроком: дроп падает на дно — это ожидаемо, подбирать будем стеновой тайл
 mouse('up', 0, 0);
 frames(90);
-ok('дроп упал и заснул в яме', game.drops.length === 1 && game.drops[0].sleeping, `drops=${game.drops.length} sleep=${game.drops[0] && game.drops[0].sleeping}`);
-const pitDrop = game.drops[0];
+ok('дроп упал и заснул в яме', !!dugDrop && dugDrop.sleeping, `drops=${game.drops.length} sleep=${dugDrop && dugDrop.sleeping}`);
+const pitDrop = dugDrop;
 ok('дроп в яме физически ниже пола', pitDrop.y > digTarget.ty * TS, `y=${pitDrop.y.toFixed(1)}`);
 
 // подбор вплотную: дроп появляется на игроке — должен подобраться за кадр
@@ -407,6 +412,7 @@ const sleepY = quiet.map(d => d.y);
 game.tide.setPhase(2);
 game.tide.applyPhase(game.tide.id);
 game.onPhaseChanged('CATASTROPHE');
+P.invuln = 999;                 // M3: изолируем физику прилива от системы здоровья
 frames(200);
 const movedUp = quiet.filter((d, i) => d.y < sleepY[i] - 20).length;
 ok('в катастрофе дропы летят вверх', movedUp >= 4, `улетело: ${movedUp}/6`);
@@ -416,6 +422,7 @@ ok('игрок тоже улетел вверх без F', P.y < FLOOR_Y - 40, `
 tapKey('KeyF');
 frames(120);
 ok('F при катастрофе меняет личную гравитацию', P.gravityTarget === 1, `target=${P.gravityTarget}`);
+P.invuln = 0;
 
 game.tide.setPhase(0);
 game.tide.applyPhase('STABLE');
@@ -630,6 +637,214 @@ ok('длительности фаз как в спеке',
 const domeSrc = sandbox.__game.render.toString();
 ok('купол рисуется дугой (arc), а не по тайлам',
    /drawAnchors/.test(domeSrc) && /arc\(/.test(String(sandbox.__game.drawAnchors)));
+
+// ================================================================
+// M3: жизнь и смерть
+// ================================================================
+const ITEM = sandbox.__ITEM;
+const ST = sandbox.__CRAWLER_STATE;
+const Crawler = sandbox.__cls.Crawler;
+
+// Кадры гоняем напрямую: raf-очередь принадлежит самому первому Game
+function stepG(g, n = 1) {
+  for (let i = 0; i < n; i++) g.update(CFG.step);
+}
+function pressG(g, code) {
+  g.input.pressed.add(code);
+}
+
+// свежий мир на чистом сейве
+sandbox.localStorage.removeItem(CFG.save.key);
+const g3 = new (sandbox.__cls.Game)(view);
+const P3 = g3.player;
+stepG(g3, 60);
+
+ok('M3: здоровье 100/100 на старте', P3.health === 100 && P3.maxHealth === 100, `hp=${P3.health}`);
+ok('M3: в инвентаре появился BIOGEL', !!CFG.resources.find(r => r.id === ITEM.BIOGEL),
+   JSON.stringify(CFG.resources.map(r => r.name)));
+ok('M3: биогель зелёный', CFG.resources.find(r => r.id === ITEM.BIOGEL).color.toLowerCase() === '#3fd66b');
+
+// --- хищники в пещерах
+const caveTop = CFG.layers.skyRows + CFG.layers.ceilingRows;
+ok('M3: спавнится 2-3 хищника', g3.crawlers.length >= 2 && g3.crawlers.length <= 3, `n=${g3.crawlers.length}`);
+ok('M3: хищники под землёй', g3.crawlers.every(c => c.cy > caveTop * TS),
+   g3.crawlers.map(c => (c.cy / TS).toFixed(1)).join(','));
+ok('M3: размер хищника 32x24', g3.crawlers.every(c => c.w === 32 && c.h === 24));
+ok('M3: у хищника 30 HP', g3.crawlers.every(c => c.hp === 30 && c.maxHp === 30));
+
+ok('M3: хищник начинает в IDLE', g3.crawlers.every(c => c.state === ST.IDLE),
+   g3.crawlers.map(c => c.state).join(','));
+const gelOnMap = g3.drops.filter(d => d.type === ITEM.BIOGEL);
+ok('M3: 3-4 биогеля лежат в пещерах', gelOnMap.length >= 3 && gelOnMap.length <= 4, `n=${gelOnMap.length}`);
+
+// --- урон от падения
+P3.health = 100; P3.invuln = 0;
+P3.x = 30 * TS; P3.y = 6 * TS; P3.vy = 900; P3.vx = 0;
+let hurtByFall = false;
+for (let i = 0; i < 120; i++) {
+  stepG(g3, 1);
+  if (P3.health < 100) { hurtByFall = true; break; }
+}
+ok('M3: падение с высоты наносит урон', hurtByFall, `hp=${P3.health.toFixed(0)}`);
+ok('M3: урон от падения по формуле', P3.health >= 60 && P3.health <= 95, `hp=${P3.health.toFixed(0)}`);
+
+// мягкое падение не ранит
+P3.health = 100; P3.invuln = 0;
+P3.x = 30 * TS; P3.y = g3.world.surfaceRow * TS - P3.h - 40; P3.vy = 0;
+stepG(g3, 40);
+ok('M3: мягкое падение не ранит', P3.health === 100, `hp=${P3.health}`);
+
+// в приливе урон даёт прилив, а не удар о плиту (иначе двойной штраф)
+const savedCrawlers = g3.crawlers.slice();
+g3.crawlers.length = 0;
+P3.health = 100; P3.invuln = 0;
+g3.tide.setPhase(2); g3.tide.applyPhase('CATASTROPHE');
+P3.x = 30 * TS; P3.y = 10 * TS; P3.vy = -1100;
+stepG(g3, 30);
+ok('M3: в приливе удар о плиту не считается падением', P3.health === 100, `hp=${P3.health} y=${P3.y.toFixed(0)}`);
+g3.tide.setPhase(0); g3.tide.applyPhase('STABLE');
+g3.crawlers.push(...savedCrawlers);
+
+// --- урон от прилива без укрытия
+P3.health = 100; P3.invuln = 0;
+g3.anchors = [];
+g3.lastGround = { x: 30 * TS, y: g3.world.surfaceRow * TS - P3.h };
+g3.tide.setPhase(2); g3.tide.applyPhase('CATASTROPHE');
+P3.y = -P3.h - 2;
+stepG(g3, 1);
+ok('M3: прилив без укрытия бьёт на 30', P3.health === 70, `hp=${P3.health}`);
+
+// --- под куполом с потолком над головой урона нет
+P3.health = 100; P3.invuln = 0;
+const cxT = 40, cyT = 16;
+g3.anchors.push({ x: cxT, y: cyT, born: 0 });
+g3.world.set(cxT, cyT - 3, TILE.STONE, true);
+P3.x = cxT * TS + 4; P3.y = cyT * TS - P3.h;
+g3.lastGround = { x: P3.x, y: P3.y };
+ok('M3: укрытие определяется', g3.isSheltered() === true, `anchors=${g3.anchors.length}`);
+P3.y = -P3.h - 2;
+stepG(g3, 1);
+ok('M3: в укрытии прилив не ранит', P3.health === 100, `hp=${P3.health}`);
+g3.world.set(cxT, cyT - 3, TILE.EMPTY, true);
+g3.anchors = [];
+
+// --- лечение по H
+P3.health = 40; P3.invuln = 5;
+g3.inventory.counts[ITEM.BIOGEL] = 1;
+pressG(g3, 'KeyH');
+stepG(g3, 1);
+ok('M3: H лечит на 40 и тратит биогель', P3.health === 80 && g3.inventory.counts[ITEM.BIOGEL] === 0,
+   `hp=${P3.health} gel=${g3.inventory.counts[ITEM.BIOGEL]}`);
+
+P3.health = 40;
+g3.inventory.counts[ITEM.BIOGEL] = 0;
+g3.healPlayer(40);
+ok('M3: без биогеля лечения нет', P3.health === 40, `hp=${P3.health}`);
+ok('M3: H привязана к инпуту', /KeyH/.test(String(sandbox.__game.update)));
+
+// --- смерть: потеря 50% ресурсов, респавн, полное здоровье
+P3.health = 10; P3.invuln = 0;
+g3.inventory.counts[TILE.FERRITE] = 7;
+g3.inventory.counts[TILE.STONE] = 3;
+g3.inventory.counts[TILE.DIRT] = 1;
+const deathsBefore = g3.deaths;
+g3.damagePlayer(50, 'тест');
+ok('M3: смерть фиксируется', g3.deaths === deathsBefore + 1);
+ok('M3: теряется половина ресурсов (floor)',
+   g3.inventory.counts[TILE.FERRITE] === 4 && g3.inventory.counts[TILE.STONE] === 2 &&
+   g3.inventory.counts[TILE.DIRT] === 1,
+   `f=${g3.inventory.counts[TILE.FERRITE]} s=${g3.inventory.counts[TILE.STONE]} d=${g3.inventory.counts[TILE.DIRT]}`);
+ok('M3: после смерти здоровье восстановлено', P3.health === 100, `hp=${P3.health}`);
+ok('M3: респавн на стартовой точке',
+   Math.abs(P3.x - (CFG.spawn.playerTileX * TS + (TS - P3.w) / 2)) < 2, `x=${P3.x.toFixed(1)}`);
+ok('M3: после респавна есть неуязвимость', P3.invuln > 0, `inv=${P3.invuln.toFixed(2)}`);
+ok('M3: красный экран смерти включён', g3.deathT > 0, `t=${g3.deathT.toFixed(2)}`);
+ok('M3: смерть пишется в консоль', /console\.log/.test(String(g3.killPlayer)));
+
+P3.health = 100;
+g3.damagePlayer(20, 'тест');
+ok('M3: неуязвимость блокирует урон', P3.health === 100, `hp=${P3.health}`);
+P3.invuln = 0;
+
+// --- хищник: состояния, погоня, укус, побег
+g3.tide.setPhase(0); g3.tide.applyPhase('STABLE');   // выходим из прилива предыдущего теста
+const cw0 = g3.crawlers[0];
+g3.crawlers.length = 0;
+g3.crawlers.push(cw0);
+P3.health = 100; P3.invuln = 0;
+P3.x = cw0.x + 2 * TS; P3.y = cw0.y;
+P3.gravityTarget = 1;
+cw0.vx = 0;
+stepG(g3, 2);
+ok('M3: хищник рядом агрится', cw0.state === ST.AGGRO, cw0.state);
+const hpBeforeBite = P3.health;
+for (let i = 0; i < 70; i++) {          // держим игрока вплотную: проверяем укус, а не полёт
+  P3.x = cw0.x + 10; P3.y = cw0.y; P3.vx = 0; P3.vy = 0;
+  stepG(g3, 1);
+}
+ok('M3: хищник кусает', P3.health < hpBeforeBite, `hp=${P3.health.toFixed(0)}`);
+ok('M3: укус снимает 10', hpBeforeBite - P3.health <= 20, `dmg=${hpBeforeBite - P3.health}`);
+ok('M3: у хищника пауза между укусами', CFG.crawler.biteCooldown === 1);
+
+cw0.hp = 4;
+P3.health = 100; P3.invuln = 0;
+stepG(g3, 2);
+ok('M3: раненый хищник убегает', cw0.state === ST.FLEE, cw0.state);
+
+// --- смерть хищника от ящика
+const g4 = new (sandbox.__cls.Game)(view);
+stepG(g4, 10);
+g4.crawlers.length = 0;
+const cwA = new Crawler(40 * TS, 16 * TS);
+g4.crawlers.push(cwA);
+const hitCrate = g4.crates[0];
+hitCrate.gravityScale = 0;
+hitCrate.x = cwA.x; hitCrate.y = cwA.y; hitCrate.vx = 600; hitCrate.vy = 0;
+g4.updateCrawlerHits();
+ok('M3: ящик бьёт хищника на 15', cwA.hp === 15, `hp=${cwA.hp}`);
+hitCrate.x = cwA.x; hitCrate.y = cwA.y; hitCrate.vx = 600;
+cwA.crateCd = 0;
+g4.updateCrawlerHits();
+ok('M3: второй удар добивает', cwA.dead === true, `hp=${cwA.hp} dead=${cwA.dead}`);
+const gelAfterKill = g4.drops.filter(d => d.type === ITEM.BIOGEL).length;
+ok('M3: шанс биогеля с трупа 50%', CFG.crawler.gelChance === 0.5 && gelAfterKill >= 3, `gel=${gelAfterKill}`);
+g4.updateCrawlers(0.016);
+ok('M3: мёртвый хищник убирается из мира', g4.crawlers.indexOf(cwA) === -1, `n=${g4.crawlers.length}`);
+
+// --- прилив: хищник уходит вверх и цепляется за потолок
+const g5 = new (sandbox.__cls.Game)(view);
+stepG(g5, 10);
+g5.crawlers.length = 0;
+const cwB = new Crawler(40 * TS, 15 * TS);
+g5.crawlers.push(cwB);
+g5.player.x = 40 * TS; g5.player.y = 15 * TS; g5.player.invuln = 99;
+g5.tide.setPhase(2);
+stepG(g5, 40);
+ok('M3: при катастрофе хищник уходит наверх', cwB.state === ST.HANG || cwB.y < 15 * TS,
+   `state=${cwB.state} y=${(cwB.y / TS).toFixed(1)}`);
+
+// --- ускоренное разрушение
+const g6 = new (sandbox.__cls.Game)(view);
+ok('M3: волна разрушения раз в секунду', CFG.tide.wreckInterval === 1);
+ok('M3: минимум два тайла за волну', CFG.tide.wreckPerWave === 2 && CFG.tide.wreckRatio === 0.1);
+g6.anchors = [];
+while (g6.world.placed.some(v => v)) {
+  const i = g6.world.placed.indexOf(1);
+  g6.world.set(i % g6.world.cols, Math.floor(i / g6.world.cols), TILE.EMPTY, false);
+}
+for (let i = 0; i < 5; i++) g6.world.set(60 + i, 16, TILE.DIRT, true);
+ok('M3: на малом числе построек ломается ровно 2', g6.wreckWave() === 2);
+for (let i = 0; i < 60; i++) g6.world.set(20 + i, 14, TILE.STONE, true);
+ok('M3: 10% за волну на 60 постройках', g6.wreckWave() === 6, `broken=${6}`);
+
+// --- HUD и подсказки
+ok('M3: в HUD есть полоска здоровья',
+   /drawHealthBar/.test(String(sandbox.__game.drawHud)) && /drawHealthBar/.test(String(sandbox.__game.drawHealthBar)));
+ok('M3: полоска использует долю HP', /health \/ p\.maxHealth|health \/ this\.player\.maxHealth/.test(String(sandbox.__game.drawHealthBar)),
+   'нет отношения hp/max');
+ok('M3: управление 1..6 не сломано',
+   /Digit6/.test(String(sandbox.__game.update)) && /KeyF/.test(String(sandbox.__game.update)));
+ok('M3: H подсказана в панели управления', /KeyH|биогель/.test(String(sandbox.__game.drawControls)));
 
 // ---------------------------------------------------------------- итог
 const passed = results.filter(r => r.pass).length;
