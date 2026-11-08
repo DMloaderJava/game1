@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GRAVITY: VOID — ревью итерации 1A</title>
+<style>
+  :root {
+    --bg: #070910;
+    --panel: #0d1220;
+    --panel-2: #111829;
+    --line: rgba(150, 180, 220, 0.16);
+    --text: #dfe8f6;
+    --muted: #8fa3bf;
+    --accent: #63c8ff;
+    --ok: #56d18f;
+    --warn: #f0bb5c;
+    --bad: #ff7b7b;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: radial-gradient(1200px 600px at 20% -10%, #101a2e 0%, var(--bg) 55%) fixed;
+    color: var(--text);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding-bottom: 80px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+
+  header.hero { padding: 44px 0 24px; border-bottom: 1px solid var(--line); }
+  .eyebrow { color: var(--accent); font: 12px/1.4 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; }
+  h1 { margin: 10px 0 6px; font-size: clamp(26px, 4vw, 40px); letter-spacing: -0.02em; line-height: 1.1; }
+  h1 .sub { color: var(--muted); font-weight: 400; }
+  .lead { color: var(--muted); max-width: 70ch; margin: 12px 0 0; }
+  .lead b { color: var(--text); }
+
+  .verdict {
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+    margin-top: 22px; padding: 14px 16px;
+    background: linear-gradient(90deg, rgba(240,187,92,0.12), rgba(240,187,92,0.02));
+    border: 1px solid rgba(240,187,92,0.35); border-radius: 12px;
+  }
+  .verdict .tag { font: 700 13px/1 var(--mono); letter-spacing: 0.08em; color: #1a1405; background: var(--warn); padding: 6px 10px; border-radius: 999px; }
+  .verdict p { margin: 0; color: #f3e3c4; font-size: 14px; }
+
+  nav.toc {
+    position: sticky; top: 0; z-index: 5;
+    display: flex; gap: 6px; flex-wrap: wrap;
+    padding: 10px 0; margin-bottom: 8px;
+    background: rgba(7, 9, 16, 0.9); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  nav.toc a {
+    color: var(--muted); text-decoration: none; font: 12px/1 var(--mono);
+    padding: 7px 10px; border-radius: 999px; border: 1px solid transparent;
+  }
+  nav.toc a:hover { color: var(--text); border-color: var(--line); background: var(--panel); }
+
+  section { padding: 30px 0; border-bottom: 1px solid var(--line); }
+  h2 { font-size: 20px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  h2 .num { color: var(--accent); font: 13px/1 var(--mono); margin-right: 8px; }
+  .hint { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+
+  .grid { display: grid; gap: 14px; }
+  .g2 { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px;
+  }
+  .card h3 { margin: 0 0 8px; font-size: 14px; letter-spacing: 0.02em; }
+  .card h3 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 8px; vertical-align: 0; }
+  .card.ok { border-color: rgba(86,209,143,0.28); }
+  .card.warn { border-color: rgba(240,187,92,0.3); }
+  .card.bad { border-color: rgba(255,123,123,0.3); }
+  .card.ok h3 .dot { background: var(--ok); }
+  .card.warn h3 .dot { background: var(--warn); }
+  .card.bad h3 .dot { background: var(--bad); }
+
+  ul.tight { margin: 0; padding-left: 18px; }
+  ul.tight li { margin: 6px 0; font-size: 14px; }
+  ul.tight li::marker { color: var(--accent); }
+  code, .mono { font-family: var(--mono); font-size: 12.5px; background: rgba(120,170,230,0.1); padding: 1px 5px; border-radius: 4px; white-space: nowrap; }
+  .muted { color: var(--muted); }
+  .sm { font-size: 13px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+  td.num { font-family: var(--mono); color: var(--text); white-space: nowrap; }
+  .pill { display: inline-block; font: 11px/1 var(--mono); padding: 4px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .pill.ok { color: var(--ok); border-color: rgba(86,209,143,0.4); }
+  .pill.bad { color: var(--bad); border-color: rgba(255,123,123,0.4); }
+  .pill.warn { color: var(--warn); border-color: rgba(240,187,92,0.4); }
+
+  /* витрина игры */
+  .stage {
+    position: relative; border-radius: 14px; overflow: hidden;
+    border: 1px solid var(--line); background: #05070c;
+    aspect-ratio: 16 / 9;
+  }
+  .stage .poster, .stage iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  .stage .poster { object-fit: cover; opacity: 0.55; filter: saturate(0.85); }
+  .stage .veil {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px; text-align: center;
+    background: linear-gradient(180deg, rgba(5,7,12,0.35), rgba(5,7,12,0.85));
+    padding: 20px;
+  }
+  .stage .veil h3 { margin: 0; font-size: 18px; }
+  .stage .veil p { margin: 0; color: var(--muted); font-size: 13px; max-width: 46ch; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--accent); color: #04121d; text-decoration: none;
+    font: 700 14px/1 var(--mono); padding: 12px 18px; border-radius: 10px;
+    border: 0; cursor: pointer;
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); font-weight: 500; }
+  .btnrow { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+  .shots { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  figure.shot { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  figure.shot img { display: block; width: 100%; aspect-ratio: 16/9; object-fit: cover; background: #05070c; }
+  figure.shot figcaption { padding: 10px 12px; font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--line); }
+  figure.shot figcaption b { color: var(--text); font-weight: 600; display: block; font-size: 13px; margin-bottom: 2px; }
+
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 8px;
+    font: 12px/1 var(--mono); padding: 8px 11px; border-radius: 999px;
+    background: var(--panel); border: 1px solid var(--line); color: var(--muted);
+  }
+  .chip .led { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .chip.ok { color: var(--text); }
+  .chip.ok .led { background: var(--ok); box-shadow: 0 0 8px rgba(86,209,143,0.7); }
+  .chip.bad .led { background: var(--bad); box-shadow: 0 0 8px rgba(255,123,123,0.7); }
+
+  pre {
+    background: #05070c; border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px; overflow-x: auto; font: 12.5px/1.7 var(--mono); color: #c8dcf0; margin: 0;
+  }
+  pre .c { color: #5c728c; }
+  footer { padding: 26px 0; color: var(--muted); font-size: 12.5px; }
+  a { color: var(--accent); }
+  @media (max-width: 640px) {
+    nav.toc { position: static; }
+    header.hero { padding-top: 26px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">GRAVITY: VOID · протокол ревью · итерация 1A</div>
+    <h1>Добыча и инвентарь <span class="sub">— ревью</span></h1>
+    <div class="verdict">
+      <span class="tag">ПРИНЯТА С ЗАМЕЧАНИЯМИ</span>
+      <p>Скоуп закрыт, автотесты зелёные. До 1B починить: перекрытие ЛКМ у ног и тесноту дропов.</p>
+    </div>
+
+    <div class="chips" id="chips">
+      <span class="chip" id="chip-shots"><span class="led"></span><span>скриншоты: проверяю…</span></span>
+      <span class="chip" id="chip-game"><span class="led"></span><span>игра: не проверена</span></span>
+      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>автопроверки: 45 / 45</span></span>
+      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>зависимостей: 0</span></span>
+    </div>
+  </div>
+</header>
+
+<nav class="toc wrap">
+  <a href="#play">▶ Играть</a>
+  <a href="#works">Что работает</a>
+  <a href="#defects">Дефекты</a>
+  <a href="#scope">Скоуп</a>
+  <a href="#mustfix">До 1B</a>
+  <a href="#questions">Вопросы</a>
+  <a href="#shots">Скриншоты</a>
+  <a href="#verify">Как проверено</a>
+</nav>
+
+<main class="wrap">
+
+  <!-- ------------------------------------------------------------ игра -->
+  <section id="play">
+    <h2><span class="num">01</span>Сборка</h2>
+
+    <div class="stage" id="stage">
+      <img class="poster" id="poster" src="screenshots/01-start.png" alt="Кадр из игры GRAVITY: VOID">
+      <div class="veil" id="veil">
+        <h3>GRAVITY: VOID — итерация 1A</h3>
+        <p>Кликните «Запустить», затем кликните по картинке игры, чтобы клавиатура заработала.
+           <br>A / D — идти · Space — прыжок · F — гравитация · ЛКМ — копать или тянуть · ПКМ — толчок.</p>
+        <div class="btnrow">
+          <button class="btn" id="play-btn" type="button">Запустить игру</button>
+          <a class="btn ghost" href="gravity-void.html" target="_blank" rel="noopener">Открыть в новой вкладке</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="btnrow" style="margin-top:12px">
+      <a class="btn ghost" href="README.md">CHANGELOG</a>
+      <a class="btn ghost" href="tools/verify.mjs">tools/verify.mjs</a>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------ что работает -->
+  <section id="works">
+    <h2><span class="num">02</span>Что работает</h2>
+
+    <div class="grid g2">
+      <div class="card ok">
+        <h3><span class="dot"></span>Мир как тайловая сетка</h3>
+        <ul class="tight">
+          <li>200×100 тайлов по 32 px, слои: небо → потолочная плита → зал с уступами → <code>DIRT</code> → <code>STONE</code>.</li>
+          <li>Верхние 5 рядов гарантированно пустые, <code>FERRITE</code> — 5 % в породе.</li>
+        </ul>
+      </div>
+      <div class="card ok">
+        <h3><span class="dot"></span>Копание</h3>
+        <ul class="tight">
+          <li>ЛКМ по тайлу в радиусе 4 тайлов; <code>DIRT</code> 0.15 с, <code>STONE</code> 0.50 с, <code>FERRITE</code> 0.70 с.</li>
+          <li>Прогресс: заливка тайла + трещины + полоса. Отпустил ЛКМ — сброс.</li>
+        </ul>
+      </div>
+      <div class="card ok">
+        <h3><span class="dot"></span>Дропы и подбор</h3>
+        <ul class="tight">
+          <li>Физические 12×12: падают, сталкиваются с тайлами, отскакивают, засыпают.</li>
+          <li>Просыпаются от копания рядом и от переворота гравитации.</li>
+          <li>Автоподбор при касании игрока + burst из 6 частиц.</li>
+        </ul>
+      </div>
+      <div class="card ok">
+        <h3><span class="dot"></span>HUD и отклик</h3>
+        <ul class="tight">
+          <li>Три строки с иконками 10×10, цифры пульсируют 200 мс.</li>
+          <li>Частицы копания и пыль в процессе, подсказки «копать / тянуть / далеко».</li>
+        </ul>
+      </div>
+      <div class="card ok">
+        <h3><span class="dot"></span>Производительность</h3>
+        <ul class="tight">
+          <li>Тайлы — в offscreen-буфере: в простое 0 <code>fillRect</code> в буфер и 1 <code>drawImage</code> за кадр.</li>
+          <li>Кадр p50 ≈ 4.8 мс, p95 ≈ 5.2 мс при 300+ телах.</li>
+        </ul>
+      </div>
+      <div class="card ok">
+        <h3><span class="dot"></span>Гравитация Milestone 0</h3>
+        <ul class="tight">
+          <li>Переворот работает: игрок встаёт на потолочную плиту, не застревает в ней.</li>
+          <li>Дропы и ящики тоже падают вверх и не проваливаются сквозь плиту.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------ дефекты -->
+  <section id="defects">
+    <h2><span class="num">03</span>Что не работает / где неприятно</h2>
+
+    <div class="grid g2">
+      <div class="card bad">
+        <h3><span class="dot"></span>ЛКМ у ног перехватывает дроп</h3>
+        <ul class="tight">
+          <li>Приоритет у тела: клик по дропу — телекинез, а не копание. Под собой копать капризно.</li>
+          <li>Развести: копать — ЛКМ, телекинез — ПКМ, толчок — Shift+ПКМ.</li>
+        </ul>
+      </div>
+      <div class="card bad">
+        <h3><span class="dot"></span>Дропы слипаются в полосу</h3>
+        <ul class="tight">
+          <li>50+ дропов лежат вплотную и читаются как серая лента; <code>DIRT</code> сливается с землёй.</li>
+          <li>Обводка 1 px + магнит подбора 1.5 тайла.</li>
+        </ul>
+      </div>
+      <div class="card warn">
+        <h3><span class="dot"></span>Дропы копятся на потолке</h3>
+        <ul class="tight">
+          <li>После переворота ресурс падает вверх и остаётся там — физика честная, ресурс теряется.</li>
+        </ul>
+      </div>
+      <div class="card warn">
+        <h3><span class="dot"></span>Тяжёлые тайлы не отличаются на ощупь</h3>
+        <ul class="tight">
+          <li><code>STONE</code> и <code>FERRITE</code> просто дольше. Нужна микро-тряска на последних 20 %.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------ скоуп -->
+  <section id="scope">
+    <h2><span class="num">04</span>Не соответствует скоупу</h2>
+    <table>
+      <thead>
+        <tr><th>Что</th><th>Почему так</th><th>Что делать</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><b>Собран Milestone 0</b><br><span class="muted sm">персонаж, физика, переворот, телекинез, ящики</span></td>
+          <td>В репозитории лежал только <code>README.md</code> — прототипа 0 не было, расширять было нечего.
+              Без тайлового мира копать нечего, поэтому база вошла в 1A.</td>
+          <td>Либо принять как «1A с базой», либо прислать Milestone 0 — сведу управление и ощущение 1:1.</td>
+        </tr>
+        <tr>
+          <td><b>Масштаб камеры 2×</b><br><span class="muted sm">параметр сверх задания</span></td>
+          <td>При 32 px и 1:1 на 1280 px видно 40 тайлов, мир читается мелкой сеткой. С 2× тайл становится клеткой.</td>
+          <td>Считаю обязательным, но это меняет «сколько мира видно». Решается одной константой <code>CFG.camera.zoom</code>.</td>
+        </tr>
+        <tr>
+          <td><b>Подсказки и кольцо радиуса</b><br><span class="muted sm">обучение в игре</span></td>
+          <td>Прогресс-бар и радиус без пояснения читались не сразу; кольцо показывается 0.9 с после переворота.</td>
+          <td>Если лишнее — убрать <code>drawRadius</code> и подписи у курсора.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ------------------------------------------------------------ до 1B -->
+  <section id="mustfix">
+    <h2><span class="num">05</span>Чинить до 1B</h2>
+    <table>
+      <thead><tr><th>Приоритет</th><th>Задача</th><th>Почему до 1B</th></tr></thead>
+      <tbody>
+        <tr><td><span class="pill bad">must</span></td>
+          <td>Развести ЛКМ / ПКМ</td>
+          <td>В 1B на ЛКМ добавится постановка блока — станет три действия на одной кнопке.</td></tr>
+        <tr><td><span class="pill bad">must</span></td>
+          <td>Магнит подбора 1.5 тайла + обводка</td>
+          <td>Убирает «ленту» дропов и потерю ресурса на потолке.</td></tr>
+        <tr><td><span class="pill warn">should</span></td>
+          <td><code>DIRT</code>-дроп не видно на земле</td>
+          <td>Накопленное теряется на фоне породы.</td></tr>
+        <tr><td><span class="pill warn">should</span></td>
+          <td>Подтвердить радиус копания</td>
+          <td>В 1B радиус стройки 5 — мерить так же.</td></tr>
+        <tr><td><span class="pill">nice</span></td>
+          <td>Микро-тряска, звук</td>
+          <td>Звук — отдельная итерация, нужны ассеты.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ------------------------------------------------------------ вопросы -->
+  <section id="questions">
+    <h2><span class="num">06</span>Запросы ревью</h2>
+    <div class="grid g2">
+      <div class="card">
+        <h3>1. Сколько тайлов по горизонтали?</h3>
+        <p class="sm muted">Сейчас ≈20. <code>CFG.camera.zoom</code>.</p>
+      </div>
+      <div class="card">
+        <h3>2. Провисание породы?</h3>
+        <p class="sm muted">Если да — 1B придётся строить с опорой у стены.</p>
+      </div>
+      <div class="card">
+        <h3>3. Дропы на потолке терпим?</h3>
+        <p class="sm muted">Магнит подбора решает, но это уже качество жизни.</p>
+      </div>
+      <div class="card">
+        <h3>4. Радиус от центра или от ног?</h3>
+        <p class="sm muted">Сейчас от центра. В 1B стройка — 5 тайлов: мерить так же?</p>
+      </div>
+      <div class="card">
+        <h3>5. Блок в воздухе?</h3>
+        <p class="sm muted">Главный вопрос к 1B: ставить тайл без опоры можно?</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------ скриншоты -->
+  <section id="shots">
+    <h2><span class="num">07</span>Скриншоты</h2>
+    <div class="shots" id="shot-grid">
+      <figure class="shot">
+        <img src="screenshots/01-start.png" alt="Старт: арена, ящики, HUD" loading="lazy">
+        <figcaption><b>Старт</b>Арена, три ящика, HUD.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/02-digging.png" alt="Копание тайла земли" loading="lazy">
+        <figcaption><b>Копание</b>Заливка, трещины, полоса прогресса.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/02b-digging-crop.png" alt="Крупный план прогресса копания" loading="lazy">
+        <figcaption><b>Копание — крупно</b>Прогресс читается без инструкции.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/03-hud.png" alt="HUD с накопленными ресурсами" loading="lazy">
+        <figcaption><b>HUD</b>Иконки и пульсация цифры.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/04-drops.png" alt="55 физических тел на полу" loading="lazy">
+        <figcaption><b>Худший кадр</b>55 тел: дропы слипаются в полосу.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/05-telekinesis.png" alt="Захват ящика телекинезом" loading="lazy">
+        <figcaption><b>Телекинез</b>Трос и подсветка захвата.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/06-ceiling.png" alt="Игрок на потолке после переворота гравитации" loading="lazy">
+        <figcaption><b>Потолок</b>Игрок на плите, дропы ушли вверх.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/07-too-far.png" alt="Курсор вне радиуса копания" loading="lazy">
+        <figcaption><b>Слишком далеко</b>Вне радиуса 4 тайла.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/08-cave.png" alt="Пещера после раскопок" loading="lazy">
+        <figcaption><b>После раскопок</b>Мир меняется по-настоящему.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------ как проверено -->
+  <section id="verify">
+    <h2><span class="num">08</span>Как проверено</h2>
+    <pre><span class="c"># 45 автопроверок логики и физики</span>
+cd tools
+npm i @napi-rs/canvas      <span class="c"># только для скриншотов; игра зависимостей не имеет</span>
+node verify.mjs            <span class="c"># → 45/45 проверок пройдено</span>
+node screenshots.mjs       <span class="c"># → 9 кадров в ../screenshots</span></pre>
+
+    <div class="grid g2" style="margin-top:14px">
+      <div class="card">
+        <h3>Что покрыто проверками</h3>
+        <ul class="tight sm">
+          <li>Генерация мира, пустые верхние ряды, потолочная плита.</li>
+          <li>Ходьба, прыжок, границы мира, отсутствие застревания в тайлах.</li>
+          <li>Тайминги копания по типам, сброс прогресса, «далеко».</li>
+          <li>Спавн, падение, сон, подбор на ходу, частицы, пульсация HUD.</li>
+          <li>Телекинез ящика и дропа, падение ящика без опоры.</li>
+          <li>Переворот гравитации: потолок, прыжок, дропы вверх и сквозь плиту.</li>
+          <li>Буфер тайлов: 0 перерисовок в простое, 1 <code>drawImage</code> за кадр.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Чего проверки не делают</h3>
+        <ul class="tight sm">
+          <li>Не браузерный FPS: цифры — время JS+draw в headless.</li>
+          <li>Не ощущение: «щёлкает» ли копание — только руками.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="btnrow">
+      <a class="btn ghost" href="gravity-void.html">Открыть игру</a>
+      <a class="btn ghost" href="README.md">README</a>
+    </div>
+    <p>Ветка <code>arena/b1bb672b-game1</code> · задел под 1B: <code>CFG.hud.active</code>, <code>World.set</code>, <code>mineTile</code>, клавиши 1–4.</p>
+  </footer>
+</main>
+
+<script>
+// Страница ревью не должна быть пустой и не должна зависеть от игры:
+// всё, что ниже — только косметика поверх статического HTML и картинок.
+(function () {
+  "use strict";
+
+  /* ---------- скриншоты: показываем, сколько реально загрузилось ---------- */
+  var imgs = Array.prototype.slice.call(document.querySelectorAll('.shots img, #poster'));
+  var total = imgs.length, loaded = 0, failed = 0;
+  var chipShots = document.getElementById('chip-shots');
+
+  function updateShots() {
+    if (!chipShots) return;
+    var ok = loaded === total && failed === 0;
+    chipShots.className = 'chip ' + (ok ? 'ok' : (failed ? 'bad' : ''));
+    chipShots.lastElementChild.textContent = 'скриншоты: ' + loaded + ' / ' + total + (failed ? ' (не хватает ' + failed + ')' : '');
+    if (failed) {
+      var hint = document.createElement('p');
+      hint.className = 'sm muted';
+      hint.style.marginTop = '10px';
+      hint.textContent = 'Часть скриншотов не загрузилась — откройте страницу из корня репозитория, чтобы папка screenshots/ была рядом.';
+      var grid = document.getElementById('shot-grid');
+      if (grid && !document.getElementById('shots-warn')) {
+        hint.id = 'shots-warn';
+        grid.parentNode.insertBefore(hint, grid);
+      }
+    }
+  }
+
+  imgs.forEach(function (img) {
+    if (img.complete && img.naturalWidth > 0) { loaded++; return; }
+    img.addEventListener('load', function () { loaded++; updateShots(); });
+    img.addEventListener('error', function () { failed++; updateShots(); });
+  });
+  updateShots();
+
+  /* ---------- игра во встроенном фрейме ---------- */
+  var veil = document.getElementById('veil');
+  var stage = document.getElementById('stage');
+  var playBtn = document.getElementById('play-btn');
+  var chipGame = document.getElementById('chip-game');
+  var frame = null;
+  var booted = false;
+
+  function setGameChip(cls, text) {
+    if (!chipGame) return;
+    chipGame.className = 'chip ' + cls;
+    chipGame.lastElementChild.textContent = text;
+  }
+
+  function startEmbedded() {
+    if (frame) return;
+    frame = document.createElement('iframe');
+    frame.src = 'gravity-void.html';
+    frame.title = 'GRAVITY: VOID — игра';
+    frame.allow = 'fullscreen';
+    frame.addEventListener('load', function () {
+      booted = true;
+      setGameChip('ok', 'игра: загружена во фрейме');
+      if (veil) veil.style.display = 'none';
+    });
+    stage.appendChild(frame);
+    setGameChip('', 'игра: загружается…');
+    try { frame.focus(); } catch (e) { /* фокус — не критично */ }
+  }
+
+  if (playBtn) {
+    playBtn.addEventListener('click', function () {
+      startEmbedded();
+      setTimeout(function () {
+        // если за 4 с фрейм не отдал load — честно говорим об этом, но кадр остаётся
+        if (!booted) {
+          setGameChip('bad', 'игра: фрейм не загрузился — откройте в новой вкладке');
+          if (veil) veil.style.display = '';
+        }
+      }, 4000);
+    });
+  }
+
+  // Проверяем, что файл игры вообще лежит рядом — без запуска самого фрейма
+  fetch('gravity-void.html', { method: 'HEAD' }).then(function (r) {
+    if (r.ok) {
+      if (!booted) setGameChip('ok', 'игра: файл найден (' + (r.headers.get('content-length') ? Math.round(r.headers.get('content-length') / 1024) + ' КБ' : 'ok') + ')');
+    } else {
+      setGameChip('bad', 'игра: файл не найден рядом со страницей');
+    }
+  }).catch(function () {
+    setGameChip('', 'игра: локальный файл — проверка по сети недоступна');
+  });
+
+  /* ---------- якорная навигация без прыжка под липкое меню ---------- */
+  document.querySelectorAll('nav.toc a').forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      var el = document.querySelector(a.getAttribute('href'));
+      if (!el) return;
+      e.preventDefault();
+      var top = el.getBoundingClientRect().top + window.pageYOffset - 56;
+      window.scrollTo({ top: top, behavior: 'smooth' });
+    });
+  });
+})();
+</script>
+</body>
+</html>

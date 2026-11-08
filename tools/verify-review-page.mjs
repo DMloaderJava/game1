@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+const html = fs.readFileSync(new URL('../review.html', import.meta.url), 'utf8');
 const js = html.slice(html.lastIndexOf('<script>')+8, html.lastIndexOf('</script>'));
 
 // грубая проверка структуры: все локальные картинки существуют
