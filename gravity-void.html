@@ -1,0 +1,1674 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GRAVITY: VOID — итерация 1A</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #05070c; overflow: hidden; }
+  #view { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<script>
+"use strict";
+
+/* ============================================================
+   Типы тайлов
+   ============================================================ */
+const TILE = { EMPTY: 0, DIRT: 1, STONE: 2, FERRITE: 3 };
+
+/* ============================================================
+   CFG — все числа прототипа собраны здесь
+   ============================================================ */
+const CFG = {
+  seed: 20261108,
+  step: 1 / 60,
+  tile: 32,
+
+  // Мир: 200x100 тайлов = 6400x3200 px
+  world: { cols: 200, rows: 100 },
+  layers: {
+    skyRows: 5,          // верхние 5 рядов гарантированно EMPTY
+    ceilingRows: 2,      // потолочная плита — по ней ходят при перевороте
+    caveRows: 10,        // основной зал
+    dirtRows: 5,         // слой DIRT
+    ferriteChance: 0.05  // доля FERRITE в STONE
+  },
+
+  // Уступы в зале: проходимая геометрия для проверки физики.
+  // Ряды 7..16 — зал, ниже начинается земля.
+  ledges: [
+    { x: 26, y: 13, w: 6 },
+    { x: 34, y: 10, w: 5 },
+    { x: 43, y: 12, w: 6 },
+    { x: 52, y: 14, w: 8 },
+    { x: 66, y: 11, w: 10 },
+    { x: 70, y: 15, w: 5 },
+    { x: 82, y: 13, w: 7 },
+    { x: 95, y: 14, w: 9 },
+    { x: 97, y: 9, w: 6 },
+    { x: 112, y: 12, w: 8 },
+    { x: 126, y: 15, w: 10 },
+    { x: 128, y: 10, w: 5 },
+    { x: 145, y: 13, w: 9 },
+    { x: 161, y: 14, w: 7 },
+    { x: 163, y: 9, w: 6 },
+    { x: 179, y: 12, w: 8 }
+  ],
+
+  spawn: { playerTileX: 16, cratesTileX: [22, 26, 31] },
+
+  // Ресурсы: цвет используется и в тайлах, и в дропах, и в HUD
+  resources: [
+    { id: TILE.DIRT, name: 'DIRT', color: '#6b4a2b', shade: '#49301b', light: '#946a3c' },
+    { id: TILE.STONE, name: 'STONE', color: '#7a7a85', shade: '#53535d', light: '#a4a4b0' },
+    { id: TILE.FERRITE, name: 'FERRITE', color: '#4a7fbf', shade: '#2c4f78', light: '#8fbcf0' }
+  ],
+
+  physics: { gravity: 2200, maxFall: 1150, maxStepPx: 10 },
+
+  player: {
+    w: 22, h: 28,
+    speed: 265,
+    accelGround: 2600, accelAir: 1900,
+    frictionGround: 3200, frictionAir: 500,
+    jump: 660,
+    coyote: 0.1, jumpBuffer: 0.12,
+    flipTime: 0.18
+  },
+
+  drop: {
+    size: 12,
+    spawnVx: 80, spawnVy: 150, popOut: 170,
+    bounce: 0.22, bounceMin: 150,
+    groundDamp: 9, sleepSpeed: 14, sleepTime: 0.25,
+    wakeRadius: 2, wakeKick: 60
+  },
+
+  crate: { w: 36, h: 36 },
+
+  dig: {
+    radius: 4,                          // тайлов от центра игрока
+    times: { 1: 0.15, 2: 0.5, 3: 0.7 }, // по типам тайлов
+    dustEvery: 0.09,                    // пыль во время копания
+    tooFarHold: 0.3,                    // сколько держится надпись «далеко»
+    radiusEcho: 0.9                     // вспышка радиуса после переворота гравитации
+  },
+
+  tele: { range: 8, stiffness: 90, damping: 15, maxSpeed: 950, pushImpulse: 620, pushCooldown: 0.15 },
+
+  pickup: { pad: 3 },                   // допуск на пересечение с игроком
+
+  camera: {
+    zoom: 2,                  // экранных пикселей на мировой
+    deadZoneX: 0.11, deadZoneY: 0.09,
+    smooth: 9, shakeDecay: 8, flipShake: 0.55
+  },
+
+  render: {
+    dprMax: 2,
+    detailBudgetMs: 3,        // бюджет на дорисовку текстур за кадр
+    font: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+    bgTop: '#0a0f1a', bgBottom: '#04060b',
+    dust: 70, dustParallax: 0.25, dustTile: 512
+  },
+
+  // hud.active: в 1B сюда придёт выбор материала (подсветка строки).
+  // В 1A режимов нет — поле всегда null.
+  hud: { w: 176, rowH: 26, pad: 12, pulse: 0.2, margin: 18, active: null },
+
+  particles: { max: 520, digMin: 3, digMax: 5, pickup: 6, life: 0.4, flip: 10 },
+
+  binds: ['KeyA', 'KeyD', 'Space', 'KeyF']
+};
+
+const TS = CFG.tile;
+
+// Быстрый доступ к описанию ресурса по id тайла
+const RES = {};
+for (const r of CFG.resources) RES[r.id] = r;
+
+/* ============================================================
+   Утилиты
+   ============================================================ */
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Детерминированный шум по координатам тайла — текстура не мерцает
+function hash2(x, y) {
+  let h = Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+// Скруглённый прямоугольник (свой, без внешних зависимостей)
+function rr(ctx, x, y, w, h, r) {
+  const rad = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rad, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rad);
+  ctx.arcTo(x + w, y + h, x, y + h, rad);
+  ctx.arcTo(x, y + h, x, y, rad);
+  ctx.arcTo(x, y, x + w, y, rad);
+  ctx.closePath();
+}
+
+function overlap(a, b, pad) {
+  const p = pad || 0;
+  return a.x - p < b.x + b.w && a.x + a.w + p > b.x &&
+         a.y - p < b.y + b.h && a.y + a.h + p > b.y;
+}
+
+/* ============================================================
+   Мир: тайловая сетка, статичная
+   ============================================================ */
+class World {
+  constructor(cfg) {
+    this.cols = cfg.world.cols;
+    this.rows = cfg.world.rows;
+    this.tiles = new Uint8Array(this.cols * this.rows);
+    this.dirty = [];        // индексы изменённых тайлов
+    this.surfaceRow = 0;
+    this.solidPx = 0;       // для отладки: сколько тайлов не пусто
+  }
+
+  inBounds(x, y) {
+    return x >= 0 && y >= 0 && x < this.cols && y < this.rows;
+  }
+
+  // За пределами мира — «камень», чтобы никто не ушёл за границу
+  get(x, y) {
+    if (!this.inBounds(x, y)) return TILE.STONE;
+    return this.tiles[y * this.cols + x];
+  }
+
+  solid(x, y) {
+    return this.get(x, y) !== TILE.EMPTY;
+  }
+
+  set(x, y, type) {
+    if (!this.inBounds(x, y)) return;
+    const i = y * this.cols + x;
+    if (this.tiles[i] === type) return;
+    this.tiles[i] = type;
+    this.dirty.push(i);
+  }
+
+  generate(cfg) {
+    const L = cfg.layers;
+    const ceilingTop = L.skyRows;
+    const caveTop = ceilingTop + L.ceilingRows;
+    const dirtTop = caveTop + L.caveRows;
+    const stoneTop = dirtTop + L.dirtRows;
+    this.surfaceRow = dirtTop;
+
+    const rnd = mulberry32(cfg.seed);
+    for (let y = 0; y < this.rows; y++) {
+      for (let x = 0; x < this.cols; x++) {
+        let t;
+        if (y < ceilingTop) t = TILE.EMPTY;               // небо
+        else if (y < caveTop) t = TILE.STONE;             // потолочная плита
+        else if (y < dirtTop) t = TILE.EMPTY;             // зал
+        else if (y < stoneTop) t = TILE.DIRT;             // земля
+        else t = rnd() < L.ferriteChance ? TILE.FERRITE : TILE.STONE;
+        this.tiles[y * this.cols + x] = t;
+      }
+    }
+
+    // Уступы поверх зала
+    for (const l of cfg.ledges) {
+      for (let x = l.x; x < l.x + l.w; x++) {
+        if (x < 0 || x >= this.cols || l.y < 0 || l.y >= this.rows) continue;
+        this.tiles[l.y * this.cols + x] = TILE.STONE;
+      }
+    }
+
+    this.dirty.length = 0;
+    return this;
+  }
+
+  countSolid() {
+    let n = 0;
+    for (let i = 0; i < this.tiles.length; i++) if (this.tiles[i] !== TILE.EMPTY) n++;
+    return n;
+  }
+}
+
+/* ============================================================
+   Рендер тайлов: offscreen-canvas, перерисовка только изменённых
+   ============================================================ */
+class TileLayer {
+  constructor(world) {
+    this.world = world;
+    this.canvas = document.createElement('canvas');
+    this.canvas.width = world.cols * TS;
+    this.canvas.height = world.rows * TS;
+    this.ctx = this.canvas.getContext('2d');
+
+    // Два прохода: силуэт рисуется сразу (запуск не «висит»),
+    // текстура — лениво, только для тайлов, попавших в кадр
+    this.detailed = new Uint8Array(world.cols * world.rows);
+    for (let y = 0; y < world.rows; y++) {
+      for (let x = 0; x < world.cols; x++) this.drawBase(x, y);
+    }
+  }
+
+  // Изменённые тайлы перерисовываются целиком сразу
+  flush() {
+    const dirty = this.world.dirty;
+    if (!dirty.length) return;
+    const cols = this.world.cols;
+    for (let i = 0; i < dirty.length; i++) {
+      const idx = dirty[i];
+      const tx = idx % cols, ty = Math.floor(idx / cols);
+      this.drawTile(tx, ty);
+      this.detailed[idx] = 0;
+    }
+    dirty.length = 0;
+  }
+
+  // Полная перерисовка одного тайла (после копания/строительства)
+  drawTile(tx, ty) {
+    this.drawBase(tx, ty);
+    if (this.world.solid(tx, ty)) {
+      this.drawDetail(tx, ty);
+      this.detailed[ty * this.world.cols + tx] = 1;
+    }
+  }
+
+  // Детализация тайлов, которые видно. Бюджет по времени — кадр не проваливается
+  detailVisible(world, camera, player) {
+    const cols = world.cols;
+    const tx0 = Math.max(0, Math.floor(camera.x / TS));
+    const tx1 = Math.min(cols - 1, Math.ceil((camera.x + camera.w) / TS));
+    const ty0 = Math.max(0, Math.floor(camera.y / TS));
+    const ty1 = Math.min(world.rows - 1, Math.ceil((camera.y + camera.h) / TS));
+    const pcx = player.cx / TS, pcy = player.cy / TS;
+
+    // Ближние к игроку тайлы — первыми
+    const list = [];
+    for (let y = ty0; y <= ty1; y++) {
+      for (let x = tx0; x <= tx1; x++) {
+        const i = y * cols + x;
+        if (this.detailed[i] || world.tiles[i] === TILE.EMPTY) continue;
+        list.push(i);
+      }
+    }
+    if (!list.length) return;
+    list.sort((a, b) => {
+      const ax = (a % cols) - pcx, ay = Math.floor(a / cols) - pcy;
+      const bx = (b % cols) - pcx, by = Math.floor(b / cols) - pcy;
+      return (ax * ax + ay * ay) - (bx * bx + by * by);
+    });
+
+    const t0 = performance.now();
+    for (let k = 0; k < list.length; k++) {
+      const i = list[k];
+      this.drawDetail(i % cols, Math.floor(i / cols));
+      this.detailed[i] = 1;
+      if ((k & 7) === 7 && performance.now() - t0 > CFG.render.detailBudgetMs) break;
+    }
+  }
+
+  // Силуэт: цвет породы + кромки на открытых гранях. Дешево и даёт читаемость.
+  drawBase(tx, ty) {
+    const c = this.ctx;
+    const type = this.world.tiles[ty * this.world.cols + tx];
+    const px = tx * TS;
+    const py = ty * TS;
+
+    c.clearRect(px, py, TS, TS);
+    if (type === TILE.EMPTY) return;
+
+    const rock = RES[type === TILE.FERRITE ? TILE.STONE : type];
+    c.fillStyle = rock.color;
+    c.fillRect(px, py, TS, TS);
+
+    const up = this.world.solid(tx, ty - 1);
+    if (!up) {
+      c.fillStyle = rock.light;
+      c.fillRect(px, py, TS, 3);
+      c.globalAlpha = 0.3;
+      c.fillRect(px, py + 3, TS, 2);
+      c.globalAlpha = 1;
+    }
+    c.globalAlpha = 0.45;
+    c.fillStyle = rock.shade;
+    if (!this.world.solid(tx, ty + 1)) c.fillRect(px, py + TS - 3, TS, 3);
+    if (!this.world.solid(tx + 1, ty)) c.fillRect(px + TS - 3, py, 3, TS);
+    if (!this.world.solid(tx - 1, ty)) c.fillRect(px, py, 2, TS);
+    c.globalAlpha = 1;
+  }
+
+  // Детали: слоистость, пятна, вкрапления, кристаллы феррита, намёк на сетку
+  drawDetail(tx, ty) {
+    const c = this.ctx;
+    const type = this.world.tiles[ty * this.world.cols + tx];
+    if (type === TILE.EMPTY) return;
+    const px = tx * TS;
+    const py = ty * TS;
+    const rock = RES[type === TILE.FERRITE ? TILE.STONE : type];
+
+    c.fillStyle = rock.color;
+    c.fillRect(px, py, TS, TS);
+    // База перекрыта — восстановим кромки после текстуры
+    const up = this.world.solid(tx, ty - 1);
+
+    if (ty % 3 === 0) {
+      c.globalAlpha = 0.07;
+      c.fillStyle = rock.shade;
+      c.fillRect(px, py, TS, TS);
+      c.globalAlpha = 1;
+    }
+    c.globalAlpha = 0.14;
+    for (let i = 0; i < 2; i++) {
+      const a = hash2(tx * 7 + i * 3, ty * 13 - i);
+      const b = hash2(tx * 3 - i, ty * 5 + i + 31);
+      c.fillStyle = i ? rock.shade : rock.light;
+      c.fillRect(px + Math.floor(a * (TS - 12)), py + Math.floor(b * (TS - 12)),
+                 7 + Math.floor(a * 7), 5 + Math.floor(b * 9));
+    }
+    c.globalAlpha = 0.32;
+    for (let i = 0; i < 2; i++) {
+      const a = hash2(tx * 11 - i, ty * 17 + i);
+      const b = hash2(tx * 23 + i, ty * 29 - i);
+      c.fillStyle = i ? rock.shade : rock.light;
+      c.fillRect(px + 3 + Math.floor(a * (TS - 7)), py + 4 + Math.floor(b * (TS - 7)), 2, 2);
+    }
+
+    // Еле заметная сетка: прицел и радиус считаются по тайлам,
+    // границы клеток должны угадываться, но не превращаться в «одеяло»
+    c.globalAlpha = 0.06;
+    c.fillStyle = '#ffffff';
+    c.fillRect(px, py, TS, 1);
+    c.fillRect(px, py, 1, TS);
+    c.globalAlpha = 1;
+
+    if (type === TILE.FERRITE) this.drawFerrite(px, py, tx, ty);
+
+    if (!up) {
+      c.fillStyle = rock.light;
+      c.fillRect(px, py, TS, 3);
+      c.globalAlpha = 0.3;
+      c.fillRect(px, py + 3, TS, 2);
+      c.globalAlpha = 1;
+    }
+  }
+
+  drawFerrite(px, py, tx, ty) {
+    const c = this.ctx;
+    const m = RES[TILE.FERRITE];
+    // Кристаллы заметно ярче камня — иначе феррит не находился глазом
+    for (let i = 0; i < 5; i++) {
+      const hx = hash2(tx * 17 + i, ty * 23 - i);
+      const hy = hash2(tx * 19 - i, ty * 29 + i);
+      const size = 3 + Math.floor(hx * 5);
+      c.fillStyle = i % 2 ? m.light : m.color;
+      c.fillRect(px + 4 + Math.floor(hy * (TS - 11)), py + 4 + Math.floor(hx * (TS - 11)), size, size);
+      if (i < 2) {
+        c.globalAlpha = 0.55;
+        c.fillStyle = '#dceeff';
+        c.fillRect(px + 4 + Math.floor(hy * (TS - 11)), py + 4 + Math.floor(hx * (TS - 11)), 1, 1);
+        c.globalAlpha = 1;
+      }
+    }
+  }
+
+}
+
+/* ============================================================
+   Физика: AABB против тайлов
+   ============================================================ */
+function resolveX(world, b) {
+  const y0 = Math.floor(b.y / TS);
+  const y1 = Math.floor((b.y + b.h - 0.001) / TS);
+  if (b.vx > 0) {
+    const tx = Math.floor((b.x + b.w - 0.001) / TS);
+    for (let y = y0; y <= y1; y++) {
+      if (world.solid(tx, y)) {
+        b.x = tx * TS - b.w - 0.001;
+        b.vx = 0;
+        return;
+      }
+    }
+  } else if (b.vx < 0) {
+    const tx = Math.floor(b.x / TS);
+    for (let y = y0; y <= y1; y++) {
+      if (world.solid(tx, y)) {
+        b.x = (tx + 1) * TS + 0.001;
+        b.vx = 0;
+        return;
+      }
+    }
+  }
+}
+
+function resolveY(world, b, gdir) {
+  const x0 = Math.floor(b.x / TS);
+  const x1 = Math.floor((b.x + b.w - 0.001) / TS);
+  if (b.vy > 0) {
+    const ty = Math.floor((b.y + b.h - 0.001) / TS);
+    for (let x = x0; x <= x1; x++) {
+      if (world.solid(x, ty)) {
+        b.y = ty * TS - b.h - 0.001;
+        b.vy = 0;
+        if (gdir >= 0) b.onGround = true;
+        return;
+      }
+    }
+  } else if (b.vy < 0) {
+    const ty = Math.floor(b.y / TS);
+    for (let x = x0; x <= x1; x++) {
+      if (world.solid(x, ty)) {
+        b.y = (ty + 1) * TS + 0.001;
+        b.vy = 0;
+        if (gdir < 0) b.onGround = true;
+        return;
+      }
+    }
+  }
+}
+
+// Движение с дроблением шага — чтобы быстрые тела не проходили сквозь тайлы
+function moveAndCollide(world, b, dt, gdir) {
+  const dx = b.vx * dt;
+  const dy = b.vy * dt;
+  const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / CFG.physics.maxStepPx));
+  const sdt = dt / steps;
+  for (let i = 0; i < steps; i++) {
+    b.x += b.vx * sdt;
+    resolveX(world, b);
+    b.y += b.vy * sdt;
+    resolveY(world, b, gdir);
+  }
+}
+
+function overlapsSolidTile(world, b) {
+  const x0 = Math.floor(b.x / TS);
+  const x1 = Math.floor((b.x + b.w - 0.001) / TS);
+  const y0 = Math.floor(b.y / TS);
+  const y1 = Math.floor((b.y + b.h - 0.001) / TS);
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      if (world.solid(x, y)) return true;
+    }
+  }
+  return false;
+}
+
+/* ============================================================
+   Физическое тело (ящик, дроп)
+   ============================================================ */
+class PhysBody {
+  constructor(x, y, w, h) {
+    this.gravitySign = 1;
+    this.x = x; this.y = y;
+    this.w = w; this.h = h;
+    this.vx = 0; this.vy = 0;
+    this.onGround = false;
+    this.sleeping = false;
+    this.sleepTimer = 0;
+    this.gravityScale = 1;
+    this.dead = false;
+  }
+
+  get cx() { return this.x + this.w / 2; }
+  get cy() { return this.y + this.h / 2; }
+
+  wake() {
+    this.sleeping = false;
+    this.sleepTimer = 0;
+  }
+
+  step(dt, world, gsign) {
+    if (this.sleeping) { this.onGround = true; return; }
+    this.gravitySign = gsign;
+    this.vy = clamp(this.vy + CFG.physics.gravity * gsign * this.gravityScale * dt,
+                    -CFG.physics.maxFall, CFG.physics.maxFall);
+    const impactVy = this.vy;
+    this.onGround = false;
+    moveAndCollide(world, this, dt, gsign);
+    this.onLanded(impactVy, dt);
+  }
+
+  onLanded() {}
+}
+
+class Crate extends PhysBody {
+  constructor(x, y) {
+    super(x, y, CFG.crate.w, CFG.crate.h);
+  }
+}
+
+class Drop extends PhysBody {
+  constructor(x, y, type) {
+    super(x, y, CFG.drop.size, CFG.drop.size);
+    this.type = type;
+    this.spin = hash2(Math.floor(x), Math.floor(y)) * Math.PI;
+  }
+
+  onLanded(impactVy, dt) {
+    if (this.onGround) {
+      // Мягкий отскок — дроп «приземляется», а не прилипает
+      if (Math.abs(impactVy) > CFG.drop.bounceMin) this.vy = -impactVy * CFG.drop.bounce;
+      this.vx *= Math.exp(-CFG.drop.groundDamp * dt);
+      if (Math.abs(this.vx) < CFG.drop.sleepSpeed && Math.abs(this.vy) < CFG.drop.sleepSpeed) {
+        this.sleepTimer += dt;
+        if (this.sleepTimer > CFG.drop.sleepTime) {
+          this.sleeping = true;
+          this.vx = 0;
+          this.vy = 0;
+        }
+      } else {
+        this.sleepTimer = 0;
+      }
+    } else {
+      this.sleepTimer = 0;
+    }
+  }
+}
+
+/* ============================================================
+   Игрок
+   ============================================================ */
+class Player {
+  constructor(x, y) {
+    this.x = x; this.y = y;
+    this.w = CFG.player.w;
+    this.h = CFG.player.h;
+    this.vx = 0; this.vy = 0;
+    this.onGround = false;
+    this.gravityTarget = 1;   // куда хотим перевернуться (+1 вниз, -1 вверх)
+    this.gravitySign = 1;     // текущий плавно интерполированный знак
+    this.coyote = 0;
+    this.jumpBuffer = 0;
+    this.facing = 1;
+    this.walkPhase = 0;
+  }
+
+  get cx() { return this.x + this.w / 2; }
+  get cy() { return this.y + this.h / 2; }
+
+  update(dt, input, world, crates) {
+    // --- горизонталь ---
+    const dir = (input.down('KeyD') ? 1 : 0) - (input.down('KeyA') ? 1 : 0);
+    if (dir !== 0) this.facing = dir;
+
+    const accel = this.onGround ? CFG.player.accelGround : CFG.player.accelAir;
+    if (dir !== 0) {
+      this.vx += dir * accel * dt;
+      const lim = CFG.player.speed;
+      if (Math.abs(this.vx) > lim) this.vx = Math.sign(this.vx) * lim;
+    } else {
+      const fric = (this.onGround ? CFG.player.frictionGround : CFG.player.frictionAir) * dt;
+      if (Math.abs(this.vx) <= fric) this.vx = 0;
+      else this.vx -= Math.sign(this.vx) * fric;
+    }
+
+    // --- плавный переворот гравитации ---
+    if (this.gravitySign !== this.gravityTarget) {
+      const rate = 2 / CFG.player.flipTime;
+      const left = Math.abs(this.gravityTarget - this.gravitySign);
+      const stepSign = rate * dt;
+      if (left <= stepSign) this.gravitySign = this.gravityTarget;
+      else this.gravitySign += Math.sign(this.gravityTarget - this.gravitySign) * stepSign;
+    }
+
+    // --- прыжок (с coyote-time и буфером) ---
+    if (input.consume('Space')) this.jumpBuffer = CFG.player.jumpBuffer;
+    this.jumpBuffer = Math.max(0, this.jumpBuffer - dt);
+    this.coyote = this.onGround ? CFG.player.coyote : Math.max(0, this.coyote - dt);
+
+    if (this.jumpBuffer > 0 && this.coyote > 0) {
+      this.vy = -CFG.player.jump * this.gravityTarget;
+      this.jumpBuffer = 0;
+      this.coyote = 0;
+      this.onGround = false;
+    }
+
+    // --- гравитация и перемещение ---
+    this.vy = clamp(this.vy + CFG.physics.gravity * this.gravitySign * dt,
+                    -CFG.physics.maxFall, CFG.physics.maxFall);
+    this.onGround = false;
+    moveAndCollide(world, this, dt, this.gravitySign);
+
+    // --- ящики твёрдые для игрока ---
+    for (const c of crates) this.pushOutOf(c, world);
+
+    // --- фаза шага для простой анимации ног ---
+    if (this.onGround && Math.abs(this.vx) > 20) {
+      this.walkPhase += dt * Math.abs(this.vx) * 0.05;
+    } else {
+      this.walkPhase = 0;
+    }
+  }
+
+  pushOutOf(c, world) {
+    if (!overlap(this, c, 0)) return;
+    const ox = (this.w + c.w) / 2 - Math.abs(this.cx - c.cx);
+    const oy = (this.h + c.h) / 2 - Math.abs(this.cy - c.cy);
+
+    const px = this.x, py = this.y, pvx = this.vx, pvy = this.vy;
+
+    if (ox < oy) {
+      this.x += Math.sign(this.cx - c.cx) * ox;
+      this.vx = 0;
+    } else {
+      const dirY = Math.sign(this.cy - c.cy);
+      this.y += dirY * oy;
+      if (this.vy * dirY < 0) this.vy = 0;
+      if (dirY === -this.gravitySign) this.onGround = true;
+    }
+
+    // Не вдавливаем игрока в тайл: откат, если после выталкивания он внутри камня
+    if (overlapsSolidTile(world, this)) {
+      this.x = px; this.y = py;
+      this.vx = pvx; this.vy = pvy;
+    }
+  }
+}
+
+/* ============================================================
+   Частицы
+   ============================================================ */
+class Particles {
+  constructor() { this.list = []; }
+
+  add(x, y, vx, vy, size, color, life) {
+    if (this.list.length >= CFG.particles.max) this.list.shift();
+    this.list.push({ x, y, vx, vy, size, color, life, maxLife: life });
+  }
+
+  dig(tileType, cx, cy, rnd) {
+    const m = RES[tileType];
+    const n = CFG.particles.digMin + Math.floor(rnd() * (CFG.particles.digMax - CFG.particles.digMin + 1));
+    for (let i = 0; i < n; i++) {
+      const a = rnd() * Math.PI * 2;
+      const sp = 40 + rnd() * 110;
+      this.add(cx, cy, Math.cos(a) * sp, Math.sin(a) * sp,
+               3 + Math.floor(rnd() * 3), i % 2 ? m.color : m.light, CFG.particles.life);
+    }
+  }
+
+  dust(tileType, cx, cy, rnd) {
+    const m = RES[tileType];
+    this.add(cx, cy, (rnd() - 0.5) * 40, -20 - rnd() * 30, 2, m.light, 0.3);
+  }
+
+  pickup(type, cx, cy, rnd) {
+    const m = RES[type];
+    for (let i = 0; i < CFG.particles.pickup; i++) {
+      const a = (i / CFG.particles.pickup) * Math.PI * 2 + rnd() * 0.4;
+      const sp = 60 + rnd() * 90;
+      this.add(cx, cy, Math.cos(a) * sp, Math.sin(a) * sp, 2, m.light, 0.45);
+    }
+  }
+
+  flip(cx, cy) {
+    for (let i = 0; i < CFG.particles.flip; i++) {
+      const a = (i / CFG.particles.flip) * Math.PI * 2;
+      this.add(cx, cy, Math.cos(a) * 150, Math.sin(a) * 150, 2, '#9fd8ff', 0.35);
+    }
+  }
+
+  update(dt, gsign) {
+    const g = CFG.physics.gravity * 0.3 * gsign;
+    for (let i = this.list.length - 1; i >= 0; i--) {
+      const p = this.list[i];
+      p.life -= dt;
+      if (p.life <= 0) { this.list.splice(i, 1); continue; }
+      p.vy += g * dt;
+      p.vx *= Math.exp(-2 * dt);
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+    }
+  }
+
+  draw(ctx) {
+    for (const p of this.list) {
+      ctx.globalAlpha = clamp(p.life / p.maxLife, 0, 1);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(Math.round(p.x), Math.round(p.y), p.size, p.size);
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+/* ============================================================
+   Инвентарь
+   ============================================================ */
+class Inventory {
+  constructor(resources) {
+    this.counts = {};
+    this.pulse = {};
+    for (const r of resources) {
+      this.counts[r.id] = 0;
+      this.pulse[r.id] = 0;
+    }
+  }
+
+  add(id, n) {
+    this.counts[id] += n;
+    this.pulse[id] = CFG.hud.pulse;
+  }
+
+  update(dt) {
+    for (const k in this.pulse) {
+      if (this.pulse[k] > 0) this.pulse[k] = Math.max(0, this.pulse[k] - dt);
+    }
+  }
+}
+
+/* ============================================================
+   Камера: мёртвая зона по центру + сглаживание
+   ============================================================ */
+class Camera {
+  constructor(worldW, worldH) {
+    this.worldW = worldW;
+    this.worldH = worldH;
+    this.x = 0; this.y = 0;
+    this.w = 1; this.h = 1;
+    this.shakeT = 0;
+    this.ox = 0; this.oy = 0;
+  }
+
+  setViewport(w, h) {
+    this.w = w;
+    this.h = h;
+    this.clamp();
+  }
+
+  clamp() {
+    const maxX = Math.max(0, this.worldW - this.w);
+    const maxY = Math.max(0, this.worldH - this.h);
+    this.x = clamp(this.x, 0, maxX);
+    this.y = clamp(this.y, 0, maxY);
+    if (this.worldW < this.w) this.x = (this.worldW - this.w) / 2;
+    if (this.worldH < this.h) this.y = (this.worldH - this.h) / 2;
+  }
+
+  snap(target) {
+    this.x = target.cx - this.w / 2;
+    this.y = target.cy - this.h / 2;
+    this.clamp();
+  }
+
+  shake(amount) {
+    this.shakeT = Math.max(this.shakeT, amount);
+  }
+
+  update(target, dt) {
+    const dzx = this.w * CFG.camera.deadZoneX;
+    const dzy = this.h * CFG.camera.deadZoneY;
+    const cx = this.x + this.w / 2;
+    const cy = this.y + this.h / 2;
+
+    let wantX = this.x;
+    let wantY = this.y;
+    if (target.cx > cx + dzx) wantX += target.cx - (cx + dzx);
+    else if (target.cx < cx - dzx) wantX += target.cx - (cx - dzx);
+    if (target.cy > cy + dzy) wantY += target.cy - (cy + dzy);
+    else if (target.cy < cy - dzy) wantY += target.cy - (cy - dzy);
+
+    const k = 1 - Math.exp(-CFG.camera.smooth * dt);
+    this.x += (wantX - this.x) * k;
+    this.y += (wantY - this.y) * k;
+    this.clamp();
+
+    // Затухающая тряска
+    if (this.shakeT > 0) {
+      this.shakeT = Math.max(0, this.shakeT - dt * CFG.camera.shakeDecay);
+      const a = this.shakeT * 6;
+      this.ox = (Math.random() - 0.5) * a;
+      this.oy = (Math.random() - 0.5) * a;
+    } else {
+      this.ox = 0;
+      this.oy = 0;
+    }
+  }
+}
+
+/* ============================================================
+   Ввод
+   ============================================================ */
+class Input {
+  constructor(canvas) {
+    this.keys = new Set();
+    this.pressed = new Set();
+    this.mouse = { x: 0, y: 0, left: false, right: false };
+    this.rect = { left: 0, top: 0 };
+
+    window.addEventListener('keydown', (e) => {
+      if (CFG.binds.indexOf(e.code) !== -1) e.preventDefault();
+      if (!e.repeat) this.pressed.add(e.code);
+      this.keys.add(e.code);
+    });
+    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    window.addEventListener('blur', () => {
+      this.keys.clear();
+      this.mouse.left = false;
+      this.mouse.right = false;
+    });
+
+    canvas.addEventListener('mousemove', (e) => this.setMouse(e));
+    canvas.addEventListener('mousedown', (e) => {
+      this.setMouse(e);
+      if (e.button === 0) this.mouse.left = true;
+      if (e.button === 2) this.mouse.right = true;
+      e.preventDefault();
+    });
+    window.addEventListener('mouseup', (e) => {
+      if (e.button === 0) this.mouse.left = false;
+      if (e.button === 2) this.mouse.right = false;
+    });
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+
+  setMouse(e) {
+    this.mouse.x = e.clientX - this.rect.left;
+    this.mouse.y = e.clientY - this.rect.top;
+  }
+
+  down(code) { return this.keys.has(code); }
+
+  consume(code) {
+    if (!this.pressed.has(code)) return false;
+    this.pressed.delete(code);
+    return true;
+  }
+
+  endFrame() { this.pressed.clear(); }
+}
+
+/* ============================================================
+   Игра
+   ============================================================ */
+class Game {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d', { alpha: false });
+    this.rnd = mulberry32(CFG.seed ^ 0x9e3779b9);
+
+    this.world = new World(CFG).generate(CFG);
+    this.tiles = new TileLayer(this.world);
+    this.camera = new Camera(this.world.cols * TS, this.world.rows * TS);
+    this.input = new Input(canvas);
+    this.particles = new Particles();
+    this.inventory = new Inventory(CFG.resources);
+
+    // Игрок стоит на поверхности
+    const px = CFG.spawn.playerTileX * TS + (TS - CFG.player.w) / 2;
+    const py = this.world.surfaceRow * TS - CFG.player.h;
+    this.player = new Player(px, py);
+
+    // Ящики для телекинеза
+    this.crates = [];
+    for (const tx of CFG.spawn.cratesTileX) {
+      this.crates.push(new Crate(tx * TS + (TS - CFG.crate.w) / 2,
+                                 this.world.surfaceRow * TS - CFG.crate.h));
+    }
+
+    this.drops = [];
+    this.dig = null;               // { tx, ty, type, progress, max }
+    this.digDustT = 0;
+    this.tooFarT = 0;
+    this.grab = null;
+    this.leftAction = null;        // 'dig' | 'grab' | null
+    this.prevLeft = false;
+    this.radiusEcho = 0;
+    this.pushCd = 0;
+    this.gravitySign = 1;
+    this.time = 0;
+    this.accum = 0;
+    this.fps = 60;
+    this.stars = this.makeDust();
+
+    this.resize();
+    window.addEventListener('resize', () => this.resize());
+    this.camera.snap(this.player);
+  }
+
+  makeDust() {
+    const rnd = mulberry32(CFG.seed ^ 0x51ed270b);
+    const list = [];
+    for (let i = 0; i < CFG.render.dust; i++) {
+      list.push({
+        x: rnd() * CFG.render.dustTile,
+        y: rnd() * CFG.render.dustTile,
+        r: 1 + rnd() * 1.4,
+        a: 0.12 + rnd() * 0.3
+      });
+    }
+    return list;
+  }
+
+  resize() {
+    this.dpr = Math.min(window.devicePixelRatio || 1, CFG.render.dprMax);
+    this.vw = Math.max(320, window.innerWidth || 1280);
+    this.vh = Math.max(240, window.innerHeight || 720);
+    this.canvas.width = Math.round(this.vw * this.dpr);
+    this.canvas.height = Math.round(this.vh * this.dpr);
+    this.canvas.style.width = this.vw + 'px';
+    this.canvas.style.height = this.vh + 'px';
+    this.input.rect = typeof this.canvas.getBoundingClientRect === 'function'
+      ? this.canvas.getBoundingClientRect()
+      : { left: 0, top: 0 };
+    this.camera.setViewport(this.vw / CFG.camera.zoom, this.vh / CFG.camera.zoom);
+  }
+
+  /* ---------- игровые величины ---------- */
+
+  mouseWorld() {
+    const z = CFG.camera.zoom;
+    return {
+      x: this.input.mouse.x / z + Math.round(this.camera.x),
+      y: this.input.mouse.y / z + Math.round(this.camera.y)
+    };
+  }
+
+  // Мировые координаты курсора считаем один раз за кадр
+  get mouseW() {
+    const m = this.input.mouse;
+    if (this._mwKey !== (m.x + ',' + m.y + ',' + this.camera.x + ',' + this.camera.y)) {
+      this._mwKey = m.x + ',' + m.y + ',' + this.camera.x + ',' + this.camera.y;
+      this._mouseW = this.mouseWorld();
+    }
+    return this._mouseW;
+  }
+
+  bodies() {
+    return this.crates.concat(this.drops);
+  }
+
+  bodyAt(wx, wy) {
+    // Сначала дропы (они мельче и лежат сверху), потом ящики
+    for (let i = this.drops.length - 1; i >= 0; i--) {
+      const d = this.drops[i];
+      if (wx >= d.x && wx <= d.x + d.w && wy >= d.y && wy <= d.y + d.h) return d;
+    }
+    for (const c of this.crates) {
+      if (wx >= c.x && wx <= c.x + c.w && wy >= c.y && wy <= c.y + c.h) return c;
+    }
+    return null;
+  }
+
+  inTeleRange(body) {
+    const p = this.player;
+    const d = Math.hypot(body.cx - p.cx, body.cy - p.cy) / TS;
+    return d <= CFG.tele.range;
+  }
+
+  tileDistance(tx, ty) {
+    const p = this.player;
+    const cx = tx * TS + TS / 2;
+    const cy = ty * TS + TS / 2;
+    return Math.hypot(cx - p.cx, cy - p.cy) / TS;
+  }
+
+  /* ---------- действия ---------- */
+
+  flipGravity() {
+    this.player.gravityTarget *= -1;
+    this.particles.flip(this.player.cx, this.player.cy);
+    this.camera.shake(CFG.camera.flipShake);
+    this.radiusEcho = CFG.dig.radiusEcho;
+    // Спящие тела иначе остались бы лежать «приклеенными» к полу
+    for (const b of this.bodies()) {
+      if (b.sleeping) b.wake();
+      b.vy += b.gravitySign * CFG.drop.wakeKick;
+    }
+  }
+
+  updateMouse(dt) {
+    const inp = this.input;
+    const mw = this.mouseW;
+    const left = inp.mouse.left;
+    const right = inp.mouse.right;
+
+    // Нажатие ЛКМ: решаем один раз — тянем тело или копаем тайл
+    if (left && !this.prevLeft) {
+      const body = this.bodyAt(mw.x, mw.y);
+      if (body && this.inTeleRange(body)) {
+        this.leftAction = 'grab';
+        this.grab = body;
+        body.wake();
+        body.gravityScale = 0;
+        this.dig = null;
+      } else {
+        this.leftAction = 'dig';
+        this.dig = null;
+      }
+    }
+
+    if (!left) {
+      if (this.leftAction === 'grab') this.releaseGrab();
+      this.leftAction = null;
+      this.dig = null;
+    }
+
+    if (this.leftAction === 'grab') this.updateGrab(dt, mw);
+    else if (this.leftAction === 'dig') this.updateDig(dt, mw);
+
+    // ПКМ — импульс от игрока
+    this.pushCd = Math.max(0, this.pushCd - dt);
+    if (right && this.pushCd <= 0) {
+      const body = this.bodyAt(mw.x, mw.y);
+      if (body && this.inTeleRange(body)) {
+        this.pushBody(body);
+        this.pushCd = CFG.tele.pushCooldown;
+      }
+    }
+
+    this.tooFarT = Math.max(0, this.tooFarT - dt);
+    this.radiusEcho = Math.max(0, this.radiusEcho - dt);
+    this.prevLeft = left;
+  }
+
+  releaseGrab() {
+    if (this.grab) {
+      this.grab.gravityScale = 1;
+      this.grab.wake();
+      this.grab = null;
+    }
+  }
+
+  updateGrab(dt, mw) {
+    const b = this.grab;
+    if (!b || b.dead) { this.grab = null; this.leftAction = null; return; }
+
+    // Цель — курсор, но не дальше радиуса телекинеза от игрока
+    const p = this.player;
+    let tx = mw.x, ty = mw.y;
+    const dx = tx - p.cx, dy = ty - p.cy;
+    const dist = Math.hypot(dx, dy);
+    const maxD = CFG.tele.range * TS;
+    if (dist > maxD) {
+      tx = p.cx + (dx / dist) * maxD;
+      ty = p.cy + (dy / dist) * maxD;
+    }
+
+    b.vx += (tx - b.cx) * CFG.tele.stiffness * dt;
+    b.vy += (ty - b.cy) * CFG.tele.stiffness * dt;
+    const damp = Math.exp(-CFG.tele.damping * dt);
+    b.vx *= damp;
+    b.vy *= damp;
+    const sp = Math.hypot(b.vx, b.vy);
+    if (sp > CFG.tele.maxSpeed) {
+      b.vx *= CFG.tele.maxSpeed / sp;
+      b.vy *= CFG.tele.maxSpeed / sp;
+    }
+    b.sleeping = false;
+  }
+
+  pushBody(b) {
+    const p = this.player;
+    const dx = b.cx - p.cx;
+    const dy = b.cy - p.cy;
+    const d = Math.hypot(dx, dy) || 1;
+    b.wake();
+    b.vx += (dx / d) * CFG.tele.pushImpulse;
+    b.vy += (dy / d) * CFG.tele.pushImpulse;
+  }
+
+  updateDig(dt, mw) {
+    const tx = Math.floor(mw.x / TS);
+    const ty = Math.floor(mw.y / TS);
+
+    if (!this.world.solid(tx, ty)) {
+      this.dig = null;
+      return;
+    }
+
+    if (this.tileDistance(tx, ty) > CFG.dig.radius) {
+      this.dig = null;
+      this.tooFarT = CFG.dig.tooFarHold;
+      return;
+    }
+
+    const type = this.world.get(tx, ty);
+    if (!this.dig || this.dig.tx !== tx || this.dig.ty !== ty) {
+      this.dig = { tx, ty, type, progress: 0, max: CFG.dig.times[type] };
+      this.digDustT = 0;
+    }
+
+    this.dig.progress += dt;
+
+    // Пыль в процессе копания
+    this.digDustT -= dt;
+    if (this.digDustT <= 0) {
+      this.digDustT = CFG.dig.dustEvery;
+      this.particles.dust(type, tx * TS + TS / 2 + (this.rnd() - 0.5) * 16,
+                          ty * TS + TS / 2 + (this.rnd() - 0.5) * 16, this.rnd);
+    }
+
+    if (this.dig.progress >= this.dig.max) {
+      this.mineTile(tx, ty);
+      this.dig = null;
+    }
+  }
+
+  mineTile(tx, ty) {
+    const type = this.world.get(tx, ty);
+    if (type === TILE.EMPTY) return;
+
+    this.world.set(tx, ty, TILE.EMPTY);
+    this.tiles.flush();           // тайл сразу исчезает из буфера
+
+    const cx = tx * TS + TS / 2;
+    const cy = ty * TS + TS / 2;
+
+    // Физический дроп
+    const d = new Drop(cx - CFG.drop.size / 2, cy - CFG.drop.size / 2, type);
+    const toPlayer = Math.sign(this.player.cx - cx) || 1;
+    d.vx = toPlayer * CFG.drop.spawnVx * 0.5 + (this.rnd() - 0.5) * CFG.drop.spawnVx;
+    d.vy = -this.gravitySign * (CFG.drop.popOut + this.rnd() * CFG.drop.spawnVy);
+    this.drops.push(d);
+
+    this.particles.dig(type, cx, cy, this.rnd);
+    this.wakeNear(tx, ty);
+  }
+
+  // Разбудить спящие тела, которые могли опираться на убранный тайл
+  wakeNear(tx, ty) {
+    const R = CFG.drop.wakeRadius;
+    const all = this.bodies();
+    for (const b of all) {
+      if (Math.abs(b.cx / TS - (tx + 0.5)) <= R && Math.abs(b.cy / TS - (ty + 0.5)) <= R) b.wake();
+    }
+  }
+
+  collectDrops() {
+    const p = this.player;
+    for (let i = this.drops.length - 1; i >= 0; i--) {
+      const d = this.drops[i];
+      if (!overlap(d, p, CFG.pickup.pad)) continue;
+      this.inventory.add(d.type, 1);
+      this.particles.pickup(d.type, d.cx, d.cy, this.rnd);
+      if (this.grab === d) this.grab = null;
+      this.drops.splice(i, 1);
+    }
+  }
+
+  /* ---------- шаг симуляции ---------- */
+
+  update(dt) {
+    this.time += dt;
+    const inp = this.input;
+
+    if (inp.consume('KeyF')) this.flipGravity();
+
+    this.player.update(dt, inp, this.world, this.crates);
+    this.gravitySign = this.player.gravitySign;
+
+    for (const c of this.crates) c.step(dt, this.world, this.gravitySign);
+    for (const d of this.drops) d.step(dt, this.world, this.gravitySign);
+
+    this.updateMouse(dt);
+    this.collectDrops();
+
+    this.particles.update(dt, this.gravitySign);
+    this.inventory.update(dt);
+    this.camera.update(this.player, dt);
+
+    this.tiles.flush();
+    inp.endFrame();
+  }
+
+  /* ---------- рендер ---------- */
+
+  render() {
+    const ctx = this.ctx;
+    const z = CFG.camera.zoom;
+
+    // Слой интерфейса и фона — 1:1 к экрану
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.globalAlpha = 1;
+    this.drawBackground(ctx);
+
+    const camX = Math.round(this.camera.x + this.camera.ox);
+    const camY = Math.round(this.camera.y + this.camera.oy);
+
+    // Мир — с зумом камеры
+    ctx.setTransform(this.dpr * z, 0, 0, this.dpr * z, 0, 0);
+    ctx.save();
+    ctx.translate(-camX, -camY);
+
+    this.drawTiles(ctx, camX, camY);
+    this.drawCrates(ctx);
+    this.drawDrops(ctx);
+    this.drawPlayer(ctx);
+    this.particles.draw(ctx);
+    this.drawRadius(ctx);
+    this.drawDig(ctx);
+    this.drawCursor(ctx);
+
+    ctx.restore();
+
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    this.drawHud(ctx);
+    this.drawCrosshair(ctx);
+  }
+
+  // Перекрестие в экранных пикселях: остаётся тонким при любом зуме
+  drawCrosshair(ctx) {
+    const m = this.input.mouse;
+    ctx.strokeStyle = 'rgba(228,240,255,0.85)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(m.x - 7, m.y);
+    ctx.lineTo(m.x - 2, m.y);
+    ctx.moveTo(m.x + 2, m.y);
+    ctx.lineTo(m.x + 7, m.y);
+    ctx.moveTo(m.x, m.y - 7);
+    ctx.lineTo(m.x, m.y - 2);
+    ctx.moveTo(m.x, m.y + 2);
+    ctx.lineTo(m.x, m.y + 7);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(228,240,255,0.9)';
+    ctx.fillRect(m.x - 1, m.y - 1, 2, 2);
+  }
+
+  drawBackground(ctx) {
+    const g = ctx.createLinearGradient(0, 0, 0, this.vh);
+    g.addColorStop(0, CFG.render.bgTop);
+    g.addColorStop(1, CFG.render.bgBottom);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, this.vw, this.vh);
+
+    // Пыль в пустоте, с параллаксом: рисуем только то, что попало в экран
+    const S = CFG.render.dustTile;
+    const px = -this.camera.x * CFG.render.dustParallax;
+    const py = -this.camera.y * CFG.render.dustParallax;
+    const ox = ((px % S) + S) % S;
+    const oy = ((py % S) + S) % S;
+    ctx.fillStyle = '#8fb6e0';
+    for (let gy = -1; gy * S < this.vh + S; gy++) {
+      for (let gx = -1; gx * S < this.vw + S; gx++) {
+        for (const s of this.stars) {
+          const sx = gx * S + ox + s.x;
+          const sy = gy * S + oy + s.y;
+          if (sx < -2 || sy < -2 || sx > this.vw + 2 || sy > this.vh + 2) continue;
+          ctx.globalAlpha = s.a;
+          ctx.fillRect(Math.round(sx), Math.round(sy), s.r, s.r);
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  drawTiles(ctx, camX, camY) {
+    // Дорисовываем текстуру того, что попало в кадр
+    this.tiles.detailVisible(this.world, this.camera, this.player);
+
+    const buf = this.tiles.canvas;
+    const sx = clamp(camX, 0, buf.width);
+    const sy = clamp(camY, 0, buf.height);
+    const w = Math.min(this.camera.w + 2, buf.width - sx);
+    const h = Math.min(this.camera.h + 2, buf.height - sy);
+    if (w > 0 && h > 0) ctx.drawImage(buf, sx, sy, w, h, sx, sy, w, h);
+  }
+
+  drawCrates(ctx) {
+    for (const c of this.crates) {
+      const x = Math.round(c.x), y = Math.round(c.y);
+      ctx.fillStyle = '#7a5a34';
+      ctx.fillRect(x, y, c.w, c.h);
+      ctx.fillStyle = '#5e4426';
+      ctx.fillRect(x, y + c.h - 4, c.w, 4);
+      ctx.fillRect(x + c.w - 4, y, 4, c.h);
+      ctx.strokeStyle = '#3d2c18';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x + 1, y + 1, c.w - 2, c.h - 2);
+      ctx.beginPath();
+      ctx.moveTo(x + 4, y + 4);
+      ctx.lineTo(x + c.w - 4, y + c.h - 4);
+      ctx.moveTo(x + c.w - 4, y + 4);
+      ctx.lineTo(x + 4, y + c.h - 4);
+      ctx.stroke();
+      if (this.grab === c) {
+        ctx.strokeStyle = 'rgba(120,210,255,0.8)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x - 2, y - 2, c.w + 4, c.h + 4);
+      }
+    }
+  }
+
+  drawDrops(ctx) {
+    for (const d of this.drops) {
+      const m = RES[d.type];
+      const x = Math.round(d.x), y = Math.round(d.y);
+      ctx.fillStyle = m.shade;
+      ctx.fillRect(x, y, d.w, d.h);
+      ctx.fillStyle = m.color;
+      ctx.fillRect(x + 1, y + 1, d.w - 2, d.h - 2);
+      ctx.fillStyle = m.light;
+      ctx.fillRect(x + 2, y + 2, d.w - 5, 2);
+      if (this.grab === d) {
+        ctx.strokeStyle = 'rgba(120,210,255,0.9)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x - 2, y - 2, d.w + 4, d.h + 4);
+      }
+    }
+  }
+
+  drawPlayer(ctx) {
+    const p = this.player;
+    ctx.save();
+    ctx.translate(Math.round(p.cx), Math.round(p.cy));
+    if (p.gravitySign < 0) ctx.rotate(Math.PI);
+
+    const halfW = p.w / 2;
+    const halfH = p.h / 2;
+
+    // Ноги — простая анимация шага
+    const swing = Math.sin(p.walkPhase) * 3;
+    ctx.fillStyle = '#8ea6c4';
+    ctx.fillRect(-halfW + 3, halfH - 4, 6, 6 + swing * 0.5);
+    ctx.fillRect(halfW - 9, halfH - 4, 6, 6 - swing * 0.5);
+
+    // Корпус
+    ctx.fillStyle = '#dfe9f7';
+    rr(ctx, -halfW, -halfH, p.w, p.h - 2, 7);
+    ctx.fill();
+
+    // Ранец — со стороны спины
+    ctx.fillStyle = '#9db2cc';
+    ctx.fillRect(p.facing > 0 ? -halfW - 3 : halfW - 1, -6, 4, 12);
+
+    // Визор смотрит в сторону движения
+    ctx.fillStyle = '#63c8ff';
+    const visorX = p.facing > 0 ? -halfW + 4 : -halfW + 6;
+    rr(ctx, visorX, -halfH + 5, p.w - 10, 7, 3);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  // Кольцо радиуса копания — показывается коротко после переворота гравитации, обучения ради
+  drawRadius(ctx) {
+    if (this.radiusEcho <= 0) return;
+    const p = this.player;
+    const a = this.radiusEcho / CFG.dig.radiusEcho;
+    ctx.globalAlpha = 0.28 * a;
+    ctx.strokeStyle = '#9fd8ff';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 8]);
+    ctx.beginPath();
+    ctx.arc(p.cx, p.cy, CFG.dig.radius * TS, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+  }
+
+  drawDig(ctx) {
+    const d = this.dig;
+    if (!d) return;
+    const px = d.tx * TS;
+    const py = d.ty * TS;
+    const m = RES[d.type];
+    const t = clamp(d.progress / d.max, 0, 1);
+
+    // Трещины по тайлу
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(px, py, TS, TS);
+    ctx.clip();
+    ctx.strokeStyle = 'rgba(6,8,12,0.55)';
+    ctx.lineWidth = 2;
+    const cracks = 1 + Math.floor(t * 3);
+    for (let i = 0; i < cracks; i++) {
+      const hx = hash2(d.tx * 13 + i, d.ty * 7 - i);
+      const hy = hash2(d.tx * 5 - i, d.ty * 11 + i);
+      const ax = px + TS / 2 + (hx - 0.5) * TS * 0.7;
+      const ay = py + TS / 2 + (hy - 0.5) * TS * 0.7;
+      ctx.beginPath();
+      ctx.moveTo(px + TS / 2, py + TS / 2);
+      ctx.lineTo(ax, ay);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Заливка тайла растёт с прогрессом — читается даже если бар закрыт игроком
+    ctx.globalAlpha = 0.1 + 0.3 * t;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(px, py, TS, TS);
+    ctx.globalAlpha = 1;
+
+    // Рамка тайла
+    ctx.strokeStyle = '#ffffff';
+    ctx.globalAlpha = 0.8;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(px + 0.75, py + 0.75, TS - 1.5, TS - 1.5);
+    ctx.globalAlpha = 1;
+
+    // Прогресс-бар над тайлом; если игрок перекрывает его головой — уводим внутрь тайла
+    const p = this.player;
+    const blocked = p.x < px + TS && p.x + p.w > px && p.y + p.h > py - 10 && p.y < py + 4;
+    const bw = TS - 2;
+    const bx = px + 1;
+    const by = blocked ? py + TS - 7 : py - 8;
+    ctx.fillStyle = 'rgba(3,5,10,0.92)';
+    ctx.fillRect(bx - 1, by - 1, bw + 2, 8);
+    ctx.fillStyle = '#1d2a3d';
+    ctx.fillRect(bx, by, bw, 6);
+    const fillW = Math.max(1, (bw - 2) * t);
+    ctx.fillStyle = m.light;
+    ctx.fillRect(bx + 1, by + 1, fillW, 4);
+    // Яркий наконечник — видно, что бар растёт
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(bx + 1 + fillW - 1, by + 1, 1, 4);
+  }
+
+  drawCursor(ctx) {
+    const mw = this.mouseW;
+    const tx = Math.floor(mw.x / TS);
+    const ty = Math.floor(mw.y / TS);
+    const p = this.player;
+
+    let color = 'rgba(210,225,245,0.55)';
+    let label = '';
+    let labelColor = '#dfeaff';
+
+    const body = this.bodyAt(mw.x, mw.y);
+
+    if (this.grab) {
+      color = 'rgba(120,210,255,0.95)';
+      label = 'тянуть';
+      labelColor = '#9fdcff';
+      this.drawTether(ctx, this.grab, 0.5);
+    } else if (body && this.inTeleRange(body)) {
+      color = 'rgba(120,210,255,0.75)';
+      label = 'тянуть';
+      labelColor = '#9fdcff';
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(body.x - 2.5, body.y - 2.5, body.w + 5, body.h + 5);
+    } else if (this.world.solid(tx, ty)) {
+      if (this.tileDistance(tx, ty) <= CFG.dig.radius) {
+        color = 'rgba(255,255,255,0.85)';
+        label = this.leftAction === 'dig' ? '' : 'копать';
+      } else {
+        color = 'rgba(255,90,90,0.9)';
+        label = 'далеко';
+        labelColor = '#ff8a8a';
+      }
+    } else {
+      color = 'rgba(160,180,205,0.35)';
+    }
+
+    // Квадрат под курсором
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(tx * TS + 0.75, ty * TS + 0.75, TS - 1.5, TS - 1.5);
+
+    // Линия до игрока, если цель вне радиуса
+    if (label === 'далеко') {
+      ctx.globalAlpha = 0.35;
+      ctx.setLineDash([4, 6]);
+      ctx.beginPath();
+      ctx.moveTo(p.cx, p.cy);
+      ctx.lineTo(tx * TS + TS / 2, ty * TS + TS / 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+    }
+
+    if (label) {
+      ctx.font = '11px ' + CFG.render.font;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      // если целимся в тело — подпись уходит под него
+      const anchor = body || null;
+      const lx = anchor ? anchor.x + anchor.w / 2 : tx * TS + TS / 2;
+      const ly = anchor ? anchor.y + anchor.h + 5 : ty * TS + TS + 4;
+      ctx.fillStyle = 'rgba(4,6,12,0.75)';
+      const w = ctx.measureText(label).width;
+      ctx.fillRect(lx - w / 2 - 3, ly - 1, w + 6, 14);
+      ctx.fillStyle = labelColor;
+      ctx.fillText(label, lx, ly);
+    }
+  }
+
+  // Трос телекинеза: прерывистая линия от рук игрока к удерживаемому телу
+  drawTether(ctx, body, alpha) {
+    const p = this.player;
+    const tx = clamp(body.cx, body.x, body.x + body.w);
+    const ty = body.cy;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = '#7fd4ff';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 5]);
+    ctx.lineDashOffset = -this.time * 60;   // бежит по направлению к телу
+    ctx.beginPath();
+    ctx.moveTo(p.cx, p.cy);
+    ctx.lineTo(tx, ty);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = alpha * 0.9;
+    ctx.fillStyle = '#bfe9ff';
+    ctx.fillRect(tx - 1.5, ty - 1.5, 3, 3);
+    ctx.restore();
+  }
+
+  /* ---------- HUD ---------- */
+
+  drawHud(ctx) {
+    const H = CFG.hud;
+    const x = this.vw - H.w - H.margin;
+    const y = H.margin;
+    const h = H.pad * 2 + H.rowH * CFG.resources.length;
+
+    ctx.fillStyle = 'rgba(9,13,21,0.78)';
+    rr(ctx, x, y, H.w, h, 10);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(150,180,220,0.16)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i < CFG.resources.length; i++) {
+      const r = CFG.resources[i];
+      const rowY = y + H.pad + i * H.rowH + H.rowH / 2;
+
+      // Активная строка (задел под выбор материала в 1B)
+      if (H.active === r.id) {
+        ctx.fillStyle = 'rgba(120,190,255,0.14)';
+        rr(ctx, x + 4, rowY - H.rowH / 2 + 2, H.w - 8, H.rowH - 4, 6);
+        ctx.fill();
+        ctx.fillStyle = r.color;
+        ctx.fillRect(x + 4, rowY - H.rowH / 2 + 4, 2, H.rowH - 8);
+      }
+
+      // Иконка 10x10
+      ctx.fillStyle = r.color;
+      rr(ctx, x + H.pad, rowY - 5, 10, 10, 2);
+      ctx.fill();
+
+      // Название
+      ctx.fillStyle = 'rgba(214,228,246,0.72)';
+      ctx.font = '11px ' + CFG.render.font;
+      ctx.textAlign = 'left';
+      ctx.fillText(r.name, x + H.pad + 18, rowY + 0.5);
+
+      // Число с пульсацией 200 мс
+      const raw = this.inventory.pulse[r.id] / CFG.hud.pulse;   // 1 -> 0
+      const pulse = raw * raw;                                  // быстрый спад, мягкий хвост
+      const scale = 1 + 0.45 * pulse;
+      ctx.save();
+      ctx.translate(x + H.w - H.pad, rowY);
+      ctx.scale(scale, scale);
+      ctx.textAlign = 'right';
+      ctx.font = 'bold 14px ' + CFG.render.font;
+      ctx.fillStyle = pulse > 0 ? '#ffffff' : 'rgba(232,242,255,0.92)';
+      ctx.fillText(String(this.inventory.counts[r.id]), 0, 0.5);
+      ctx.restore();
+    }
+
+    // Отладка производительности — по ней проверяется критерий FPS
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.font = '11px ' + CFG.render.font;
+    ctx.fillStyle = 'rgba(170,195,225,0.55)';
+    ctx.fillText(Math.round(this.fps) + ' FPS · тел ' + (this.drops.length + this.crates.length), 16, 14);
+
+    // Подсказка по управлению
+    ctx.fillStyle = 'rgba(170,195,225,0.42)';
+    ctx.font = '11px ' + CFG.render.font;
+    ctx.fillStyle = 'rgba(178,202,232,0.6)';
+    ctx.fillText('A / D  идти', 16, this.vh - 46);
+    ctx.fillText('Space  прыжок', 16, this.vh - 30);
+    ctx.fillText('F  гравитация', 16, this.vh - 14);
+    ctx.textAlign = 'right';
+    ctx.fillText('ЛКМ  копать / тянуть', this.vw - 16, this.vh - 30);
+    ctx.fillText('ПКМ  толчок', this.vw - 16, this.vh - 14);
+    ctx.textAlign = 'left';
+  }
+
+  /* ---------- цикл ---------- */
+
+  start() {
+    let last = 0;
+    const frame = (now) => {
+      if (!last) last = now;
+      let dt = (now - last) / 1000;
+      last = now;
+      if (dt > 0.25) dt = 0.25;          // после сворачивания окна
+      if (dt > 0) this.fps += (1 / dt - this.fps) * 0.08;
+
+      this.accum += dt;
+      let steps = 0;
+      while (this.accum >= CFG.step && steps < 5) {
+        this.update(CFG.step);
+        this.accum -= CFG.step;
+        steps++;
+      }
+      if (steps === 5) this.accum = 0;
+
+      this.render();
+      requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+  }
+}
+
+/* ============================================================
+   Запуск
+   ============================================================ */
+const game = new Game(document.getElementById('view'));
+game.start();
+</script>
+</body>
+</html>
