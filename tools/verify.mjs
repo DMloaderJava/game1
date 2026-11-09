@@ -1157,6 +1157,44 @@ ok('M4: флаги сохраняются после перезагрузки',
    `laser=${g9.player.hasLaser} armor=${g9.player.hasArmor} gun=${g9.player.hasGravityGun}`);
 ok('M4: верстак сохраняется как тайл', g9.world.get(bx, by) === TILE_WB);
 
+// --- меню забирает клавиши 1..3 у режимов и ведёт курсор дальше
+{
+  // чистый сейв: иначе экипировка из прошлых тестов уже скрафчена
+  sandbox.localStorage.removeItem(CFG.save.key);
+  const gk = new (sandbox.__cls.Game)(view);
+  gk.player.hasLaser = false; gk.player.hasArmor = false; gk.player.hasGravityGun = false;
+  stepG(gk, 30);
+  const s2 = gk.world.surfaceRow;
+  const kbx = Math.floor(gk.player.cx / TS) + 3;
+  for (let i = 0; i < 2; i++) gk.world.set(kbx + i, s2 - 1, TILE.EMPTY, false);
+  gk.world.set(kbx, s2 - 1, TILE_WB, true);
+  gk.world.set(kbx + 1, s2 - 1, TILE_WB, true);
+  gk.tiles.flush();
+  gk.player.x = kbx * TS - TS; gk.camera.snap(gk.player);
+  gk.mode = MODE_BENCH;
+  gk.craftOpen = false;
+  pressG(gk, 'KeyC');
+  stepG(gk, 1);
+  ok('M4: меню на клавише C у верстака', gk.craftOpen === true);
+  gk.inventory.counts[TILE.FERRITE] = 3; gk.inventory.counts[TILE.STONE] = 2;
+  pressG(gk, 'Digit1');
+  stepG(gk, 1);
+  ok('M4: в меню клавиша 1 создаёт предмет, а не меняет режим',
+     gk.player.hasLaser === true && gk.mode === MODE_BENCH,
+     `laser=${gk.player.hasLaser} mode=${gk.mode}`);
+  ok('M4: после крафта курсор переехал на следующий рецепт', gk.craftSel === 1,
+     `sel=${gk.craftSel} laser=${gk.player.hasLaser} open=${gk.craftOpen} done=${gk.recipeDone(CFG.recipes[0])}`);
+  // повторный Enter создаёт второй предмет, а не тратит ресурсы в пустоту
+  gk.inventory.counts[TILE.FERRITE] = 5; gk.inventory.counts[TILE.STONE] = 10;
+  pressG(gk, 'Enter');
+  stepG(gk, 1);
+  ok('M4: Enter создаёт выбранный рецепт', gk.player.hasArmor === true,
+     `armor=${gk.player.hasArmor}`);
+  pressG(gk, 'Escape');
+  stepG(gk, 1);
+  ok('M4: Escape закрывает меню', gk.craftOpen === false);
+}
+
 // --- HUD
 ok('M4: иконки экипировки в HUD', /hasLaser/.test(String(g9.drawHealthBar)) &&
    /hasArmor/.test(String(g9.drawHealthBar)) && /hasGravityGun/.test(String(g9.drawHealthBar)));

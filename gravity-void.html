@@ -2138,6 +2138,15 @@ class Game {
     return true;
   }
 
+  // После успешного крафта подсвечиваем следующий ещё не сделанный рецепт
+  nextRecipe() {
+    const n = CFG.recipes.length;
+    for (let k = 1; k <= n; k++) {
+      const cand = (this.craftSel + k) % n;
+      if (!this.recipeDone(CFG.recipes[cand])) { this.craftSel = cand; return; }
+    }
+  }
+
   // Ввод в меню: мышь по строкам или клавиши 1..3 / Enter
   updateCraft(dt) {
     this.craftT = Math.min(1, this.craftT + dt * 6);
@@ -2147,9 +2156,16 @@ class Game {
 
     const n = CFG.recipes.length;
     for (let i = 0; i < n; i++) {
-      if (inp.consume('Digit' + (i + 1))) { this.craftSel = i; this.craft(CFG.recipes[i]); return; }
+      if (inp.consume('Digit' + (i + 1))) {
+        this.craftSel = i;
+        if (this.craft(CFG.recipes[i])) this.nextRecipe();
+        return;
+      }
     }
-    if (inp.consume('Enter') || inp.consume('NumpadEnter')) { this.craft(CFG.recipes[this.craftSel]); return; }
+    if (inp.consume('Enter') || inp.consume('NumpadEnter')) {
+      if (this.craft(CFG.recipes[this.craftSel])) this.nextRecipe();
+      return;
+    }
 
     // Наведение мышью: строки рисуются в drawCraft по этим же координатам
     const m = inp.mouse;
@@ -2158,7 +2174,9 @@ class Game {
       const idx = Math.floor((m.y - box.y - box.headH) / box.rowH);
       if (idx >= 0 && idx < n) {
         this.craftSel = idx;
-        if (inp.consume('MouseLeft') || (inp.mouse.left && !this.prevLeft)) this.craft(CFG.recipes[idx]);
+        if (inp.consume('MouseLeft') || (inp.mouse.left && !this.prevLeft)) {
+          if (this.craft(CFG.recipes[idx])) this.nextRecipe();
+        }
       }
     }
   }
@@ -2571,10 +2589,10 @@ class Game {
     this.time += dt;
     const inp = this.input;
 
-    // Переключение режимов: 1-3 материал, 4 копать, 5 снос, 6 якорь
-    if (inp.consume('Digit1')) this.setMode(MODE.DIRT);
-    if (inp.consume('Digit2')) this.setMode(MODE.STONE);
-    if (inp.consume('Digit3')) this.setMode(MODE.FERRITE);
+    // Пока открыто меню крафта, клавиши 1..3 принадлежат ему, а не режимам
+    if (!this.craftOpen && inp.consume('Digit1')) this.setMode(MODE.DIRT);
+    if (!this.craftOpen && inp.consume('Digit2')) this.setMode(MODE.STONE);
+    if (!this.craftOpen && inp.consume('Digit3')) this.setMode(MODE.FERRITE);
     if (inp.consume('Digit4')) this.setMode(MODE.DIG);
     if (inp.consume('Digit5')) this.setMode(MODE.DEMOLISH);
     if (inp.consume('Digit6')) this.setMode(MODE.ANCHOR);
