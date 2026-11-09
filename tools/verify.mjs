@@ -84,7 +84,8 @@ const ctx = vm.createContext(sandbox);
 SRC += '\n;globalThis.__game = game; globalThis.__CFG = CFG; globalThis.__TILE = TILE;'
      + ';globalThis.__ITEM = ITEM; globalThis.__CRAWLER_STATE = CRAWLER_STATE;'
      + ';globalThis.__cls = { Drop, Crate, PhysBody, Player, World, Game, Tide, Save, Crawler, Particles, Inventory };'
-     + ';globalThis.__SPR = SPR; globalThis.__Sprites = Sprites;';
+     + ';globalThis.__SPR = SPR; globalThis.__Sprites = Sprites;'
+     + ';globalThis.__TouchUI = TouchUI; globalThis.__MODE = MODE;';
 vm.runInContext(SRC, ctx, { filename: 'gravity-void.html' });
 
 const game = sandbox.__game;
@@ -1754,6 +1755,314 @@ ok('M5: слой тайлов размером с новый мир',
   const per = (performance.now() - t0) / N;
   ok('M6: кадр в глубине со светом укладывается в бюджет', per < 25,
      `${per.toFixed(2)} мс/кадр`);
+}
+
+// ---------------------------------------------------------------- M7: телекинез, колесо, тач
+
+// --- 1. Скорость захваченного ящика ограничена
+{
+  const g = new (sandbox.__cls.Game)(view);
+  const p = g.player;
+  const sr = g.world.surfaceRow;
+  // чистая арена над полом — рельеф не должен влиять на замер
+  for (let x = 12; x <= 44; x++) for (let y = sr - 9; y <= sr - 1; y++) g.world.set(x, y, TILE.EMPTY, false);
+  g.crates.length = 0;
+  g.tiles.flush();
+  p.x = 20 * TS; p.y = sr * TS - p.h; p.vx = p.vy = 0;
+  g.camera.snap(p);
+  const z = CFG.camera.zoom;
+  const aim = (wx, wy) => {
+    g.input.mouse.x = (wx - Math.round(g.camera.x)) * z;
+    g.input.mouse.y = (wy - Math.round(g.camera.y)) * z;
+  };
+  const crate = new (sandbox.__cls.Crate)(26 * TS, sr * TS - CFG.crate.h - 4 * TS);
+  g.crates.push(crate);
+  g.grab = crate;
+  crate.gravityScale = 0;
+  crate.wake();
+  g.input.mouse.right = true;
+
+  let maxSp = 0, maxJump = 0;
+  let px = crate.cx, py = crate.cy;
+  for (let i = 0; i < 120; i++) {
+    // цель гуляет: то к игроку, то далеко, то в его центр
+    const a = i * 0.35;
+    aim(p.cx + Math.cos(a) * 6 * TS, p.cy + Math.sin(a * 1.7) * 4 * TS);
+    g.update(CFG.step);
+    maxSp = Math.max(maxSp, Math.hypot(crate.vx, crate.vy));
+    maxJump = Math.max(maxJump, Math.hypot(crate.cx - px, crate.cy - py));
+    px = crate.cx; py = crate.cy;
+  }
+  ok('M7: захваченный ящик не разгоняется выше holdSpeed',
+     maxSp <= CFG.tele.holdSpeed + 1, `макс ${maxSp.toFixed(0)} из ${CFG.tele.holdSpeed}`);
+  ok('M7: лимит захвата ниже лимита свободного падения',
+     CFG.tele.holdSpeed < CFG.tele.maxSpeed, `hold ${CFG.tele.holdSpeed} < fall ${CFG.tele.maxSpeed}`);
+  ok('M7: за кадр ящик не прыгает больше лимита шага',
+     maxJump <= CFG.tele.holdSpeed / 60 + 1.5, `прыжок ${maxJump.toFixed(1)} px`);
+}
+
+// --- 2. Отпускание гасит скорость, а не сохраняет её
+{
+  const g = new (sandbox.__cls.Game)(view);
+  const p = g.player;
+  const sr = g.world.surfaceRow;
+  for (let x = 12; x <= 44; x++) for (let y = sr - 9; y <= sr - 1; y++) g.world.set(x, y, TILE.EMPTY, false);
+  g.crates.length = 0;
+  g.tiles.flush();
+  p.x = 20 * TS; p.y = sr * TS - p.h;
+  g.camera.snap(p);
+  const crate = new (sandbox.__cls.Crate)(20 * TS, sr * TS - CFG.crate.h - 3 * TS);
+  crate.vx = 900; crate.vy = 0;          // как будто уже разогнался
+  g.crates.push(crate);
+  g.grab = crate;
+  crate.gravityScale = 0;
+  g.releaseGrab();
+  const after = Math.hypot(crate.vx, crate.vy);
+  ok('M7: после отпускания скорость гасится до releaseKeep',
+     after <= CFG.tele.holdSpeed * CFG.tele.releaseKeep + 1,
+     `осталось ${after.toFixed(0)} px/s`);
+  ok('M7: гравитация телу возвращается', crate.gravityScale === 1);
+  // и тело дальше ведёт себя обычно: скорость затухает, а не растёт
+  const sp0 = Math.hypot(crate.vx, crate.vy);
+  for (let i = 0; i < 30; i++) g.update(CFG.step);
+  const sp1 = Math.hypot(crate.vx, crate.vy);
+  ok('M7: отпущенный ящик не разгоняется сам по себе',
+     sp1 <= sp0 + 60 && Math.abs(crate.vx) < 120,
+     `${sp0.toFixed(0)} → ${sp1.toFixed(0)} px/s`);
+  ok('M7: отпущенный ящик подчиняется гравитации', crate.gravityScale === 1);
+}
+
+// --- 3. Ящик не пробивает игрока
+{
+  const g = new (sandbox.__cls.Game)(view);
+  const p = g.player;
+  const sr = g.world.surfaceRow;
+  for (let x = 12; x <= 44; x++) for (let y = sr - 9; y <= sr - 1; y++) g.world.set(x, y, TILE.EMPTY, false);
+  g.crates.length = 0;
+  g.tiles.flush();
+  p.x = 20 * TS; p.y = sr * TS - p.h; p.vx = p.vy = 0;
+  g.camera.snap(p);
+  const z = CFG.camera.zoom;
+  const crate = new (sandbox.__cls.Crate)(p.cx + 5 * TS, p.cy - 2 * TS);
+  g.crates.push(crate);
+  g.grab = crate;
+  crate.gravityScale = 0;
+  g.input.mouse.right = true;
+  let minD = Infinity;
+  for (let i = 0; i < 90; i++) {
+    g.input.mouse.x = (p.cx - Math.round(g.camera.x)) * z;
+    g.input.mouse.y = (p.cy - Math.round(g.camera.y)) * z;
+    g.update(CFG.step);
+    minD = Math.min(minD, Math.hypot(crate.cx - p.cx, crate.cy - p.cy));
+  }
+  const hard = (p.w + CFG.crate.w) / 2;
+  ok('M7: ящик не проходит сквозь игрока',
+     minD >= hard - 1, `минимум ${minD.toFixed(1)} px, габарит ${hard}`);
+  ok('M7: цель захвата не заходит в центр игрока',
+     CFG.tele.grabOffset >= hard, `offset ${CFG.tele.grabOffset} ≥ ${hard}`);
+}
+
+// --- 4. Колесо мыши листает режимы
+{
+  const g = new (sandbox.__cls.Game)(view);
+  const order = g.modeList();
+  g.setMode(order[0]);
+  g.input.wheel = 1;
+  g.update(CFG.step);
+  ok('M7: колесо вниз — следующий режим', g.mode === order[1], `режим ${g.mode}`);
+  g.input.wheel = -1;
+  g.update(CFG.step);
+  ok('M7: колесо вверх — предыдущий режим', g.mode === order[0], `режим ${g.mode}`);
+  // по кругу: с последнего вперёд — на первый
+  g.setMode(order[order.length - 1]);
+  g.input.wheel = 1;
+  g.update(CFG.step);
+  ok('M7: с последнего режима колесо уводит на первый', g.mode === order[0], `режим ${g.mode}`);
+  // с первого назад — на последний
+  g.setMode(order[0]);
+  g.input.wheel = -1;
+  g.update(CFG.step);
+  ok('M7: с первого режима назад — последний', g.mode === order[order.length - 1], `режим ${g.mode}`);
+  // три щелчка сразу = три шага
+  g.setMode(order[0]);
+  g.input.wheel = 3;
+  g.update(CFG.step);
+  ok('M7: три щелчка подряд листают три режима', g.mode === order[3], `режим ${g.mode}`);
+  // во время крафта колесо не трогает режимы
+  g.setMode(order[0]);
+  g.craftOpen = true;
+  g.craftT = 1;
+  g.input.wheel = 2;
+  g.update(CFG.step);
+  ok('M7: при открытом крафте колесо не меняет режим', g.mode === order[0], `режим ${g.mode}`);
+  g.craftOpen = false;
+}
+
+// --- 5. Пульсация слота режима
+{
+  const g = new (sandbox.__cls.Game)(view);
+  g.modeSwitchT = 0;
+  g.setMode(2);            // STONE
+  ok('M7: смена режима включает пульсацию', g.modeSwitchT === CFG.hud.modePulse,
+     `t=${g.modeSwitchT}`);
+  g.update(CFG.step);
+  ok('M7: пульсация затухает по времени', g.modeSwitchT < CFG.hud.modePulse, `t=${g.modeSwitchT.toFixed(2)}`);
+  ok('M7: плашка рисует пульсацию', /modeSwitchT/.test(String(g.drawModeBar)));
+  ok('M7: цифры 1–7 продолжают работать',
+     /Digit1/.test(String(g.update)) && /Digit7/.test(String(g.update)));
+}
+
+// --- 6. Тач-интерфейс: определение устройства и геометрия
+{
+  const oldMM = sandbox.window.matchMedia;
+  const oldNav = sandbox.navigator;
+  sandbox.window.matchMedia = (q) => ({ matches: q.indexOf('coarse') >= 0 });
+  sandbox.navigator = { maxTouchPoints: 5 };
+  const touchInput = new (sandbox.__cls.Game)(view);
+  ok('M7: тач-устройство определяется по coarse/maxTouchPoints', touchInput.isTouch === true);
+  const lay = touchInput.touch.layout(430, 780);
+  ok('M7: на экране восемь кнопок', lay.buttons.length === 8, `кнопок=${lay.buttons.length}`);
+  ok('M7: кнопки не меньше 48 px',
+     lay.buttons.every(b => b.r * 2 >= 48), `радиус=${lay.buttons[0].r}`);
+  const T = CFG.touchUI;
+  ok('M7: кнопки не ближе 20 px к краю',
+     lay.buttons.every(b => b.x + b.r <= 430 - T.margin + 0.5 && b.y + b.r <= 780 - T.margin + 0.5),
+     'отступ края');
+  ok('M7: джойстик в левой части экрана', lay.stick.x < 430 * 0.45, `x=${lay.stick.x}`);
+  const hud = touchInput.hudMetrics();
+  ok('M7: кнопки не перекрывают панель ресурсов и HP',
+     lay.buttons.every(b => b.y - b.r > hud.bottom) && hud.bottom > 0,
+     `верх кнопок ${Math.min(...lay.buttons.map(b => b.y - b.r)).toFixed(0)} > HUD ${hud.bottom.toFixed(0)}`);
+  ok('M7: джойстик не перекрывает блок кнопок',
+     Math.abs(lay.stick.x - lay.buttons[0].x) > lay.stick.r + lay.buttons[0].r,
+     `джойстик ${lay.stick.x}, первая кнопка ${lay.buttons[0].x.toFixed(0)}`);
+  ok('M7: HUD на тач-устройстве крупнее на 20 %', Math.abs(touchInput.hudScale - 1.2) < 1e-6);
+  ok('M7: плашка клавиш на тач-устройстве скрыта', /isTouch/.test(String(touchInput.drawControls)));
+  // в альбомной ориентации сетка перестраивается, а не остаётся колонкой
+  const land = touchInput.touch.layout(900, 430);
+  ok('M7: в альбомной ориентации кнопки раскладываются шире',
+     land.buttons[1].y === land.buttons[0].y, 'второй ряд тот же');
+  sandbox.window.matchMedia = oldMM;
+  sandbox.navigator = oldNav;
+}
+
+// --- 7. Мультитач: бег и прыжок одновременно
+{
+  const g = new (sandbox.__cls.Game)(view);
+  const p = g.player;
+  const sr = g.world.surfaceRow;
+  for (let x = 14; x <= 60; x++) {
+    for (let y = sr - 6; y <= sr - 1; y++) g.world.set(x, y, TILE.EMPTY, false);
+    g.world.set(x, sr, TILE.DIRT, false);
+  }
+  g.tiles.flush();
+  g.crates.length = 0;
+  p.x = 20 * TS; p.y = sr * TS - p.h; p.vx = p.vy = 0;
+  g.camera.snap(p);
+
+  const lay = g.touch.layout(g.vw, g.vh);
+  const st = lay.stick;
+  const jump = lay.buttons.find(b => b.id === 'jump');
+  // 1) палец на джойстике тянет вправо
+  g.touch.onStart({ changedTouches: [{ identifier: 1, clientX: st.x, clientY: st.y }], preventDefault() {} });
+  g.touch.onMove({ changedTouches: [{ identifier: 1, clientX: st.x + st.r, clientY: st.y }], preventDefault() {} });
+  for (let i = 0; i < 20; i++) g.update(CFG.step);
+  const moving = p.vx;
+  ok('M7: джойстик двигает игрока вправо', moving > 60, `vx=${moving.toFixed(0)}`);
+  // 2) второй палец жмёт прыжок, не отпуская джойстик
+  g.touch.onStart({ changedTouches: [{ identifier: 2, clientX: jump.x, clientY: jump.y }], preventDefault() {} });
+  const vyBefore = p.vy;
+  for (let i = 0; i < 3; i++) g.update(CFG.step);
+  ok('M7: прыжок во время движения работает (мультитач)', p.vy < vyBefore - 100,
+     `vy ${vyBefore.toFixed(0)} → ${p.vy.toFixed(0)}`);
+  ok('M7: джойстик остался активен после второго пальца', g.touch.stick.active === true);
+  ok('M7: второй палец не отобрал джойстик', g.touch.stick.id === 1);
+  // 3) отпускаем прыжок — джойстик по-прежнему ведёт игрока
+  g.touch.onEnd({ changedTouches: [{ identifier: 2, clientX: jump.x, clientY: jump.y }], preventDefault() {} });
+  const vxKeep = p.vx;
+  for (let i = 0; i < 10; i++) { g.update(CFG.step); }
+  ok('M7: отпускание кнопки не сбрасывает движение', Math.abs(p.vx) >= vxKeep - 1,
+     `vx ${vxKeep.toFixed(0)} → ${p.vx.toFixed(0)}`);
+  // 4) отпускаем джойстик — вектор обнуляется
+  g.touch.onEnd({ changedTouches: [{ identifier: 1, clientX: st.x, clientY: st.y }], preventDefault() {} });
+  ok('M7: отпускание джойстика обнуляет вектор',
+     g.input.touchX === 0 && g.touch.stick.active === false);
+  const vx0 = Math.abs(p.vx);
+  for (let i = 0; i < 40; i++) g.update(CFG.step);
+  ok('M7: после отпускания джойстика игрок тормозит', Math.abs(p.vx) < vx0 * 0.2,
+     `vx ${vx0.toFixed(0)} → ${Math.abs(p.vx).toFixed(0)}`);
+}
+
+// --- 8. Кнопки стреляют теми же клавишами, что и клавиатура
+{
+  const g = new (sandbox.__cls.Game)(view);
+  const lay = g.touch.layout(g.vw, g.vh);
+  const btn = (id) => lay.buttons.find(b => b.id === id);
+  const press = (id) => g.touch.onStart({
+    changedTouches: [{ identifier: 9, clientX: btn(id).x, clientY: btn(id).y }], preventDefault() {}
+  });
+  const release = (id) => g.touch.onEnd({
+    changedTouches: [{ identifier: 9, clientX: btn(id).x, clientY: btn(id).y }], preventDefault() {}
+  });
+  press('jump');
+  ok('M7: кнопка прыжка жмёт Space', g.input.keys.has('Space'));
+  release('jump');
+  ok('M7: отпускание кнопки отпускает Space', !g.input.keys.has('Space'));
+  press('flip');
+  ok('M7: кнопка гравитации жмёт F', g.input.keys.has('KeyF'));
+  release('flip');
+  press('act');
+  ok('M7: кнопка действия держит ЛКМ', g.input.mouse.left === true);
+  release('act');
+  ok('M7: отпускание действия снимает ЛКМ', g.input.mouse.left === false);
+  press('tele');
+  ok('M7: кнопка телекинеза жмёт ПКМ', g.input.mouse.right === true);
+  release('tele');
+  ok('M7: кнопка крафта жмёт C', (press('craft'), g.input.keys.has('KeyC')));
+  release('craft');
+  ok('M7: кнопка сканера жмёт Q', (press('scan'), g.input.keys.has('KeyQ')));
+  release('scan');
+  ok('M7: кнопка чтения жмёт E', (press('use'), g.input.keys.has('KeyE')));
+  release('use');
+  ok('M7: кнопка биогеля жмёт H', (press('heal'), g.input.keys.has('KeyH')));
+  release('heal');
+  ok('M7: нажатие кнопки даёт вспышку', Object.keys(g.touch.flash).length > 0);
+}
+
+// --- 9. Мышь и тач не конфликтуют
+{
+  const PClike = new (sandbox.__cls.Game)(view);
+  ok('M7: на ПК тач-слой выключен', PClike.isTouch === false);
+  ok('M7: на ПК HUD обычного размера', PClike.hudScale === 1);
+  ok('M7: тач-слой не рисуется на ПК', !/drawTouchIcon/.test(String(PClike.drawTouchUI)) ||
+     /if \(!this.isTouch\) return;/.test(String(PClike.drawTouchUI)));
+  ok('M7: колесо работает и на ПК', /takeWheel/.test(String(PClike.update)));
+}
+
+// --- 10. Подсказка старта гаснет после первого тапа
+{
+  const g = new (sandbox.__cls.Game)(view);
+  ok('M7: подсказка старта видна до первого тапа', g.touch.awake === false && g.touch.hintT > 0,
+     `hintT=${g.touch.hintT}`);
+  g.touch.onStart({ changedTouches: [{ identifier: 1, clientX: g.vw / 2, clientY: 40 }], preventDefault() {} });
+  ok('M7: первый тап убирает подсказку', g.touch.awake === true);
+  g.touch.onEnd({ changedTouches: [{ identifier: 1, clientX: g.vw / 2, clientY: 40 }], preventDefault() {} });
+}
+
+// --- 11. Меню крафта ужимается под экран и остаётся попадаемым
+{
+  const g = new (sandbox.__cls.Game)(view);
+  const box = g.craftLayout();
+  ok('M7: панель крафта влезает в экран', box.w <= g.vw - 20 && box.h <= g.vh - 20,
+     `${box.w}×${box.h.toFixed(0)} при ${g.vw}×${g.vh}`);
+  // на узком экране масштаб меньше единицы, но строки по-прежнему попадаются
+  const oldVw = g.vw;
+  g.vw = 430;
+  const small = g.craftLayout();
+  g.vw = oldVw;
+  ok('M7: на узком экране панель крафта масштабируется', small.s < 1, `s=${small.s.toFixed(2)}`);
+  ok('M7: попадание по строке считается с тем же масштабом',
+     /box\.s/.test(String(g.updateCraft)) || /rowH \* box\.s/.test(String(g.updateCraft)));
 }
 
 // ---------------------------------------------------------------- итог

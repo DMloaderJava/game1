@@ -335,9 +335,18 @@ const CFG = {
     radiusEcho: 0.9                     // вспышка радиуса после переворота гравитации
   },
 
+  // M7: телекинез. Скорость захваченного тела ограничена отдельно от физики падения
+  // (maxSpeed), демпфирование выше, а при отпускании скорость гасится, а не сохраняется
   tele: { range: 8, rangeGun: 15, stiffness: 90, stiffnessGun: 135,
           damping: 15, maxSpeed: 950, pushImpulse: 620, pushCooldown: 0.15,
-          crateDamage: 15 },
+          crateDamage: 15,
+          holdSpeed: 400,       // предел скорости тела в захвате, px/s
+          holdDamping: 26,      // сопротивление среды при телекинезе (было общее 15)
+          releaseKeep: 0.2,     // доля скорости, которая остаётся после отпускания
+          grabGap: 6,           // зазор до игрока: ящик не входит в него и не пролетает сквозь
+          grabOffset: 34,       // на сколько ящик не доезжает до центра игрока, px:
+                                // больше полуширины пары (11 + 20), иначе центр тела в игроке
+          maxMass: 4 },
 
   pickup: { pad: 3 },                   // допуск на пересечение с игроком
 
@@ -358,7 +367,23 @@ const CFG = {
 
   // hud.active: в 1B сюда придёт выбор материала (подсветка строки).
   // В 1A режимов нет — поле всегда null.
-  hud: { w: 176, rowH: 26, pad: 12, pulse: 0.2, margin: 18, active: null },
+  hud: { w: 176, rowH: 26, pad: 12, pulse: 0.2, margin: 18, active: null,
+         modePulse: 0.45,        // длительность пульсации слота режима, сек
+         modeSlotTouch: 44,      // ширина слота режима на тач-устройстве
+         touchScale: 1.2,        // +20 % к шрифтам HUD на тач-устройствах
+         touchWidth: 1.15 },     // панель ресурсов шире: под крупный шрифт
+
+  // M7: мобильный интерфейс. Кнопки не меньше 48 px, отступ от края 20 px
+  touchUI: {
+    minButton: 48,        // минимальный габарит кнопки, px
+    margin: 20,           // отступ от края экрана, px
+    stickRadius: 62,      // радиус основания джойстика, px
+    stickKnob: 26,        // радиус «пятачка»
+    deadZone: 0.16,       // доля радиуса, в которой джойстик не двигает игрока
+    hitPad: 8,            // припуск на попадание пальцем, px
+    flashTime: 0.16,      // вспышка нажатой кнопки, сек
+    hintTime: 2.6         // сколько висит подсказка «Тапните для старта»
+  },
 
   particles: { max: 300, digMin: 3, digMax: 5, pickup: 6, life: 0.4, flip: 10 },
 
@@ -2347,13 +2372,17 @@ class Player {
   update(dt, input, world, crates, worldGravity) {
     const wg = worldGravity === undefined ? 1 : worldGravity;
     // --- горизонталь ---
-    const dir = (input.down('KeyD') ? 1 : 0) - (input.down('KeyA') ? 1 : 0);
-    if (dir !== 0) this.facing = dir;
+    // M7: клавиши дают -1/0/1, джойстик — плавное значение. Берём то, что сильнее
+    const touchX = input.touchX || 0;
+    let dir = (input.down('KeyD') ? 1 : 0) - (input.down('KeyA') ? 1 : 0);
+    if (Math.abs(touchX) > Math.abs(dir)) dir = touchX;
+    if (dir !== 0) this.facing = Math.sign(dir);
 
     const accel = this.onGround ? CFG.player.accelGround : CFG.player.accelAir;
     if (dir !== 0) {
       this.vx += dir * accel * dt;
-      const lim = CFG.player.speed;
+      // Предел скорости масштабируется аналоговым вводом: джойстик на треть — идём в треть
+      const lim = CFG.player.speed * Math.max(0.35, Math.abs(dir));
       if (Math.abs(this.vx) > lim) this.vx = Math.sign(this.vx) * lim;
     } else {
       const fric = (this.onGround ? CFG.player.frictionGround : CFG.player.frictionAir) * dt;
@@ -2736,6 +2765,9 @@ class Input {
     this.pressed = new Set();
     this.mouse = { x: 0, y: 0, left: false, right: false };
     this.rect = { left: 0, top: 0 };
+    // M7: аналоговый ввод с джойстика (-1..1). Ноль значит «джойстик не трогают»
+    this.touchX = 0;
+    this.stickPx = null;
 
     window.addEventListener('keydown', (e) => {
       if (CFG.binds.indexOf(e.code) !== -1) e.preventDefault();
@@ -2761,6 +2793,16 @@ class Input {
       if (e.button === 2) this.mouse.right = false;
     });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    // M7: колесо мыши переключает режим. Копим в очереди, а не меняем состояние
+    // игры прямо из обработчика события
+    this.wheel = 0;
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      // нормализуем: у тачпадов шаг бывает дробным, знак важнее величины
+      const step = Math.abs(e.deltaY) >= 1 ? Math.sign(e.deltaY) : Math.sign(e.deltaY || 0);
+      if (step) this.wheel += step;
+    }, { passive: false });
   }
 
   setMouse(e) {
@@ -2770,6 +2812,13 @@ class Input {
 
   down(code) { return this.keys.has(code); }
 
+  // Сколько щелчков колеса накопилось с прошлого кадра (+ вниз, − вверх)
+  takeWheel() {
+    const d = this.wheel;
+    this.wheel = 0;
+    return d;
+  }
+
   consume(code) {
     if (!this.pressed.has(code)) return false;
     this.pressed.delete(code);
@@ -2777,6 +2826,211 @@ class Input {
   }
 
   endFrame() { this.pressed.clear(); }
+}
+
+/* ============================================================
+   M7: сенсорное управление.
+   Слушаем touch-события на канвасе и кормим ими те же клавиши, что и клавиатура,
+   поэтому физика, coyote-time и переворот гравитации работают без изменений.
+   Мультитач получается сам собой: каждый палец ведёт свой элемент по identifier.
+   ============================================================ */
+class TouchUI {
+  constructor(canvas, input) {
+    this.canvas = canvas;
+    this.input = input;
+    this.game = null;
+    this.ptr = new Map();          // identifier -> { kind: 'btn'|'stick'|'free', id }
+    this.stick = { x: 0, y: 0, r: 60, dx: 0, dy: 0, id: null, active: false };
+    this.flash = {};               // id кнопки -> остаток вспышки, сек
+    this.hintT = CFG.touchUI.hintTime;
+    this.awake = false;            // был ли первый тап (старт)
+    this.W = 1280;
+    this.H = 720;
+
+    // Порог «это тач»: грубый указатель или есть точки касания
+    const coarse = typeof window.matchMedia === 'function' &&
+                   window.matchMedia('(pointer: coarse)').matches;
+    const points = (typeof navigator !== 'undefined' && navigator.maxTouchPoints) || 0;
+    this.enabled = !!(coarse || points > 0);
+    if (!this.enabled) return;
+
+    const opts = { passive: false };
+    canvas.addEventListener('touchstart', (e) => this.onStart(e), opts);
+    canvas.addEventListener('touchmove', (e) => this.onMove(e), opts);
+    canvas.addEventListener('touchend', (e) => this.onEnd(e), opts);
+    canvas.addEventListener('touchcancel', (e) => this.onEnd(e), opts);
+  }
+
+  // Геометрия: пересчитывается по размеру экрана, поэтому поворот телефона не ломает кнопки
+  layout(vw, vh) {
+    const T = CFG.touchUI;
+    const m = T.margin;
+    const b = Math.max(T.minButton, Math.round(Math.min(vw, vh) * 0.115));
+    const r = b / 2;
+    const step = b + 14;
+    const portrait = vh >= vw * 1.05;
+    // Портрет: сетка 2×4 в правом нижнем углу. Ландшафт: 4×2 вдоль нижнего края —
+    // иначе колонка из четырёх кнопок наезжает на панель ресурсов
+    const order = ['jump', 'flip', 'act', 'tele', 'craft', 'scan', 'use', 'heal'];
+    const cols = portrait ? 2 : 4;
+
+    const list = [];
+    for (let i = 0; i < order.length; i++) {
+      const col = i % cols;                 // 0 — ближе к правому краю
+      const row = Math.floor(i / cols);
+      const rows = Math.ceil(order.length / cols);
+      const x = vw - m - r - col * step;
+      const y = vh - m - r - (rows - 1 - row) * step;
+      const key = order[i] === 'jump' ? 'Space'
+                : order[i] === 'flip' ? 'KeyF'
+                : order[i] === 'act' ? 'MouseLeft'
+                : order[i] === 'tele' ? 'MouseRight'
+                : order[i] === 'craft' ? 'KeyC'
+                : order[i] === 'scan' ? 'KeyQ'
+                : order[i] === 'use' ? 'KeyE' : 'KeyH';
+      list.push({ id: order[i], key, x, y, r });
+    }
+
+    // Джойстик: слева снизу, не задевая сетку кнопок по горизонтали
+    const sr = Math.min(T.stickRadius, Math.max(44, Math.min(vw, vh) * 0.17));
+    const sx = m + sr + 8;
+    const sy = vh - m - sr - 8;
+    return { buttons: list, stick: { x: sx, y: sy, r: sr }, portrait, btn: b };
+  }
+
+  hitButton(lay, x, y) {
+    const pad = CFG.touchUI.hitPad;
+    for (const it of lay.buttons) {
+      if (Math.hypot(x - it.x, y - it.y) <= it.r + pad) return it;
+    }
+    return null;
+  }
+
+  onStart(e) {
+    // Первый тап — это ещё и пользовательский жест: только из него браузер
+    // разрешает полноэкранный режим. Не вышло (iframe без allowfullscreen) — не страшно
+    if (!this.awake) {
+      this.awake = true;
+      try {
+        const el = this.canvas;
+        const req = el.requestFullscreen || el.webkitRequestFullscreen;
+        if (req && !document.fullscreenElement) req.call(el).catch(() => {});
+      } catch (err) { /* полноэкранный режим не критичен */ }
+    }
+    const lay = this.layout(this.W, this.H);
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      const p = this.local(t);
+      const btn = this.hitButton(lay, p.x, p.y);
+      if (btn) {
+        this.press(btn.key);
+        this.flash[btn.id] = CFG.touchUI.flashTime;
+        this.ptr.set(t.identifier, { kind: 'btn', id: btn.id, key: btn.key });
+        continue;
+      }
+      // Левая половина и низ — джойстик; правая половина — прицел и действие
+      const onLeft = p.x < this.W * 0.46;
+      if (onLeft && !this.stick.active) {
+        this.stick.active = true;
+        this.stick.id = t.identifier;
+        this.stick.x = lay.stick.x;
+        this.stick.y = lay.stick.y;
+        this.stick.r = lay.stick.r;
+        this.ptr.set(t.identifier, { kind: 'stick' });
+        this.moveStick(p.x, p.y);
+      } else {
+        this.ptr.set(t.identifier, { kind: 'free' });
+        this.aim(p.x, p.y);
+      }
+    }
+    e.preventDefault();
+  }
+
+  onMove(e) {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      const rec = this.ptr.get(t.identifier);
+      if (!rec) continue;
+      const p = this.local(t);
+      if (rec.kind === 'stick') this.moveStick(p.x, p.y);
+      else if (rec.kind === 'free') this.aim(p.x, p.y);
+    }
+    e.preventDefault();
+  }
+
+  onEnd(e) {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      const rec = this.ptr.get(t.identifier);
+      if (!rec) continue;
+      this.ptr.delete(t.identifier);
+      if (rec.kind === 'stick') {
+        this.stick.active = false;
+        this.stick.id = null;
+        this.stick.dx = 0;
+        this.stick.dy = 0;
+        this.input.touchX = 0;
+        this.input.stickPx = null;
+      } else if (rec.kind === 'btn') {
+        this.release(rec.key);
+      }
+    }
+    e.preventDefault();
+  }
+
+  local(t) {
+    const r = this.input.rect || { left: 0, top: 0 };
+    return { x: t.clientX - r.left, y: t.clientY - r.top };
+  }
+
+  press(key) {
+    if (key === 'MouseLeft') this.input.mouse.left = true;
+    else if (key === 'MouseRight') this.input.mouse.right = true;
+    else { this.input.keys.add(key); this.input.pressed.add(key); }
+  }
+
+  release(key) {
+    if (key === 'MouseLeft') this.input.mouse.left = false;
+    else if (key === 'MouseRight') this.input.mouse.right = false;
+    else this.input.keys.delete(key);
+  }
+
+  // Джойстик: палец задаёт вектор движения, как A/D (по X) с мёртвой зоной
+  moveStick(x, y) {
+    const s = this.stick;
+    let dx = x - s.x, dy = y - s.y;
+    const d = Math.hypot(dx, dy);
+    if (d > s.r) { dx = dx / d * s.r; dy = dy / d * s.r; }
+    s.dx = dx / s.r;
+    s.dy = dy / s.r;
+    const dead = CFG.touchUI.deadZone;
+    const ax = Math.abs(s.dx);
+    this.input.touchX = ax < dead ? 0 : Math.sign(s.dx) * clamp((ax - dead) / (1 - dead), 0, 1);
+    this.input.stickPx = { dx, dy };
+  }
+
+  // Свободный палец — прицел: курсор игры встаёт под палец, ЛКМ держится
+  aim(x, y) {
+    this.input.mouse.x = x;
+    this.input.mouse.y = y;
+    this.input.mouse.left = true;
+  }
+
+  // Раз в кадр: держим ЛКМ, пока на экране есть «действующий» палец
+  update(dt) {
+    if (!this.enabled) return;
+    this.hintT = Math.max(0, this.hintT - dt);
+    for (const k of Object.keys(this.flash)) {
+      this.flash[k] -= dt;
+      if (this.flash[k] <= 0) delete this.flash[k];
+    }
+    let act = false;
+    for (const [, rec] of this.ptr) {
+      if (rec.kind === 'free' || (rec.kind === 'btn' && rec.id === 'act')) act = true;
+    }
+    // Кнопка «действие» работает по курсору, свободный палец — по своему месту
+    this.input.mouse.left = act;
+  }
 }
 
 /* ============================================================
@@ -2793,6 +3047,19 @@ class Game {
     this.tiles = new TileLayer(this.world);
     this.camera = new Camera(this.world.cols * TS, this.world.rows * TS);
     this.input = new Input(canvas);
+    // M7: тач-интерфейс включается только на сенсорных устройствах
+    this.touch = new TouchUI(canvas, this.input);
+    this.touch.game = this;
+    this.isTouch = this.touch.enabled;
+    if (this.isTouch) {
+      // Прицел по умолчанию в центре: иначе первый кадр рисует его в углу экрана
+      this.input.mouse.x = this.vw / 2;
+      this.input.mouse.y = this.vh / 2;
+    }
+    this.modeSwitchT = 0;
+    // M7: на тач-устройствах HUD крупнее, а плашка управления скрыта
+    this.hudScale = this.isTouch ? CFG.hud.touchScale : 1;
+    this.hudW = this.isTouch ? CFG.hud.touchWidth : 1;
     this.particles = new Particles();
     this.inventory = new Inventory(CFG.resources);
 
@@ -2913,6 +3180,25 @@ class Game {
       ? this.canvas.getBoundingClientRect()
       : { left: 0, top: 0 };
     this.camera.setViewport(this.vw / CFG.camera.zoom, this.vh / CFG.camera.zoom);
+    // M7: геометрия тач-кнопок зависит от размера окна
+    if (this.touch) {
+      this.touch.W = this.vw;
+      this.touch.H = this.vh;
+    }
+  }
+
+  // M7: геометрия HUD, доступная без отрисовки (нужна и тестам, и раскладке кнопок).
+  // Всё считается из размеров экрана, а не из последнего кадра
+  hudMetrics() {
+    const H = CFG.hud;
+    const mb = this.modeBarMetrics();
+    const w = H.w * this.hudW;
+    const top = this.isTouch ? mb.y + mb.h + 10 : H.margin;
+    const h = H.pad * 2 + H.rowH * CFG.resources.length;
+    const hpY = top + h + 8;
+    // панель ресурсов + полоска HP + иконки экипировки + счётчик терминалов + кулдаун
+    const bottom = hpY + 16 + 46;
+    return { x: this.vw - w - H.margin, y: top, w, h, hpY, bottom, mb };
   }
 
   /* ---------- игровые величины ---------- */
@@ -2939,16 +3225,22 @@ class Game {
     return this.crates.concat(this.drops);
   }
 
-  bodyAt(wx, wy) {
+  // pad расширяет зону попадания: на тач-устройстве палец закрывает тело
+  bodyAt(wx, wy, pad = 0) {
     // Сначала дропы (они мельче и лежат сверху), потом ящики
     for (let i = this.drops.length - 1; i >= 0; i--) {
       const d = this.drops[i];
-      if (wx >= d.x && wx <= d.x + d.w && wy >= d.y && wy <= d.y + d.h) return d;
+      if (wx >= d.x - pad && wx <= d.x + d.w + pad && wy >= d.y - pad && wy <= d.y + d.h + pad) return d;
     }
     for (const c of this.crates) {
-      if (wx >= c.x && wx <= c.x + c.w && wy >= c.y && wy <= c.y + c.h) return c;
+      if (wx >= c.x - pad && wx <= c.x + c.w + pad && wy >= c.y - pad && wy <= c.y + c.h + pad) return c;
     }
     return null;
+  }
+
+  // Радиус пальца в мировых пикселях: 22 экранных / зум
+  touchPad() {
+    return this.isTouch ? 22 / CFG.camera.zoom : 0;
   }
 
   // Радиус телекинеза: пушка расширяет его с 8 до 15 тайлов
@@ -2971,11 +3263,27 @@ class Game {
 
   /* ---------- действия ---------- */
 
+  // Порядок режимов в плашке и для колеса: 1..7, как в подсказке
+  modeList() {
+    return [MODE.DIRT, MODE.STONE, MODE.FERRITE, MODE.DIG, MODE.DEMOLISH, MODE.ANCHOR, MODE.BENCH];
+  }
+
+  // Колесо: dir = +1 — следующий режим, −1 — предыдущий, по кругу
+  cycleMode(dir) {
+    const list = this.modeList();
+    const n = list.length;
+    const i = list.indexOf(this.mode);
+    const next = list[((i < 0 ? 0 : i) + dir + n) % n];
+    this.setMode(next);
+  }
+
   setMode(m) {
     this.mode = m;
     this.dig = null;
     this.holdAnchor = false;
     this.demolishT = 0;
+    // M7: пульсация слота — обратная связь, что режим действительно сменился
+    this.modeSwitchT = CFG.hud.modePulse;
   }
 
   // ---------- 1B: постройка ----------
@@ -3270,8 +3578,9 @@ class Game {
     // Наведение мышью: строки рисуются в drawCraft по этим же координатам
     const m = inp.mouse;
     const box = this.craftLayout();
-    if (m.x > box.x && m.x < box.x + box.w && m.y > box.y + box.headH && m.y < box.y + box.h) {
-      const idx = Math.floor((m.y - box.y - box.headH) / box.rowH);
+    const rowH = box.rowH * box.s, headH = box.headH * box.s;
+    if (m.x > box.x && m.x < box.x + box.w && m.y > box.y + headH && m.y < box.y + box.h) {
+      const idx = Math.floor((m.y - box.y - headH) / rowH);
       if (idx >= 0 && idx < n) {
         this.craftSel = idx;
         if (inp.consume('MouseLeft') || (inp.mouse.left && !this.prevLeft)) {
@@ -3282,10 +3591,18 @@ class Game {
   }
 
   // Геометрия панели: одна функция для отрисовки и для попадания мышью
+  // M7: панель крафта рисуется в «проектных» координатах 500×N и целиком
+  // масштабируется под экран. Так строки рецептов не вылезают за край на телефоне,
+  // а попадание мышью считается по тем же масштабам
   craftLayout() {
-    const w = 500, rowH = 62, headH = 54;
-    const h = headH + rowH * CFG.recipes.length + 16;
-    return { x: (this.vw - w) / 2, y: (this.vh - h) / 2, w, h, headH, rowH };
+    const dw = 500, rowH = 62, headH = 54;
+    const dh = headH + rowH * CFG.recipes.length + 16;
+    const sc = Math.min(1, (this.vw - 24) / dw, (this.vh - 24) / dh);
+    const w = dw * sc, h = dh * sc;
+    return {
+      x: (this.vw - w) / 2, y: (this.vh - h) / 2, w, h,
+      dw, dh, rowH, headH, s: sc
+    };
   }
 
   /* ---------- M3: спавн хищников и биогеля ---------- */
@@ -3741,14 +4058,26 @@ class Game {
     this.placeBlock(mw, m);
   }
 
+  // M7: при отпускании тело не сохраняет набранную скорость — гасим до 20 %.
+  // Раньше 950 px/s продолжали жить после отпускания, и ящик «выстреливал»
   releaseGrab() {
-    if (this.grab) {
-      this.grab.gravityScale = 1;
-      this.grab.wake();
-      this.grab = null;
-    }
+    if (!this.grab) return;
+    const b = this.grab;
+    b.vx *= CFG.tele.releaseKeep;
+    b.vy *= CFG.tele.releaseKeep;
+    const cap = CFG.tele.holdSpeed * CFG.tele.releaseKeep;
+    const sp = Math.hypot(b.vx, b.vy);
+    if (sp > cap) { b.vx *= cap / sp; b.vy *= cap / sp; }
+    b.gravityScale = 1;
+    b.wake();
+    this.grab = null;
   }
 
+  // M7: захват. Три источника «улёта» закрыты:
+  //  1) скорость ограничена holdSpeed (было 950 — как у свободного падения);
+  //  2) цель притяжения не доезжает до центра игрока (grabOffset) — тело не пролетает
+  //     сквозь него и не получает рывок от смены знака разницы;
+  //  3) демпфирование отдельное и выше, поэтому ящик тормозит, а не разгоняется.
   updateGrab(dt, mw) {
     const b = this.grab;
     if (!b || b.dead) { this.grab = null; this.leftAction = null; return; }
@@ -3763,24 +4092,65 @@ class Game {
       tx = p.cx + (dx / dist) * maxD;
       ty = p.cy + (dy / dist) * maxD;
     }
+    // Не даём цели попасть внутрь игрока: держим зазор по габаритам.
+    // Без этого цель оказывалась в центре игрока, знак разницы менялся — и ящик
+    // получал рывок в противоположную сторону.
+    const ndx = tx - p.cx, ndy = ty - p.cy;
+    const nd = Math.hypot(ndx, ndy);
+    const minD = CFG.tele.grabOffset;
+    if (nd < minD) {
+      if (nd < 0.001) { tx = p.cx + p.facing * minD; ty = p.cy; }
+      else { tx = p.cx + (ndx / nd) * minD; ty = p.cy + (ndy / nd) * minD; }
+    }
 
     // Пушка тянет на 50% сильнее
     const pull = this.player.hasGravityGun ? CFG.tele.stiffnessGun : CFG.tele.stiffness;
     b.vx += (tx - b.cx) * pull * dt;
     b.vy += (ty - b.cy) * pull * dt;
-    const damp = Math.exp(-CFG.tele.damping * dt);
+    const damp = Math.exp(-CFG.tele.holdDamping * dt);
     b.vx *= damp;
     b.vy *= damp;
+    const cap = Math.min(CFG.tele.holdSpeed, CFG.tele.maxSpeed);
     const sp = Math.hypot(b.vx, b.vy);
-    if (sp > CFG.tele.maxSpeed) {
-      b.vx *= CFG.tele.maxSpeed / sp;
-      b.vy *= CFG.tele.maxSpeed / sp;
+    if (sp > cap) {
+      b.vx *= cap / sp;
+      b.vy *= cap / sp;
     }
     b.sleeping = false;
+
+    // Ящик, который едет в игрока, толкает его, а не проходит насквозь
+    this.separateFromPlayer(b);
+  }
+
+  // Ящик и игрок — два твёрдых тела. Разводим по минимальной оси и делим смещение
+  // по массам: тяжёлый ящик скорее сдвинет игрока, чем пролетит сквозь него
+  separateFromPlayer(b) {
+    const p = this.player;
+    if (!overlap(b, p, CFG.tele.grabGap)) return;
+    const ox = (b.w + p.w) / 2 + CFG.tele.grabGap - Math.abs(b.cx - p.cx);
+    const oy = (b.h + p.h) / 2 + CFG.tele.grabGap - Math.abs(b.cy - p.cy);
+    if (ox <= 0 || oy <= 0) return;
+    const crateMass = 3, playerMass = 1;
+    const total = crateMass + playerMass;
+    if (ox < oy) {
+      const dir = Math.sign(b.cx - p.cx) || p.facing;
+      b.x += dir * ox * (playerMass / total);
+      p.x -= dir * ox * (crateMass / total);
+      if (b.vx * dir < 0) b.vx = 0;
+      p.vx = clamp(p.vx - dir * ox * 6, -CFG.player.speed, CFG.player.speed);
+    } else {
+      const dir = Math.sign(b.cy - p.cy) || 1;
+      b.y += dir * oy * (playerMass / total);
+      p.y -= dir * oy * (crateMass / total);
+      if (b.vy * dir < 0) b.vy = 0;
+      p.vy = clamp(p.vy - dir * oy * 6, -CFG.physics.maxFall, CFG.physics.maxFall);
+    }
+    p.onGround = false;
+    b.wake();
   }
 
   startGrab(mw) {
-    const body = this.bodyAt(mw.x, mw.y);
+    const body = this.bodyAt(mw.x, mw.y, this.touchPad());
     if (!body || !this.inTeleRange(body)) return;
     this.grab = body;
     body.wake();
@@ -3884,9 +4254,20 @@ class Game {
   update(dt) {
     this.time += dt;
     const inp = this.input;
+    // M7: тач-слой кормит клавиши и держит ЛКМ, пока палец на экране
+    if (this.isTouch) this.touch.update(dt);
+    this.modeSwitchT = Math.max(0, this.modeSwitchT - dt);
 
     // Пока открыто меню крафта, цифры принадлежат ему, а не режимам
     // (M5: рецептов стало четыре, поэтому 4-я цифра тоже уходит в меню)
+    // M7: колесо мыши листает режимы по кругу, цифры остаются как альтернатива
+    const wheel = this.craftOpen || this.lore ? (inp.takeWheel(), 0) : inp.takeWheel();
+    if (wheel) {
+      const dir = wheel > 0 ? 1 : -1;
+      const n = Math.min(3, Math.abs(wheel));
+      for (let i = 0; i < n; i++) this.cycleMode(dir);
+    }
+
     if (!this.craftOpen && inp.consume('Digit1')) this.setMode(MODE.DIRT);
     if (!this.craftOpen && inp.consume('Digit2')) this.setMode(MODE.STONE);
     if (!this.craftOpen && inp.consume('Digit3')) this.setMode(MODE.FERRITE);
@@ -4650,6 +5031,20 @@ class Game {
   // Перекрестие в экранных пикселях: остаётся тонким при любом зуме
   drawCrosshair(ctx) {
     const m = this.input.mouse;
+    // M7: на телефоне прицел крупнее — палец закрывает точку, целиться надо по кольцу
+    if (this.isTouch) {
+      const r = 16;
+      ctx.strokeStyle = 'rgba(228,240,255,0.8)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(228,240,255,0.9)';
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
     ctx.strokeStyle = 'rgba(228,240,255,0.85)';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
@@ -5162,14 +5557,24 @@ class Game {
 
   /* ---------- HUD ---------- */
 
+  // M7: размер шрифта HUD с поправкой на тач-устройства.
+  // Масштабировать весь HUD-слой целиком нельзя: центрированные плашки уезжают
+  // влево, а привязки к краям — за экран. Крупнее делаем именно шрифты и иконки
+  fs(size) {
+    return Math.round(size * this.hudScale) + 'px ' + CFG.render.font;
+  }
+
   drawHud(ctx) {
     const H = CFG.hud;
-    const x = this.vw - H.w - H.margin;
-    const y = H.margin;
-    const h = H.pad * 2 + H.rowH * CFG.resources.length;
+    // M7: вся геометрия HUD считается в одном месте (hudMetrics), чтобы раскладка
+    // кнопок и тесты видели те же числа, что и отрисовка
+    const m = this.hudMetrics();
+    const x = m.x, y = m.y, w = m.w, h = m.h;
+    this.hudBottomY = m.bottom;
+    this.hudLeftX = x;
 
     ctx.fillStyle = 'rgba(9,13,21,0.78)';
-    rr(ctx, x, y, H.w, h, 10);
+    rr(ctx, x, y, w, h, 10);
     ctx.fill();
     ctx.strokeStyle = 'rgba(150,180,220,0.16)';
     ctx.lineWidth = 1;
@@ -5183,7 +5588,7 @@ class Game {
       // Активная строка (задел под выбор материала в 1B)
       if (H.active === r.id) {
         ctx.fillStyle = 'rgba(120,190,255,0.14)';
-        rr(ctx, x + 4, rowY - H.rowH / 2 + 2, H.w - 8, H.rowH - 4, 6);
+        rr(ctx, x + 4, rowY - H.rowH / 2 + 2, w - 8, H.rowH - 4, 6);
         ctx.fill();
         ctx.fillStyle = r.color;
         ctx.fillRect(x + 4, rowY - H.rowH / 2 + 4, 2, H.rowH - 8);
@@ -5196,7 +5601,7 @@ class Game {
 
       // Название
       ctx.fillStyle = 'rgba(214,228,246,0.72)';
-      ctx.font = '11px ' + CFG.render.font;
+      ctx.font = this.fs(11);
       ctx.textAlign = 'left';
       ctx.fillText(r.name, x + H.pad + 18, rowY + 0.5);
 
@@ -5205,10 +5610,10 @@ class Game {
       const pulse = raw * raw;                                  // быстрый спад, мягкий хвост
       const scale = 1 + 0.45 * pulse;
       ctx.save();
-      ctx.translate(x + H.w - H.pad, rowY);
+      ctx.translate(x + w - H.pad, rowY);
       ctx.scale(scale, scale);
       ctx.textAlign = 'right';
-      ctx.font = 'bold 14px ' + CFG.render.font;
+      ctx.font = this.fs(14).replace(/^(\d+)px/, 'bold $1px');
       ctx.fillStyle = pulse > 0 ? '#ffffff' : 'rgba(232,242,255,0.92)';
       ctx.fillText(String(this.inventory.counts[r.id]), 0, 0.5);
       ctx.restore();
@@ -5229,13 +5634,14 @@ class Game {
                    16, 30);
     }
 
-    this.drawHealthBar(ctx, x, y + h + 8);
+    this.drawHealthBar(ctx, x, m.hpY, w);
     this.drawCraft(ctx);
     this.drawLore(ctx);
     this.drawPhasePanel(ctx);
     this.drawGravityArrow(ctx);
     this.drawModeBar(ctx);
     this.drawControls(ctx);
+    this.drawTouchUI(ctx);
 
     // Уведомление (лечение, урон прилива)
     if (this.noticeT > 0) {
@@ -5286,14 +5692,15 @@ class Game {
   }
 
   // Панель фазы прилива справа снизу
-  drawHealthBar(ctx, x, y) {
+  drawHealthBar(ctx, x, y, w0) {
     const H = CFG.hud;
+    const W = w0 || H.w;
     const h = 16;
     const p = this.player;
     const ratio = clamp(p.health / p.maxHealth, 0, 1);
 
     ctx.fillStyle = 'rgba(9,13,21,0.78)';
-    rr(ctx, x, y, H.w, h, 8);
+    rr(ctx, x, y, W, h, 8);
     ctx.fill();
     ctx.strokeStyle = 'rgba(150,180,220,0.16)';
     ctx.lineWidth = 1;
@@ -5301,7 +5708,7 @@ class Game {
 
     // Сама шкала
     const pad = 4;
-    const bw = (H.w - pad * 2) * ratio;
+    const bw = (W - pad * 2) * ratio;
     const flash = p.hurtT > 0 ? 0.5 + 0.5 * Math.sin(this.time * 40) : 0;
     ctx.fillStyle = ratio > 0.5 ? '#2ecc71' : ratio > 0.25 ? '#e6a417' : '#e03b3b';
     if (flash > 0) ctx.fillStyle = '#ff5b5b';
@@ -5335,9 +5742,9 @@ class Game {
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = 'bold 11px ' + CFG.render.font;
+    ctx.font = this.fs(11).replace(/^(\d+)px/, 'bold $1px');
     ctx.fillStyle = 'rgba(240,248,255,0.95)';
-    ctx.fillText(Math.round(p.health) + ' / ' + p.maxHealth, x + H.w / 2, y + h / 2 + 0.5);
+    ctx.fillText(Math.round(p.health) + ' / ' + p.maxHealth, x + W / 2, y + h / 2 + 0.5);
 
     // M4: экипировка — резак и броня рядом с HP
     let ix = x + 6;
@@ -5435,13 +5842,16 @@ class Game {
 
     ctx.save();
     ctx.globalAlpha = ease;
-    ctx.translate(0, (1 - ease) * 12);
-
-    // затемнение мира и панель
+    // затемнение мира — на весь экран, до масштабирования
     ctx.fillStyle = 'rgba(4,6,11,0.55)';
     ctx.fillRect(0, 0, this.vw, this.vh);
+    // дальше всё рисуется в проектных координатах панели и масштабируется целиком
+    ctx.translate(b.x, b.y + (1 - ease) * 12);
+    ctx.scale(b.s, b.s);
+    const X0 = 0, Y0 = 0, W0 = b.dw, H0 = b.dh;
+
     ctx.fillStyle = 'rgba(9,13,21,0.94)';
-    rr(ctx, b.x, b.y, b.w, b.h, 14);
+    rr(ctx, X0, Y0, W0, H0, 14);
     ctx.fill();
     ctx.strokeStyle = 'rgba(150,180,220,0.28)';
     ctx.lineWidth = 1;
@@ -5451,21 +5861,23 @@ class Game {
     ctx.textAlign = 'left';
     ctx.font = 'bold 15px ' + CFG.render.font;
     ctx.fillStyle = '#e8f2ff';
-    ctx.fillText('ВЕРСТАК', b.x + 18, b.y + 24);
+    ctx.fillText('ВЕРСТАК', 18, 24);
     ctx.font = '11px ' + CFG.render.font;
     ctx.fillStyle = 'rgba(160,185,215,0.8)';
-    ctx.fillText('1–4 или ЛКМ · Enter создать · C закрыть', b.x + 18, b.y + 42);
+    ctx.fillText(this.isTouch
+      ? 'тапните строку, чтобы создать · кнопка ⚙ закрывает'
+      : '1–4 или ЛКМ · Enter создать · C закрыть', 18, 42);
 
     for (let i = 0; i < CFG.recipes.length; i++) {
       const r = CFG.recipes[i];
-      const ry = b.y + b.headH + i * b.rowH;
+      const ry = b.headH + i * b.rowH;
       const on = i === this.craftSel;
       const done = this.recipeDone(r);
       const can = this.canCraft(r);
 
       if (on) {
         ctx.fillStyle = 'rgba(120,190,255,0.12)';
-        rr(ctx, b.x + 10, ry + 4, b.w - 20, b.rowH - 8, 10);
+        rr(ctx, 10, ry + 4, W0 - 20, b.rowH - 8, 10);
         ctx.fill();
         ctx.strokeStyle = 'rgba(127,212,255,0.5)';
         ctx.lineWidth = 1.5;
@@ -5475,43 +5887,43 @@ class Game {
       // иконка
       ctx.fillStyle = r.color;
       if (done) ctx.globalAlpha = 0.45;
-      rr(ctx, b.x + 22, ry + 15, 30, 30, 7);
+      rr(ctx, 22, ry + 15, 30, 30, 7);
       ctx.fill();
       ctx.globalAlpha = 1;
       if (r.id === 'laser') {
         ctx.fillStyle = '#2a0d0a';
-        ctx.fillRect(b.x + 28, ry + 29, 18, 2);
+        ctx.fillRect(28, ry + 29, 18, 2);
       } else if (r.id === 'armor') {
         ctx.fillStyle = 'rgba(30,40,52,0.7)';
-        ctx.fillRect(b.x + 30, ry + 23, 14, 6);
+        ctx.fillRect(30, ry + 23, 14, 6);
       } else if (r.id === 'gun') {
         ctx.fillStyle = 'rgba(10,30,50,0.8)';
-        ctx.fillRect(b.x + 30, ry + 27, 14, 5);
+        ctx.fillRect(30, ry + 27, 14, 5);
       } else {
         // сканер: три расходящиеся дуги
         ctx.strokeStyle = 'rgba(20,10,40,0.85)';
         ctx.lineWidth = 2;
         for (let k = 1; k <= 3; k++) {
           ctx.beginPath();
-          ctx.arc(b.x + 26, ry + 30, k * 5, -Math.PI / 3, Math.PI / 3);
+          ctx.arc(26, ry + 30, k * 5, -Math.PI / 3, Math.PI / 3);
           ctx.stroke();
         }
         ctx.fillStyle = 'rgba(20,10,40,0.85)';
-        ctx.fillRect(b.x + 25, ry + 27, 3, 6);
+        ctx.fillRect(25, ry + 27, 3, 6);
       }
 
       // название и цена
       ctx.font = 'bold 13px ' + CFG.render.font;
       ctx.fillStyle = done ? 'rgba(155,247,180,0.85)' : '#e8f2ff';
-      ctx.fillText(r.name, b.x + 64, ry + 22);
+      ctx.fillText(r.name, 64, ry + 22);
 
       ctx.font = '11px ' + CFG.render.font;
       ctx.fillStyle = 'rgba(160,185,215,0.75)';
-      ctx.fillText(r.hint, b.x + 64, ry + 40);
+      ctx.fillText(r.hint, 64, ry + 40);
 
       // Кнопка
       const bw = 92, bh = 26;
-      const btnX = b.x + b.w - bw - 18, by = ry + b.rowH / 2 - bh / 2;
+      const btnX = W0 - bw - 18, by = ry + b.rowH / 2 - bh / 2;
 
       // Цена: справа налево, чтобы не наезжать на длинные названия
       let cx = btnX - 14;
@@ -5548,9 +5960,18 @@ class Game {
 
   drawPhasePanel(ctx) {
     const tide = this.tide;
-    const W = 210, H = 62;
-    const x = this.vw - W - 16;
-    const y = this.vh - H - 52;
+    // M7: на узком экране панель сжимается по ширине, иначе вылезает за край
+    // на тач-устройстве панель стоит слева — не должна залезть под панель ресурсов
+    const W = this.isTouch
+      ? Math.max(150, Math.min(210, (this.hudLeftX || this.vw) - 28))
+      : Math.min(210, this.vw - 32);
+    const H = 62;
+    // M7: на тач-устройстве правый нижний угол занят кнопками, а правый верхний —
+    // ресурсами, поэтому панель прилива переезжает влево под строку отладки.
+    // На ПК она остаётся на привычном месте справа снизу
+    const mb = this.modeBarMetrics();
+    const x = this.isTouch ? 16 : this.vw - W - 16;
+    const y = this.isTouch ? mb.y + mb.h + 12 : this.vh - H - 52;
     const ph = tide.phase;
     const blink = ph.id === 'WARNING'
       ? 0.5 + 0.5 * Math.sin(this.time * Math.PI * 4)
@@ -5701,6 +6122,232 @@ class Game {
   }
 
   // Выбранный режим: 1-3 материал, 4 копать, 5 снос, 6 якорь
+  /* ---------- M7: экранные кнопки и джойстик ---------- */
+
+  // Тач-слой: джойстик слева, кнопки справа. Рисуем в Canvas, а не DOM —
+  // так интерфейс живёт в тех же координатах, что игра, и не мешает мыши на ПК
+  drawTouchUI(ctx) {
+    if (!this.isTouch) return;
+    const T = CFG.touchUI;
+    const lay = this.touch.layout(this.vw, this.vh);
+    const st = this.touch.stick;
+
+    // --- джойстик: основание и пятачок
+    const baseA = st.active ? 0.36 : 0.22;
+    ctx.globalAlpha = baseA;
+    ctx.fillStyle = '#0a111c';
+    ctx.beginPath();
+    ctx.arc(lay.stick.x, lay.stick.y, lay.stick.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = st.active ? 0.75 : 0.42;
+    ctx.strokeStyle = 'rgba(140,200,255,0.9)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // мёртвая зона и оси
+    ctx.globalAlpha = 0.22;
+    ctx.strokeStyle = '#9fd8ff';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(lay.stick.x, lay.stick.y, lay.stick.r * CFG.touchUI.deadZone, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(lay.stick.x - lay.stick.r * 0.7, lay.stick.y);
+    ctx.lineTo(lay.stick.x + lay.stick.r * 0.7, lay.stick.y);
+    ctx.moveTo(lay.stick.x, lay.stick.y - lay.stick.r * 0.7);
+    ctx.lineTo(lay.stick.x, lay.stick.y + lay.stick.r * 0.7);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // пятачок смещается за пальцем, но не выходит за основание
+    const knobX = lay.stick.x + (st.dx || 0) * lay.stick.r * 0.62;
+    const knobY = lay.stick.y + (st.dy || 0) * lay.stick.r * 0.62;
+    const kg = ctx.createRadialGradient(knobX - 6, knobY - 6, 2, knobX, knobY, T.stickKnob + 6);
+    kg.addColorStop(0, 'rgba(220,244,255,0.95)');
+    kg.addColorStop(1, 'rgba(90,160,220,0.55)');
+    ctx.fillStyle = kg;
+    ctx.beginPath();
+    ctx.arc(knobX, knobY, T.stickKnob * 0.62, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(180,225,255,0.8)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // --- кнопки
+    for (const b of lay.buttons) {
+      const flash = Math.max(0, (this.touch.flash[b.id] || 0) / CFG.touchUI.flashTime);
+      const on = flash > 0;
+      const rad = b.r * (on ? 1.06 : 1);
+
+      // вспышка нажатия: яркий ореол + заливка
+      if (on) {
+        ctx.globalCompositeOperation = 'lighter';
+        const gg = ctx.createRadialGradient(b.x, b.y, rad * 0.3, b.x, b.y, rad * 1.7);
+        gg.addColorStop(0, 'rgba(120,205,255,' + (0.55 * flash).toFixed(3) + ')');
+        gg.addColorStop(1, 'rgba(120,205,255,0)');
+        ctx.fillStyle = gg;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, rad * 1.7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
+      }
+
+      ctx.globalAlpha = on ? 0.95 : 0.5;
+      ctx.fillStyle = on ? 'rgba(90,180,240,0.55)' : 'rgba(9,15,24,0.62)';
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, rad, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = on ? '#cfeeff' : 'rgba(150,205,245,0.55)';
+      ctx.lineWidth = on ? 2 : 1.4;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+
+      // Иконка: рисуем фигурами, а не символами шрифта — юникод-стрелки
+      // в моноширинных шрифтах часто превращаются в квадратики
+      this.drawTouchIcon(ctx, b.id, b.x, b.y, rad, on ? '#ffffff' : '#cfe6ff');
+    }
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+
+    // --- подпись кнопок мелким шрифтом: что именно делает кнопка
+    ctx.font = '9px ' + CFG.render.font;
+    ctx.fillStyle = 'rgba(170,200,230,0.45)';
+    const hint = { jump: 'прыжок', flip: 'гравитация', act: 'действие', tele: 'телекинез',
+                   craft: 'крафт', scan: 'сканер', use: 'читать', heal: 'биогель' };
+    for (const b of lay.buttons) {
+      ctx.textAlign = 'center';
+      ctx.fillText(hint[b.id] || '', b.x, b.y + b.r + 5);
+    }
+    ctx.textAlign = 'left';
+
+    // --- «Тапните для старта»: первый тап включает звук и фуллскрин в браузере
+    if (!this.touch.awake) {
+      const pulse = 0.7 + 0.3 * Math.sin(this.time * 3);
+      ctx.globalAlpha = pulse;
+      ctx.fillStyle = 'rgba(6,10,18,0.55)';
+      ctx.fillRect(0, 0, this.vw, this.vh);
+      ctx.globalAlpha = 1;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = 'bold 26px ' + CFG.render.font;
+      ctx.fillStyle = '#d7ecff';
+      ctx.fillText('Тапните для старта', this.vw / 2, this.vh / 2 - 8);
+      ctx.font = '13px ' + CFG.render.font;
+      ctx.fillStyle = 'rgba(170,200,230,0.8)';
+      ctx.fillText('левая половина — ходьба, кнопки справа — действия', this.vw / 2, this.vh / 2 + 22);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+    }
+  }
+
+  // Геометрия плашки режимов: одна функция для отрисовки и для раскладки HUD
+  modeBarMetrics() {
+    const touch = this.isTouch;
+    // Слоты сжимаются, если плашка не влезает по ширине (портрет телефона)
+    const fit = clamp((this.vw - 24) / (7 * CFG.hud.modeSlotTouch + 6 * 8), 0.62, 1);
+    const sw = touch ? CFG.hud.modeSlotTouch * fit : 30;
+    const sh = touch ? 40 * fit : 26;
+    const gap = (touch ? 8 : 6) * fit;
+    // На тач-устройстве строку отладки не убираем, поэтому плашку сдвигаем ниже неё
+    const y = touch ? 34 : 14;
+    return { touch, fit, sw, sh, gap, y, h: sh };
+  }
+
+  // Иконки экранных кнопок. Все — векторные, чтобы не зависеть от шрифтов
+  drawTouchIcon(ctx, id, x, y, r, color) {
+    const u = r * 0.42;                     // единица масштаба
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = Math.max(2, r * 0.11);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    if (id === 'jump') {
+      // шеврон вверх
+      ctx.beginPath();
+      ctx.moveTo(-u, u * 0.5);
+      ctx.lineTo(0, -u * 0.6);
+      ctx.lineTo(u, u * 0.5);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-u, u * 1.15);
+      ctx.lineTo(0, u * 0.05);
+      ctx.lineTo(u, u * 1.15);
+      ctx.stroke();
+    } else if (id === 'flip') {
+      // две стрелки: вверх и вниз
+      ctx.beginPath();
+      ctx.moveTo(-u * 0.8, u * 0.2); ctx.lineTo(0, -u); ctx.lineTo(u * 0.8, u * 0.2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-u * 0.8, -u * 0.2); ctx.lineTo(0, u); ctx.lineTo(u * 0.8, -u * 0.2);
+      ctx.stroke();
+    } else if (id === 'act') {
+      // кирка: ручка по диагонали и голова
+      ctx.beginPath();
+      ctx.moveTo(-u, u); ctx.lineTo(u * 0.55, -u * 0.55);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(u * 0.1, -u * 1.05);
+      ctx.quadraticCurveTo(u * 0.9, -u * 0.75, u * 1.05, u * 0.1);
+      ctx.stroke();
+    } else if (id === 'tele') {
+      // прицел телекинеза: кольцо и точка
+      ctx.beginPath(); ctx.arc(0, 0, u, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(0, 0, u * 0.28, 0, Math.PI * 2); ctx.fill();
+      for (let i = 0; i < 4; i++) {
+        const a = i * Math.PI / 2;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * u * 1.05, Math.sin(a) * u * 1.05);
+        ctx.lineTo(Math.cos(a) * u * 1.5, Math.sin(a) * u * 1.5);
+        ctx.stroke();
+      }
+    } else if (id === 'craft') {
+      // шестерня: восемь зубцов
+      ctx.beginPath();
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * Math.PI * 2;
+        const rr2 = i % 2 === 0 ? u * 1.25 : u * 0.8;
+        const px = Math.cos(a) * rr2, py = Math.sin(a) * rr2;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      ctx.beginPath(); ctx.arc(0, 0, u * 0.34, 0, Math.PI * 2); ctx.stroke();
+    } else if (id === 'scan') {
+      // три дуги радара
+      for (let k = 1; k <= 3; k++) {
+        ctx.beginPath();
+        ctx.arc(0, 0, u * 0.5 * k, -Math.PI * 0.75, Math.PI * 0.05);
+        ctx.stroke();
+      }
+      ctx.beginPath(); ctx.arc(0, 0, u * 0.16, 0, Math.PI * 2); ctx.fill();
+    } else if (id === 'use') {
+      // буква E как знак «читать»
+      ctx.beginPath();
+      ctx.moveTo(u * 0.7, -u);
+      ctx.lineTo(-u * 0.6, -u);
+      ctx.lineTo(-u * 0.6, u);
+      ctx.lineTo(u * 0.7, u);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-u * 0.6, 0);
+      ctx.lineTo(u * 0.45, 0);
+      ctx.stroke();
+    } else {
+      // heal: крест
+      ctx.beginPath();
+      ctx.moveTo(-u, 0); ctx.lineTo(u, 0);
+      ctx.moveTo(0, -u); ctx.lineTo(0, u);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // M7: плашка режимов. Активный слот пульсирует при смене (modeSwitchT),
+  // на тач-устройствах слоты крупнее — по ним попадают пальцем
   drawModeBar(ctx) {
     const items = [
       { key: '1', mode: MODE.DIRT, color: RES[TILE.DIRT].color },
@@ -5711,36 +6358,81 @@ class Game {
       { key: '6', mode: MODE.ANCHOR, color: CFG.anchor.color },
       { key: '7', mode: MODE.BENCH, color: CFG.bench.color }
     ];
-    const sw = 30, gap = 6;
+    const m = this.modeBarMetrics();
+    const sw = m.sw, sh = m.sh, gap = m.gap, fit = m.fit, touch = m.touch;
     const total = items.length * sw + (items.length - 1) * gap;
     const x0 = (this.vw - total) / 2;
-    const y = 14;
+    const y = m.y;
+
+    // спад пульсации: 1 -> 0 за modePulse
+    const pulse = clamp(this.modeSwitchT / CFG.hud.modePulse, 0, 1);
+    const wave = pulse * pulse;
 
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
-      const x = x0 + i * (sw + gap);
       const on = this.mode === it.mode;
+      // активный слот слегка раздувается в момент переключения
+      const grow = on ? wave * 3 : 0;
+      const x = x0 + i * (sw + gap) - grow / 2;
+      const yy = y - grow / 2;
+      const ww = sw + grow;
+      const hh = sh + grow;
+
+      if (on && wave > 0) {
+        ctx.globalAlpha = wave * 0.5;
+        ctx.fillStyle = '#7fd4ff';
+        rr(ctx, x - 2, yy - 2, ww + 4, hh + 4, 9);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+
       ctx.fillStyle = on ? 'rgba(120,190,255,0.2)' : 'rgba(9,13,21,0.72)';
-      rr(ctx, x, y, sw, 26, 7);
+      rr(ctx, x, yy, ww, hh, 7);
       ctx.fill();
       ctx.strokeStyle = on ? '#7fd4ff' : 'rgba(150,180,220,0.2)';
-      ctx.lineWidth = on ? 1.6 : 1;
+      ctx.lineWidth = on ? 1.6 + wave : 1;
       ctx.stroke();
+      // Иконка сверху, номер снизу: обе внутри слота при любом размере
+      const isz = Math.round((touch ? 10 : 8) * fit);
       ctx.fillStyle = it.color;
       ctx.globalAlpha = on ? 1 : 0.65;
-      ctx.fillRect(x + sw / 2 - 4, y + 8, 8, 8);
+      ctx.fillRect(x + ww / 2 - isz / 2, yy + Math.round(hh * 0.18), isz, isz);
       ctx.globalAlpha = 1;
-      ctx.font = '9px ' + CFG.render.font;
-      ctx.fillStyle = on ? '#cfe8ff' : 'rgba(180,200,225,0.55)';
+      ctx.font = 'bold ' + Math.round((touch ? 11 : 9) * fit) + 'px ' + CFG.render.font;
+      ctx.fillStyle = on ? '#eaf6ff' : 'rgba(180,200,225,0.6)';
       ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
-      ctx.fillText(it.key, x + sw / 2, y + 19);
+      ctx.textBaseline = 'middle';
+      ctx.fillText(it.key, x + ww / 2, yy + hh * 0.72);
     }
     ctx.textAlign = 'left';
   }
 
-  // Плашка управления: слева снизу, клавиши в рамках — видно без инструкции
+  // Плашка управления: слева снизу, клавиши в рамках — видно без инструкции.
+  // M7: на тач-устройствах клавиатурные подсказки не нужны вовсе — их заменяют кнопки
+  // Высота блока экранных кнопок: панель прилива и уведомления уходят выше него
+  touchButtonsHeight() {
+    if (!this.isTouch) return 0;
+    const lay = this.touch.layout(this.vw, this.vh);
+    let maxY = 0;
+    for (const b of lay.buttons) maxY = Math.max(maxY, b.y + b.r);
+    let minY = Infinity;
+    for (const b of lay.buttons) minY = Math.min(minY, b.y - b.r);
+    const stick = lay.stick.y + lay.stick.r;
+    return Math.max(maxY, stick) - Math.min(minY, lay.stick.y - lay.stick.r);
+  }
+
+  // Область, которую нельзя занимать HUD-панелями на тач-устройстве
+  touchSafeTop() {
+    if (!this.isTouch) return this.vh;
+    const lay = this.touch.layout(this.vw, this.vh);
+    let minY = this.vh;
+    for (const b of lay.buttons) minY = Math.min(minY, b.y - b.r - 14);
+    minY = Math.min(minY, lay.stick.y - lay.stick.r - 6);
+    return minY;
+  }
+
   drawControls(ctx) {
+    if (this.isTouch) return;
     const items = [
       ['A', 'D', 'идти'],
       ['Space', 'прыжок'],
