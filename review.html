@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GRAVITY: VOID — ревью M7 «Мобильное управление и Фиксы»</title>
+<style>
+  :root {
+    --bg: #070910;
+    --panel: #0d1220;
+    --panel-2: #111829;
+    --line: rgba(150, 180, 220, 0.16);
+    --text: #dfe8f6;
+    --muted: #8fa3bf;
+    --accent: #63c8ff;
+    --ok: #56d18f;
+    --warn: #f0bb5c;
+    --bad: #ff7b7b;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: radial-gradient(1200px 600px at 20% -10%, #101a2e 0%, var(--bg) 55%) fixed;
+    color: var(--text);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding-bottom: 80px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+
+  header.hero { padding: 44px 0 24px; border-bottom: 1px solid var(--line); }
+  .eyebrow { color: var(--accent); font: 12px/1.4 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; }
+  h1 { margin: 10px 0 6px; font-size: clamp(26px, 4vw, 40px); letter-spacing: -0.02em; line-height: 1.1; }
+  h1 .sub { color: var(--muted); font-weight: 400; }
+  .lead { color: var(--muted); max-width: 70ch; margin: 12px 0 0; }
+  .lead b { color: var(--text); }
+
+  .verdict {
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+    margin-top: 22px; padding: 14px 16px;
+    background: linear-gradient(90deg, rgba(240,187,92,0.12), rgba(240,187,92,0.02));
+    border: 1px solid rgba(240,187,92,0.35); border-radius: 12px;
+  }
+  .verdict .tag { font: 700 13px/1 var(--mono); letter-spacing: 0.08em; color: #1a1405; background: var(--warn); padding: 6px 10px; border-radius: 999px; }
+  .verdict p { margin: 0; color: #f3e3c4; font-size: 14px; }
+
+  nav.toc {
+    position: sticky; top: 0; z-index: 5;
+    display: flex; gap: 6px; flex-wrap: wrap;
+    padding: 10px 0; margin-bottom: 8px;
+    background: rgba(7, 9, 16, 0.9); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  nav.toc a {
+    color: var(--muted); text-decoration: none; font: 12px/1 var(--mono);
+    padding: 7px 10px; border-radius: 999px; border: 1px solid transparent;
+  }
+  nav.toc a:hover { color: var(--text); border-color: var(--line); background: var(--panel); }
+
+  section { padding: 30px 0; border-bottom: 1px solid var(--line); }
+  h2 { font-size: 20px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  h2 .num { color: var(--accent); font: 13px/1 var(--mono); margin-right: 8px; }
+  .hint { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+
+  .grid { display: grid; gap: 14px; }
+  .g2 { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px;
+  }
+  .card h3 { margin: 0 0 8px; font-size: 14px; letter-spacing: 0.02em; }
+  .card h3 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 8px; vertical-align: 0; }
+  .card.ok { border-color: rgba(86,209,143,0.28); }
+  .card.warn { border-color: rgba(240,187,92,0.3); }
+  .card.bad { border-color: rgba(255,123,123,0.3); }
+  .card.ok h3 .dot { background: var(--ok); }
+  .card.warn h3 .dot { background: var(--warn); }
+  .card.bad h3 .dot { background: var(--bad); }
+
+  ul.tight { margin: 0; padding-left: 18px; }
+  ul.tight li { margin: 6px 0; font-size: 14px; }
+  ul.tight li::marker { color: var(--accent); }
+  code, .mono { font-family: var(--mono); font-size: 12.5px; background: rgba(120,170,230,0.1); padding: 1px 5px; border-radius: 4px; white-space: nowrap; }
+  .muted { color: var(--muted); }
+  .sm { font-size: 13px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+  td.num { font-family: var(--mono); color: var(--text); white-space: nowrap; }
+  .pill { display: inline-block; font: 11px/1 var(--mono); padding: 4px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .pill.ok { color: var(--ok); border-color: rgba(86,209,143,0.4); }
+  .pill.bad { color: var(--bad); border-color: rgba(255,123,123,0.4); }
+  .pill.warn { color: var(--warn); border-color: rgba(240,187,92,0.4); }
+
+  /* витрина игры */
+  .stage {
+    position: relative; border-radius: 14px; overflow: hidden;
+    border: 1px solid var(--line); background: #05070c;
+    aspect-ratio: 16 / 9;
+  }
+  .stage .poster, .stage iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  .stage .poster { object-fit: cover; object-position: center; opacity: 0.55; filter: saturate(0.85); }
+  .stage .veil {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px; text-align: center;
+    background: linear-gradient(180deg, rgba(5,7,12,0.35), rgba(5,7,12,0.85));
+    padding: 20px;
+  }
+  .stage .veil h3 { margin: 0; font-size: 18px; }
+  .stage .veil p { margin: 0; color: var(--muted); font-size: 13px; max-width: 46ch; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--accent); color: #04121d; text-decoration: none;
+    font: 700 14px/1 var(--mono); padding: 12px 18px; border-radius: 10px;
+    border: 0; cursor: pointer;
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); font-weight: 500; }
+  .btnrow { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+  .shots { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  figure.shot { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  figure.shot img { display: block; width: 100%; aspect-ratio: 16/9; object-fit: cover; background: #05070c; }
+  /* M7: кадры с телефона вертикальные — в 16:9 они обрезались бы до полоски */
+  figure.shot.phone { max-width: 360px; }
+  figure.shot.phone img { aspect-ratio: 9 / 16; }
+  figure.shot figcaption { padding: 10px 12px; font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--line); }
+  figure.shot figcaption b { color: var(--text); font-weight: 600; display: block; font-size: 13px; margin-bottom: 2px; }
+
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 8px;
+    font: 12px/1 var(--mono); padding: 8px 11px; border-radius: 999px;
+    background: var(--panel); border: 1px solid var(--line); color: var(--muted);
+  }
+  .chip .led { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .chip.ok { color: var(--text); }
+  .chip.ok .led { background: var(--ok); box-shadow: 0 0 8px rgba(86,209,143,0.7); }
+  .chip.bad .led { background: var(--bad); box-shadow: 0 0 8px rgba(255,123,123,0.7); }
+
+  pre {
+    background: #05070c; border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px; overflow-x: auto; font: 12.5px/1.7 var(--mono); color: #c8dcf0; margin: 0;
+  }
+  pre .c { color: #5c728c; }
+  footer { padding: 26px 0; color: var(--muted); font-size: 12.5px; }
+  a { color: var(--accent); }
+  @media (max-width: 640px) {
+    nav.toc { position: static; }
+    header.hero { padding-top: 26px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">GRAVITY: VOID · протокол ревью · M7</div>
+    <h1>Мобильное управление и Фиксы <span class="sub">— ревью</span></h1>
+    <div class="verdict">
+      <span class="tag">ПРИНЯТА С ЗАМЕЧАНИЯМИ</span>
+      <p>Баг с улетающим ящиком закрыт — и причин было <b>три</b>, а не одна. Колесо режимов и
+         мобильное управление работают, мультитач проверен тестом (бег + прыжок одновременно).
+         Главное замечание: на телефоне <b>режимы</b> остались только на маленькой плашке сверху —
+         джойстик листает ходьбу, а не режимы, и это самый слабый элемент новой раскладки.</p>
+    </div>
+
+    <div class="chips" id="chips">
+      <span class="chip" id="chip-shots"><span class="led"></span><span>скриншоты: проверяю…</span></span>
+      <span class="chip" id="chip-game"><span class="led"></span><span>игра: не проверена</span></span>
+      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>автопроверки: 344 / 344</span></span>
+      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>зависимостей: 0</span></span>
+    </div>
+  </div>
+</header>
+
+<nav class="toc wrap">
+  <a href="#play">▶ Играть</a>
+  <a href="#criteria">Критерии M7</a>
+  <a href="#works">Что работает</a>
+  <a href="#defects">Дефекты</a>
+  <a href="#scope">Скоуп</a>
+  <a href="#questions">Вопросы</a>
+  <a href="#shots">Скриншоты</a>
+  <a href="#verify">Как проверено</a>
+</nav>
+
+<main class="wrap">
+
+  <section id="play">
+    <h2><span class="num">01</span>Сборка</h2>
+
+    <div class="stage" id="stage">
+      <img class="poster" id="poster" src="screenshots/26-touch-idle.png" alt="Кадр из игры GRAVITY: VOID на телефоне">
+      <div class="veil" id="veil">
+        <h3>GRAVITY: VOID — M7</h3>
+        <p>ПК: A / D — идти · Space — прыжок · F — гравитация · колесо — режимы ·
+           ЛКМ — действие · ПКМ — телекинез · C — крафт · Q — сканер · E — читать<br>
+           Телефон: джойстик слева, восемь кнопок справа, можно бежать и прыгать одновременно</p>
+        <div class="btnrow">
+          <button class="btn" id="play-btn" type="button">Запустить игру</button>
+          <a class="btn ghost" href="gravity-void.html" target="_blank" rel="noopener">Открыть в новой вкладке</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="btnrow" style="margin-top:12px">
+      <a class="btn ghost" href="M7.md">M7.md</a>
+      <a class="btn ghost" href="M6.md">M6.md</a>
+      <a class="btn ghost" href="tools/verify.mjs">tools/verify.mjs</a>
+      <a class="btn ghost" href="tools/touch-shots.mjs">tools/touch-shots.mjs</a>
+    </div>
+  </section>
+
+  <section id="criteria">
+    <h2><span class="num">02</span>Критерии M7</h2>
+    <table>
+      <thead><tr><th>Критерий</th><th>Как сделано</th><th></th></tr></thead>
+      <tbody>
+        <tr><td>Баг с улетающим ящиком исправлен</td>
+            <td>Лимит скорости в захвате 400 px/s (было 950 — как у свободного падения),
+                отдельное демпфирование 26, цель притяжения не ближе 34 px к центру игрока,
+                при отпускании остаётся 20 % скорости, ящик разводится с игроком по массам.
+                Замер: 950 → 400 px/s, прыжок за кадр 15.8 → 6.7 px</td>
+            <td><span class="pill ok">да</span></td></tr>
+        <tr><td>Колесо мыши переключает режимы</td>
+            <td>Вниз — следующий, вверх — предыдущий, по кругу 1→7→1. Цифры 1–7 остались.
+                Очередь щелчков разбирается в <code>update</code>, при крафте колесо не работает</td>
+            <td><span class="pill ok">да</span></td></tr>
+        <tr><td>Слот режима пульсирует при смене</td>
+            <td><code>modeSwitchT</code> 0.45 с: активный слот раздувается на 3 px и подсвечивается
+                ореолом, затем гаснет</td>
+            <td><span class="pill ok">да</span></td></tr>
+        <tr><td>На мобильном джойстик и кнопки</td>
+            <td>Определение по <code>(pointer: coarse)</code> или <code>maxTouchPoints</code>.
+                Джойстик слева (аналоговый, мёртвая зона 16 %), 8 кнопок справа, все ≥ 48 px
+                с отступом 20 px. Портрет — сетка 2×4, ландшафт — 4×2</td>
+            <td><span class="pill ok">да</span></td></tr>
+        <tr><td>Мультитач: движение + прыжок</td>
+            <td>Каждый палец ведёт свой элемент по <code>identifier</code>; тач кормит те же клавиши,
+                что клавиатура. Тест: джойстик держит <code>vx &gt; 60</code>, второй палец даёт
+                <code>vy &lt; −100</code>, джойстик при этом не отбирается</td>
+            <td><span class="pill ok">да</span></td></tr>
+        <tr><td>Кнопки не перекрывают HUD</td>
+            <td>Тест: верх кнопок ниже низа HUD-столбца. Панель прилива на тач-устройстве
+                переехала в левый верхний угол — правый низ занят кнопками, правый верх ресурсами</td>
+            <td><span class="pill ok">да</span></td></tr>
+        <tr><td>HUD крупнее, подсказки клавиш скрыты</td>
+            <td>Шрифты HUD ×1.2, панель ресурсов шире на 15 %; плашка <code>A / D / Space</code>
+                на тач-устройстве не рисуется вовсе</td>
+            <td><span class="pill ok">да</span></td></tr>
+        <tr><td><code>review.html</code> обновлён</td>
+            <td>Эта страница</td>
+            <td><span class="pill ok">да</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="works">
+    <h2><span class="num">03</span>Что работает</h2>
+
+    <div class="grid g2">
+      <div class="card ok">
+        <h3><span class="dot"></span>Ящик больше не выстреливает</h3>
+        <ul class="tight">
+          <li>Скорость в захвате ограничена 400 px/s — это в 2.4 раза медленнее свободного падения
+              и медленнее, чем летит брошенный лазером обломок.</li>
+          <li>Цель притяжения не заходит в центр игрока: при наведении на себя ящик останавливается
+              рядом, а не получает рывок в обратную сторону.</li>
+          <li>Отпустил ПКМ — осталось 20 % скорости, тело сразу подчиняется гравитации.</li>
+          <li>Ящик, который едет в игрока, толкает его по массам (3 : 1), а не проходит насквозь.</li>
+        </ul>
+      </div>
+      <div class="card ok">
+        <h3><span class="dot"></span>Колесо мыши</h3>
+        <ul class="tight">
+          <li>Семь режимов по кругу: копать, строить, снос, якорь, верстак — без отрыва от мыши.</li>
+          <li>Три щелчка подряд листают три режима, а не один: очередь копится и разбирается за кадр.</li>
+          <li>Активный слот пульсирует — видно, что смена произошла, даже краем глаза.</li>
+          <li>Открыт крафт — колесо молчит, режимы не листаются под меню.</li>
+        </ul>
+      </div>
+      <div class="card ok">
+        <h3><span class="dot"></span>Джойстик и кнопки</h3>
+        <ul class="tight">
+          <li>Джойстик аналоговый: нажал на треть — идёшь в треть скорости, а не рывком.</li>
+          <li>Восемь кнопок: прыжок, гравитация, действие, телекинез, крафт, сканер, чтение, биогель.</li>
+          <li>Иконки нарисованы векторами, поэтому не превращаются в квадратики в чужом шрифте.</li>
+          <li>Нажатие вспыхивает: ореол + заливка + белая иконка на 0.16 с.</li>
+        </ul>
+      </div>
+      <div class="card ok">
+        <h3><span class="dot"></span>Мультитач</h3>
+        <ul class="tight">
+          <li>Бег джойстиком и прыжок вторым пальцем — одновременно, без потери одного из них.</li>
+          <li>Отпускание кнопки не сбрасывает движение, отпускание джойстика не мешает прыжку.</li>
+          <li>Свободный палец в правой части экрана ставит прицел под палец и держит действие:
+              копать можно, не целясь мышью.</li>
+        </ul>
+      </div>
+      <div class="card ok">
+        <h3><span class="dot"></span>Тач-UX</h3>
+        <ul class="tight">
+          <li>Первый тап убирает «Тапните для старта» и просит полноэкранный режим — только из жеста
+              браузер это и разрешает.</li>
+          <li>Панель прилива ушла в левый верхний угол, чтобы не спорить с кнопками и ресурсами.</li>
+          <li>Меню крафта масштабируется целиком: на 430×780 панель сжата до 0.81, все четыре
+              строки и цены видны.</li>
+          <li>Прицел на телефоне — кольцо радиусом 16 px: палец закрывает точку, целиться надо по кольцу.</li>
+        </ul>
+      </div>
+      <div class="card ok">
+        <h3><span class="dot"></span>ПК не пострадал</h3>
+        <ul class="tight">
+          <li>На ПК тач-слой не создаётся вовсе: ни обработчиков, ни отрисовки, ни лишних объектов.</li>
+          <li>Профиль даже чуть легче M6: p50 8.30 против 8.77 мс.</li>
+          <li>Все прежние проверки зелёные, поправлен один тест — и он вернулся к прежнему виду.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="defects">
+    <h2><span class="num">04</span>Дефекты и ограничения</h2>
+
+    <div class="grid g2">
+      <div class="card bad">
+        <h3><span class="dot"></span>На телефоне неудобно менять режим</h3>
+        <ul class="tight">
+          <li>Режимы остались только на плашке сверху — это тап по слоту 44 px, и он не всегда
+              попадает с первого раза. Джойстик листает ходьбу, а не режимы.</li>
+          <li>Это главный кандидат на доработку: жест двумя пальцами по джойстику или крупная
+              кнопка «режим» с меню.</li>
+        </ul>
+      </div>
+      <div class="card warn">
+        <h3><span class="dot"></span>Телекинез на телефоне — два пальца</h3>
+        <ul class="tight">
+          <li>Нужно поставить прицел свободным пальцем и держать кнопку «◎»: одна рука не справится.</li>
+          <li>Припуск на попадание 22 экранных px частично спасает, но это обход, а не решение.</li>
+        </ul>
+      </div>
+      <div class="card warn">
+        <h3><span class="dot"></span>Сброса мира на телефоне нет</h3>
+        <ul class="tight">
+          <li><code>Backspace</code> остался единственным способом начать заново — на телефоне
+              приходится перезагружать страницу.</li>
+          <li>Осознанно не добавлял: сброс мира без подтверждения на телефоне слишком легко нажать.</li>
+        </ul>
+      </div>
+      <div class="card warn">
+        <h3><span class="dot"></span>Определение тача грубое</h3>
+        <ul class="tight">
+          <li>Ноутбук с тачскрином получит экранные кнопки и скроет подсказки клавиатуры, хотя
+              играть на нём будут мышью.</li>
+          <li>Лечится переключателем «тач/мышь», но в спеке его нет — не добавлял самовольно.</li>
+        </ul>
+      </div>
+      <div class="card warn">
+        <h3><span class="dot"></span>Полноэкранный режим в песочнице не срабатывает</h3>
+        <ul class="tight">
+          <li>Если игра открыта во фрейме без <code>allowfullscreen</code>, запрос отклоняется.
+              Игра продолжает работать — подсказка просто исчезает.</li>
+          <li>В отдельной вкладке (<code>index.html</code>) работает как надо.</li>
+        </ul>
+      </div>
+      <div class="card ok">
+        <h3><span class="dot"></span>Регрессия</h3>
+        <ul class="tight">
+          <li>Все 288 проверок M0–M6 зелёные. Один тест пришлось откатить: <code>drawHud</code>
+              на время стал обёрткой с масштабированием, и проверка «в HUD есть полоска здоровья»
+              перестала его видеть. Масштаб сделал по шрифтам (<code>fs()</code>), обёртку убрал,
+              тест вернулся к прежней формулировке — подгонки нет.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="scope">
+    <h2><span class="num">05</span>Скоуп</h2>
+    <table>
+      <thead><tr><th>Что</th><th>Почему так</th><th>Что делать</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><b>Тач-слой рисуется в Canvas, а не DOM</b><br><span class="muted sm">решение по спеке</span></td>
+          <td>Спека прямо просит Canvas «чтобы сохранить единый стиль». Плюс DOM-кнопки перехватили бы
+              события мыши на канвасе и ломали бы управление на гибридных устройствах.</td>
+          <td>Фиксирую.</td>
+        </tr>
+        <tr>
+          <td><b>Тач кормит те же клавиши</b><br><span class="muted sm">архитектура</span></td>
+          <td>Один источник истины: тесты ПК-управления покрывают и мобильное, а физика прыжка
+              с coyote-time не потребовала ни одной правки.</td>
+          <td>Фиксирую.</td>
+        </tr>
+        <tr>
+          <td><b>Восемь кнопок, а не пять из спеки</b><br><span class="muted sm">расширение</span></td>
+          <td>В спеке пять (прыжок, гравитация, действие, телекинез, крафт/сканер). Пришлось разделить
+              крафт и сканер (это разные действия) и добавить чтение терминала и биогель — без них
+              половина игры на телефоне недоступна.</td>
+          <td>Можно сократить до пяти, если решите, что плотно.</td>
+        </tr>
+        <tr>
+          <td><b>Лимит скорости 400 px/s</b><br><span class="muted sm">из спеки</span></td>
+          <td>В спеке «например, не более 400 px/s». Взял ровно это значение — оно оказалось
+              разумным: медленнее игрока (265 px/s бега не превышает 400 с запасом на рывок).</td>
+          <td>Число в <code>CFG.tele.holdSpeed</code>.</td>
+        </tr>
+        <tr>
+          <td><b>Полноэкранный режим — best effort</b><br><span class="muted sm">трактовка</span></td>
+          <td>Спека просит «включить аудио/фуллскрин». Аудио в игре нет вовсе, а фуллскрин браузер
+              разрешает только из жеста и только вне ограничивающего iframe.</td>
+          <td>Ничего, если в вашем окружении не срабатывает — это ограничение платформы.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="questions">
+    <h2><span class="num">06</span>Запросы ревью</h2>
+    <div class="grid g2">
+      <div class="card">
+        <h3>1. Как реализован мультитач?</h3>
+        <p class="sm muted">Слушаю <code>touchstart/move/end/cancel</code> <b>на канвасе</b>
+        (не на <code>window</code>, чтобы не ловить жесты страницы), но состояние веду не «событиями
+        для игры», а <b>теми же клавишами</b>, что и клавиатура. Каждый палец — запись в
+        <code>Map</code> по <code>identifier</code>: джойстик, кнопка или свободный прицел.
+        Поэтому мультитач получается бесплатно: игра видит <code>Space</code> и <code>touchX</code>
+        одновременно, а <code>touchend</code> одного пальца не трогает состояние другого.
+        DOM-кнопки не использовал: они перехватили бы мышь на канвасе, сломали бы управление на
+        гибридных устройствах и потребовали бы отдельного стиля.</p>
+      </div>
+      <div class="card">
+        <h3>2. Пойман ли баг с ящиком и в чём причина?</h3>
+        <p class="sm muted">Пойман, и причин три. <b>Первая</b>: лимит скорости тела в захвате был
+        взят из физики падения — 950 px/s, в 2.4 раза быстрее игрока. <b>Вторая</b>: цель
+        притяжения обрезалась только по радиусу телекинеза, поэтому при наведении на себя она
+        попадала в центр игрока, разница «цель − тело» проходила через ноль, и знак менялся —
+        тело получало рывок назад. <b>Третья</b>: <code>releaseGrab</code> не гасил скорость,
+        и набранные 900+ px/s жили после отпускания. Плюс ящик не сталкивался с игроком.
+        Замер до: 950 px/s и прыжок 15.8 px за кадр. После: 400 px/s, 6.7 px, после отпускания 20 %.</p>
+      </div>
+      <div class="card">
+        <h3>3. Что ещё вынести на экранные кнопки?</h3>
+        <p class="sm muted">Восемь кнопок — это предел, дальше экран превращается в пульт.
+        Не хватает трёх вещей: <b>переключателя режимов</b> (сейчас тап по маленькой плашке сверху —
+        самое слабое место раскладки), <b>паузы</b> и <b>сброса мира</b>, которого на телефоне нет
+        вовсе. Спорный кандидат — сделать телекинез одним пальцем («палец тянет ящик» без кнопки),
+        но это уже переделка логики захвата, а не интерфейса.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="shots">
+    <h2><span class="num">07</span>Скриншоты</h2>
+    <div class="shots" id="shot-grid">
+      <figure class="shot phone">
+        <img src="screenshots/25-touch-hint.png" alt="Подсказка старта на телефоне" loading="lazy">
+        <figcaption><b>M7 · Старт</b>«Тапните для старта», джойстик и блок кнопок, HUD крупнее на 20 %.</figcaption>
+      </figure>
+      <figure class="shot phone">
+        <img src="screenshots/26-touch-idle.png" alt="Мобильный интерфейс в покое" loading="lazy">
+        <figcaption><b>M7 · Покой</b>Джойстик с мёртвой зоной, панель прилива в левом верхнем углу.</figcaption>
+      </figure>
+      <figure class="shot phone">
+        <img src="screenshots/27-touch-multitouch.png" alt="Бег и прыжок одновременно" loading="lazy">
+        <figcaption><b>M7 · Мультитач</b>Бег джойстиком и прыжок вторым пальцем одновременно.</figcaption>
+      </figure>
+      <figure class="shot phone">
+        <img src="screenshots/28-touch-modes.png" alt="Смена режима" loading="lazy">
+        <figcaption><b>M7 · Режимы</b>Слот переключён и пульсирует, кнопки не перекрывают HUD.</figcaption>
+      </figure>
+      <figure class="shot phone">
+        <img src="screenshots/29-touch-dig.png" alt="Копание на телефоне" loading="lazy">
+        <figcaption><b>M7 · Действие</b>Свободный палец ставит прицел и держит ЛКМ.</figcaption>
+      </figure>
+      <figure class="shot phone">
+        <img src="screenshots/30-touch-telekinesis.png" alt="Телекинез на телефоне" loading="lazy">
+        <figcaption><b>M7 · Телекинез</b>Захват кнопкой «◎», трос к ящику, скорость ограничена.</figcaption>
+      </figure>
+      <figure class="shot phone">
+        <img src="screenshots/31-touch-craft.png" alt="Меню крафта на телефоне" loading="lazy">
+        <figcaption><b>M7 · Крафт</b>Панель ужата до 0.81: все четыре рецепта и цены видны.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/27-touch-multitouch-land.png" alt="Ландшафтная ориентация" loading="lazy">
+        <figcaption><b>M7 · Ландшафт</b>900×430: сетка кнопок 4×2 вдоль нижнего края.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/31-touch-craft-land.png" alt="Крафт в ландшафте" loading="lazy">
+        <figcaption><b>M7 · Ландшафт</b>Панель крафта в альбомной ориентации.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/01-start.png" alt="ПК-версия" loading="lazy">
+        <figcaption><b>M7 · ПК</b>Тач-слой не создаётся: ни кнопок, ни джойстика, прежние подсказки клавиш.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/05-telekinesis.png" alt="Телекинез мышью" loading="lazy">
+        <figcaption><b>M7 · Телекинез</b>ПК: прежний захват ПКМ, но со скоростью 400 px/s и без пролёта сквозь игрока.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/16b-craft-menu.png" alt="Меню крафта на ПК" loading="lazy">
+        <figcaption><b>M7 · Крафт</b>ПК-вариант панели: прежний размер, попадание мышью по строкам.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/24-light-sources.png" alt="Свет в глубине" loading="lazy">
+        <figcaption><b>M6 · Свет</b>Фонарь, кристаллы и терминал — без изменений.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/13b-crawler.png" alt="Хищники" loading="lazy">
+        <figcaption><b>M6 · Хищник</b>Спрайты и полоска HP — без изменений.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/18-scanner.png" alt="Сканер" loading="lazy">
+        <figcaption><b>M5 · Сканер</b>Волна и метки, теперь ещё и кнопкой на телефоне.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/17-terminal.png" alt="Терминал" loading="lazy">
+        <figcaption><b>M5 · Терминал</b>Чтение по «E» на ПК и по кнопке на телефоне.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section id="verify">
+    <h2><span class="num">08</span>Как проверено</h2>
+    <pre><span class="c"># 344 автопроверки логики, физики, интерфейса и критериев M0–M7</span>
+cd tools
+node verify.mjs            <span class="c"># → 344/344 проверок пройдено</span>
+node screenshots.mjs       <span class="c"># → 34 кадра ПК-версии</span>
+node touch-shots.mjs       <span class="c"># → 7 кадров мобильной (430×780)</span>
+SUF=-land TW=900 TH=430 node touch-shots.mjs  <span class="c"># → +7 кадров в ландшафте</span>
+node perf.mjs              <span class="c"># → p50 8.30 мс, p95 10.43 мс на кадр</span>
+node verify-review-page.mjs <span class="c"># → структура страницы и запуск игры во фрейме</span></pre>
+
+    <div class="grid g2" style="margin-top:14px">
+      <div class="card">
+        <h3>Что покрыто в M7</h3>
+        <ul class="tight sm">
+          <li>Захват: 120 кадров гулящей цели — скорость не выше <code>holdSpeed</code>,
+              прыжок за кадр в пределах шага, лимит ниже лимита свободного падения.</li>
+          <li>Отпускание: 900 px/s превращаются в ≤ 80, гравитация возвращается, тело не разгоняется.</li>
+          <li>Коллизия: тяга «строго в игрока» — минимальная дистанция больше габарита пары.</li>
+          <li>Колесо: вперёд, назад, через край в обе стороны, три щелчка = три режима, при крафте молчит.</li>
+          <li>Пульсация слота включается и затухает, цифры 1–7 живы.</li>
+          <li>Тач: определение устройства, 8 кнопок, ≥ 48 px, отступ 20 px, джойстик слева,
+              кнопки ниже HUD, HUD ×1.2, клавиатурные подсказки скрыты, ландшафт перестраивается.</li>
+          <li>Мультитач: бег + прыжок, джойстик не отбирается, отпускание кнопки не сбрасывает бег.</li>
+          <li>Кнопки жмут и отпускают ровно свои клавиши, дают вспышку; на ПК тач-слой выключен.</li>
+          <li>Крафт: панель влезает в экран, на узком масштабируется, попадание с тем же масштабом.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Чего проверки не делают</h3>
+        <ul class="tight sm">
+          <li>Не проверяют на реальном телефоне: тач-события эмулируются в headless, браузерные
+              жесты (свайп от края, зум) не воспроизводятся.</li>
+          <li>Не проверяют удобство пальца: «попадает ли большой палец в кнопку» — только руками.</li>
+          <li>Не ловят конфликт с системными жестами iOS/Android.</li>
+          <li>Не браузерный FPS: цифры — время JS+draw в headless-canvas.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="btnrow">
+      <a class="btn ghost" href="gravity-void.html">Открыть игру</a>
+      <a class="btn ghost" href="README.md">README</a>
+      <a class="btn ghost" href="M7.md">M7.md</a>
+      <a class="btn ghost" href="M6.md">M6.md</a>
+    </div>
+    <p>Ветка <code>arena/b1bb672b-game1</code> · M7: фикс телекинеза, колесо режимов, тач-джойстик и кнопки.</p>
+  </footer>
+</main>
+<script>
+// Страница ревью не должна быть пустой и не должна зависеть от игры:
+// всё, что ниже — только косметика поверх статического HTML и картинок.
+(function () {
+  "use strict";
+
+  /* ---------- скриншоты: показываем, сколько реально загрузилось ---------- */
+  var imgs = Array.prototype.slice.call(document.querySelectorAll('.shots img, #poster'));
+  var total = imgs.length, loaded = 0, failed = 0;
+  var chipShots = document.getElementById('chip-shots');
+
+  function updateShots() {
+    if (!chipShots) return;
+    var ok = loaded === total && failed === 0;
+    chipShots.className = 'chip ' + (ok ? 'ok' : (failed ? 'bad' : ''));
+    chipShots.lastElementChild.textContent = 'скриншоты: ' + loaded + ' / ' + total + (failed ? ' (не хватает ' + failed + ')' : '');
+    if (failed) {
+      var hint = document.createElement('p');
+      hint.className = 'sm muted';
+      hint.style.marginTop = '10px';
+      hint.textContent = 'Часть скриншотов не загрузилась — откройте страницу из корня репозитория, чтобы папка screenshots/ была рядом.';
+      var grid = document.getElementById('shot-grid');
+      if (grid && !document.getElementById('shots-warn')) {
+        hint.id = 'shots-warn';
+        grid.parentNode.insertBefore(hint, grid);
+      }
+    }
+  }
+
+  imgs.forEach(function (img) {
+    if (img.complete && img.naturalWidth > 0) { loaded++; return; }
+    img.addEventListener('load', function () { loaded++; updateShots(); });
+    img.addEventListener('error', function () { failed++; updateShots(); });
+  });
+  updateShots();
+
+  /* ---------- игра во встроенном фрейме ---------- */
+  var veil = document.getElementById('veil');
+  var stage = document.getElementById('stage');
+  var playBtn = document.getElementById('play-btn');
+  var chipGame = document.getElementById('chip-game');
+  var frame = null;
+  var booted = false;
+
+  function setGameChip(cls, text) {
+    if (!chipGame) return;
+    chipGame.className = 'chip ' + cls;
+    chipGame.lastElementChild.textContent = text;
+  }
+
+  function startEmbedded() {
+    if (frame) return;
+    frame = document.createElement('iframe');
+    frame.src = 'gravity-void.html';
+    frame.title = 'GRAVITY: VOID — игра';
+    frame.allow = 'fullscreen';
+    frame.addEventListener('load', function () {
+      booted = true;
+      setGameChip('ok', 'игра: загружена во фрейме');
+      if (veil) veil.style.display = 'none';
+    });
+    stage.appendChild(frame);
+    setGameChip('', 'игра: загружается…');
+    try { frame.focus(); } catch (e) { /* фокус — не критично */ }
+  }
+
+  if (playBtn) {
+    playBtn.addEventListener('click', function () {
+      startEmbedded();
+      setTimeout(function () {
+        // если за 4 с фрейм не отдал load — честно говорим об этом, но кадр остаётся
+        if (!booted) {
+          setGameChip('bad', 'игра: фрейм не загрузился — откройте в новой вкладке');
+          if (veil) veil.style.display = '';
+        }
+      }, 4000);
+    });
+  }
+
+  // Проверяем, что файл игры вообще лежит рядом — без запуска самого фрейма
+  fetch('gravity-void.html', { method: 'HEAD' }).then(function (r) {
+    if (r.ok) {
+      if (!booted) setGameChip('ok', 'игра: файл найден (' + (r.headers.get('content-length') ? Math.round(r.headers.get('content-length') / 1024) + ' КБ' : 'ok') + ')');
+    } else {
+      setGameChip('bad', 'игра: файл не найден рядом со страницей');
+    }
+  }).catch(function () {
+    setGameChip('', 'игра: локальный файл — проверка по сети недоступна');
+  });
+
+  /* ---------- якорная навигация без прыжка под липкое меню ---------- */
+  document.querySelectorAll('nav.toc a').forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      var el = document.querySelector(a.getAttribute('href'));
+      if (!el) return;
+      e.preventDefault();
+      var top = el.getBoundingClientRect().top + window.pageYOffset - 56;
+      window.scrollTo({ top: top, behavior: 'smooth' });
+    });
+  });
+})();
+</script>
+</body>
+</html>

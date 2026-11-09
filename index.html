@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GRAVITY: VOID</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #05070c; overflow: hidden; }
+  #game { display: block; width: 100vw; height: 100vh; border: 0; }
+</style>
+</head>
+<body>
+<iframe id="game" src="gravity-void.html" title="GRAVITY: VOID" allow="fullscreen"></iframe>
+<script>
+// Клавиатура в iframe работает только при фокусе: отдаём его игре сразу,
+// а также по первому движению мыши и по клику — без отдельного «кликните по игре»
+(function () {
+  var f = document.getElementById('game');
+  function focusGame() {
+    try { f.focus(); f.contentWindow.focus(); } catch (e) { /* не критично */ }
+  }
+  f.addEventListener('load', focusGame);
+  window.addEventListener('mousemove', focusGame);
+  window.addEventListener('mousedown', focusGame);
+  window.addEventListener('keydown', focusGame);
+  focusGame();
+})();
+</script>
+</body>
+</html>
