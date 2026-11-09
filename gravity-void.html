@@ -67,14 +67,20 @@ const CFG = {
   step: 1 / 60,
   tile: 32,
 
-  // Мир: 200x100 тайлов = 6400x3200 px
-  world: { cols: 200, rows: 100 },
+  // Мир: 200x130 тайлов = 6400x4160 px
+  // M5: +30 рядов вниз — Глубокие пещеры. Сетка выросла, но рендер
+  // по-прежнему рисует только кадр (см. drawTiles), так что цена — только память
+  world: { cols: 200, rows: 130 },
   layers: {
     skyRows: 5,          // верхние 5 рядов гарантированно EMPTY
     ceilingRows: 2,      // потолочная плита — по ней ходят при перевороте
     caveRows: 10,        // основной зал
     dirtRows: 5,         // слой DIRT
-    ferriteChance: 0.05  // доля FERRITE в STONE
+    ferriteChance: 0.05, // доля FERRITE в STONE
+    deepTopRow: 50,      // M5: с этого ряда начинаются Глубокие пещеры
+    deepFerriteChance: 0.15,   // M5: концентрация FERRITE в глубине
+    deepCaveChance: 0.36,      // M5: доля пустоты — пещеры, а не монолит
+    deepPockets: 16            // M5: больших полостей для ориентира
   },
 
   // Уступы в зале: проходимая геометрия для проверки физики.
@@ -153,17 +159,58 @@ const CFG = {
     color: '#8a5a2b'
   },
 
-  // M4: рецепты. Порядок = порядок строк в меню
+  // M4/M5: рецепты. Порядок = порядок строк в меню
   recipes: [
     { id: 'laser', name: 'ЛАЗЕРНЫЙ РЕЗАК', cost: { 3: 3, 2: 2 }, color: '#ff5b4a',
       hint: 'копание ×2' },
     { id: 'armor', name: 'УКРЕПЛЁННЫЙ КОСТЮМ', cost: { 3: 5, 2: 10 }, color: '#9fb3c8',
       hint: 'урон −30%' },
     { id: 'gun', name: 'ГРАВИТАЦИОННАЯ ПУШКА', cost: { 3: 8, 4: 2 }, color: '#7ad0ff',
-      hint: 'радиус 8 → 15' }
+      hint: 'радиус 8 → 15' },
+    { id: 'scanner', name: 'СКАНЕР ГЛУБИН', cost: { 3: 5, 2: 5, 4: 1 }, color: '#b98bff',
+      hint: 'Q — волна сквозь стены' }
   ],
   laser: { speed: 2, beam: '#ff4a3a' },
   armor: { reduce: 0.3, body: '#9aa8b8', shade: '#7d8a99' },
+
+  // M5: сканер ресурсов и жизни
+  scanner: {
+    radius: 25,          // тайлов
+    waveTime: 0.85,      // сколько волна идёт от центра до края, с
+    holdTime: 2,         // сколько подсветка держится всего, с
+    cooldown: 5,         // пауза между сканированиями, с
+    tick: 1 / 6,         // как часто обновляется список целей, с
+    colors: { ferrite: '#63b8ff', terminal: '#ffa63d', crawler: '#ff3b48' },
+    ringAlpha: 0.75
+  },
+
+  // M5: древние терминалы — объекты мира, не тайлы
+  terminal: {
+    count: 3,
+    deepCount: 2,              // из них в Глубоких пещерах
+    w: 26, h: 30,
+    interactRadius: 2,         // тайлов, чтобы прочитать
+    reward: { 3: 5, 4: 1 },    // +5 FERRITE +1 BIOGEL
+    color: '#6ee7ff',
+    dark: '#243b4a',
+    texts: [
+      { id: 'core',    title: 'ТЕРМИНАЛ 01 · ПРОТОКОЛ',
+        body: '...протокол стабилизации ядра нарушен...\nнесущая частота ушла в минус, опоры держат остаточное поле...' },
+      { id: 'tides',   title: 'ТЕРМИНАЛ 02 · ПРИЛИВЫ',
+        body: '...гравитационные приливы — это агония планеты...\nкаждый цикл — судорога, каждый выдох — вверх...' },
+      { id: 'missing', title: 'ТЕРМИНАЛ 03 · ЭКСПЕДИЦИЯ',
+        body: '...экспедиция не вернулась, они ушли глубже...\nмы слышим их маяк под пятьдесят восьмым рядом породы...' }
+    ]
+  },
+
+  // M5: Глубокие пещеры — тёмная зона под 50-м рядом
+  deep: {
+    crawlerCount: 5,       // сколько хищников живёт в глубине
+    ambient: 0.52,         // затемнение зоны (0 — чернота, 1 — без затемнения)
+    vignette: 0.75,        // насколько сильно тёмный ореол вокруг игрока в глубине
+    lightRadius: 9,        // радиус «фонаря» игрока в глубине, тайлов
+    fogTop: 46             // с какого ряда начинается визуальное затемнение
+  },
 
   // M3: здоровье и смерть
   health: {
@@ -278,8 +325,8 @@ const CFG = {
 
   particles: { max: 300, digMin: 3, digMax: 5, pickup: 6, life: 0.4, flip: 10 },
 
-  binds: ['KeyA', 'KeyD', 'Space', 'KeyF', 'KeyH', 'KeyC', 'Digit1', 'Digit2', 'Digit3',
-          'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Enter', 'Escape', 'Backspace']
+  binds: ['KeyA', 'KeyD', 'Space', 'KeyF', 'KeyH', 'KeyC', 'KeyQ', 'KeyE', 'Digit1', 'Digit2', 'Digit3',
+          'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Enter', 'Escape', 'Backspace']
 };
 
 const TS = CFG.tile;
@@ -383,6 +430,7 @@ class World {
     const dirtTop = caveTop + L.caveRows;
     const stoneTop = dirtTop + L.dirtRows;
     this.surfaceRow = dirtTop;
+    this.deepRow = L.deepTopRow;          // M5: граница Глубоких пещер
 
     const rnd = mulberry32(cfg.seed);
     for (let y = 0; y < this.rows; y++) {
@@ -392,8 +440,48 @@ class World {
         else if (y < caveTop) t = TILE.STONE;             // потолочная плита
         else if (y < dirtTop) t = TILE.EMPTY;             // зал
         else if (y < stoneTop) t = TILE.DIRT;             // земля
-        else t = rnd() < L.ferriteChance ? TILE.FERRITE : TILE.STONE;
+        else {
+          // M5: глубина — своя порода. В глубоких пещерах FERRITE втрое больше.
+          // Пустоту берём «крупными зёрнами» (3x2 тайла + второй октавный слой),
+          // иначе получается не пещера, а шум из одиночных дырок
+          const deep = y >= L.deepTopRow;
+          const chance = deep ? L.deepFerriteChance : L.ferriteChance;
+          let cave = false;
+          if (deep) {
+            const gx = Math.floor(x / 3), gy = Math.floor(y / 2);
+            const a = hash2(gx + 11, gy + 7);
+            const b = hash2(Math.floor(x / 6) + 301, Math.floor(y / 4) + 97);
+            cave = a * 0.65 + b * 0.35 < L.deepCaveChance;
+          }
+          if (cave) t = TILE.EMPTY;
+          else t = rnd() < chance ? TILE.FERRITE : TILE.STONE;
+        }
         this.tiles[y * this.cols + x] = t;
+      }
+    }
+
+    // M5: большие полости в глубине. Одной дырки мало — нужен зал, где
+    // помещаются и терминал, и хищники, и игрок с ящиком
+    const drnd = mulberry32(cfg.seed ^ 0x5f3c21a7);
+    for (let p = 0; p < L.deepPockets; p++) {
+      const cx = 6 + Math.floor(drnd() * (this.cols - 12));
+      const cy = L.deepTopRow + 3 + Math.floor(drnd() * (this.rows - L.deepTopRow - 8));
+      const rx = 3 + Math.floor(drnd() * 5);
+      const ry = 2 + Math.floor(drnd() * 3);
+      for (let y = cy - ry; y <= cy + ry; y++) {
+        for (let x = cx - rx; x <= cx + rx; x++) {
+          if (x < 0 || y < 0 || x >= this.cols || y >= this.rows) continue;
+          const d = ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2;
+          if (d <= 1) this.tiles[y * this.cols + x] = TILE.EMPTY;
+        }
+      }
+      // Вкрапления феррита у стен полости: пещера «богатая», но его надо копать
+      for (let k = 0; k < 26; k++) {
+        const x = cx + Math.round((drnd() * 2 - 1) * (rx + 1));
+        const y = cy + Math.round((drnd() * 2 - 1) * (ry + 1));
+        if (x < 0 || y < 0 || x >= this.cols || y >= this.rows) continue;
+        if (this.tiles[y * this.cols + x] === TILE.EMPTY) continue;
+        this.tiles[y * this.cols + x] = TILE.FERRITE;
       }
     }
 
@@ -1200,15 +1288,18 @@ const Save = {
   write(game) {
     try {
       const data = {
-        v: 2,
+        v: 3,
         tiles: this.packTiles(game.world),
         anchors: game.anchors.map(a => ({ x: a.x, y: a.y })),
         inventory: game.inventory.counts,
         player: { x: game.player.x, y: game.player.y, g: game.player.gravityTarget,
                   laser: game.player.hasLaser, armor: game.player.hasArmor,
-                  gun: game.player.hasGravityGun },
+                  gun: game.player.hasGravityGun, scanner: game.player.hasScanner },
         drops: game.drops.map(d => ({ x: d.x, y: d.y, t: d.type })),
         crates: game.crates.map(c => ({ x: c.x, y: c.y })),
+        // M5: терминалы — координаты и что уже прочитано
+        terminals: game.terminals.map(t => ({ id: t.id, tx: t.tx, ty: t.ty,
+                                              deep: t.deep ? 1 : 0, read: t.read ? 1 : 0 })),
         cycle: { phase: game.tide.id, timeLeft: game.tide.left }
       };
       localStorage.setItem(CFG.save.key, JSON.stringify(data));
@@ -1223,7 +1314,8 @@ const Save = {
       const raw = localStorage.getItem(CFG.save.key);
       if (!raw) return null;
       const d = JSON.parse(raw);
-      return d && d.v === 2 ? d : null;
+      // M5: v2 читаем как раньше — потеряются только терминалы, а не прогресс
+      return d && (d.v === 2 || d.v === 3) ? d : null;
     } catch (e) {
       return null;
     }
@@ -1326,6 +1418,8 @@ class Player {
     this.hasLaser = false;
     this.hasArmor = false;
     this.hasGravityGun = false;
+    // M5: сканер — тоже вечная экипировка
+    this.hasScanner = false;
   }
 
   get cx() { return this.x + this.w / 2; }
@@ -1740,8 +1834,23 @@ class Game {
     this.noticeText = '';
     this.noticeColor = '#e8f2ff';
     this.lastDeathLost = null;
+
+    // M5: терминалы, сканер, Глубокие пещеры
+    this.terminals = [];           // { id, x, y, tx, ty, read }
+    this.terminalsRead = 0;
+    this.scanT = 0;                // сколько ещё держится подсветка
+    this.scanCd = 0;               // кулдаун Q
+    this.scanTargets = [];         // снимок целей: { wx, wy, kind, color }
+    this.scanTick = 0;
+    this.lore = null;              // открытая панель лора { title, body, id }
+    this.loreT = 0;
+    this.promptTerminal = null;    // терминал под рукой: «[E] Прочитать»
+
+    // терминалы раньше хищников: глубинный спавн держится от них подальше
+    this.spawnTerminals();
     this.spawnCrawlers();
     this.spawnCaveGel();
+    this.spawnDeepCrawlers();
     this.dig = null;               // { tx, ty, type, progress, max }
     this.digDustT = 0;
     this.tooFarT = 0;
@@ -2111,7 +2220,8 @@ class Game {
     const p = this.player;
     if (r.id === 'laser') return p.hasLaser;
     if (r.id === 'armor') return p.hasArmor;
-    return p.hasGravityGun;
+    if (r.id === 'gun') return p.hasGravityGun;
+    return p.hasScanner;
   }
 
   canCraft(r) {
@@ -2129,7 +2239,8 @@ class Game {
     const p = this.player;
     if (r.id === 'laser') p.hasLaser = true;
     else if (r.id === 'armor') p.hasArmor = true;
-    else p.hasGravityGun = true;
+    else if (r.id === 'gun') p.hasGravityGun = true;
+    else p.hasScanner = true;
 
     this.particles.place(p.cx, p.cy);
     this.camera.shake(0.35);
@@ -2183,7 +2294,7 @@ class Game {
 
   // Геометрия панели: одна функция для отрисовки и для попадания мышью
   craftLayout() {
-    const w = 460, rowH = 62, headH = 54;
+    const w = 500, rowH = 62, headH = 54;
     const h = headH + rowH * CFG.recipes.length + 16;
     return { x: (this.vw - w) / 2, y: (this.vh - h) / 2, w, h, headH, rowH };
   }
@@ -2232,6 +2343,202 @@ class Game {
       this.drops.push(d);
       placed++;
     }
+  }
+
+  // M5: хищники в Глубоких пещерах. Обычный спавн работает по залу,
+  // поэтому глубина набирает своих отдельным проходом
+  spawnDeepCrawlers() {
+    const w = this.world;
+    const top = CFG.layers.deepTopRow + 2;
+    const bottom = w.rows - 4;
+    let placed = 0, guard = 0;
+    while (placed < CFG.deep.crawlerCount && guard++ < 6000) {
+      const tx = 8 + Math.floor(this.rnd() * (w.cols - 16));
+      const ty = top + Math.floor(this.rnd() * (bottom - top));
+      if (!this.freeCaveSpot(tx, ty)) continue;
+      // держимся подальше от терминалов: лор не должен читаться под укусами
+      if (this.terminals.some(t => Math.hypot(t.tx - tx, t.ty - ty) < 10)) continue;
+      const c = new Crawler(tx * TS + (TS - CFG.crawler.w) / 2, (ty + 1) * TS - CFG.crawler.h);
+      c.home = { x: c.cx, y: c.cy };
+      c.deep = true;
+      this.crawlers.push(c);
+      placed++;
+    }
+  }
+
+  // M5: древние терминалы. Один на поверхности (в зале), два — в глубине.
+  // Терминал стоит на полу, как обелиск: воздух на его тайле и над ним
+  spawnTerminals() {
+    const w = this.world;
+    const T = CFG.terminal;
+    const spots = [];
+
+    // 1) поверхностный: в зале, на полу, подальше от старта игрока
+    const caveTop = CFG.layers.skyRows + CFG.layers.ceilingRows;
+    const caveBottom = caveTop + CFG.layers.caveRows;
+    let guard = 0;
+    while (spots.length < 1 && guard++ < 6000) {
+      const tx = 25 + Math.floor(this.rnd() * (w.cols - 50));
+      const ty = caveTop + 2 + Math.floor(this.rnd() * (caveBottom - caveTop - 3));
+      if (Math.abs(tx - CFG.spawn.playerTileX) < 18) continue;
+      if (!this.freeCaveSpot(tx, ty)) continue;
+      if (spots.some(s => Math.hypot(s.tx - tx, s.ty - ty) < 20)) continue;
+      spots.push({ tx, ty, deep: false });
+    }
+
+    // 2) глубинные: только под 50-м рядом. Два терминала разводим по глубине
+    // (верхняя и нижняя треть зоны), чтобы игрок не находил оба в одной пещере
+    const bands = [
+      [CFG.layers.deepTopRow + 4, CFG.layers.deepTopRow + 25],
+      [CFG.layers.deepTopRow + 30, w.rows - 10]
+    ];
+    for (const [y0, y1] of bands) {
+      if (spots.length >= T.count) break;
+      guard = 0;
+      while (guard++ < 20000) {
+        const tx = 8 + Math.floor(this.rnd() * (w.cols - 16));
+        const ty = y0 + Math.floor(this.rnd() * Math.max(1, y1 - y0));
+        if (!this.freeCaveSpot(tx, ty)) continue;
+        if (!w.solid(tx, ty + 1)) continue;
+        if (spots.some(s => Math.hypot(s.tx - tx, s.ty - ty) < 30)) continue;
+        spots.push({ tx, ty, deep: true });
+        break;
+      }
+    }
+
+    // Терминал должен быть виден: если он оказался замурован в породе,
+    // вырезаем нишу 1x2 и опору под ним. Раньше это делал спавн «на воздухе»,
+    // но на границе полостей он может промахнуться
+    for (const s of spots) {
+      if (w.solid(s.tx, s.ty)) w.set(s.tx, s.ty, TILE.EMPTY, false);
+      if (w.solid(s.tx, s.ty - 1)) w.set(s.tx, s.ty - 1, TILE.EMPTY, false);
+      if (!w.solid(s.tx, s.ty + 1)) w.set(s.tx, s.ty + 1, TILE.STONE, false);
+      // и небольшой закуток, чтобы к терминалу можно было подойти
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = 1; dy <= 2; dy++) {
+          if (w.solid(s.tx + dx, s.ty - dy)) w.set(s.tx + dx, s.ty - dy, TILE.EMPTY, false);
+        }
+      }
+    }
+    w.dirty.length = 0;
+
+    this.terminals = spots.map((s, i) => {
+      const text = CFG.terminal.texts[i % CFG.terminal.texts.length];
+      return {
+        id: text.id, index: i, title: text.title, body: text.body,
+        tx: s.tx, ty: s.ty, deep: s.deep,
+        x: s.tx * TS + (TS - CFG.terminal.w) / 2,
+        y: (s.ty + 1) * TS - CFG.terminal.h,
+        read: false
+      };
+    });
+    this.terminalsRead = this.terminals.filter(t => t.read).length;
+  }
+
+  // Терминал в радиусе взаимодействия — ближайший
+  terminalNear() {
+    const p = this.player;
+    const R = CFG.terminal.interactRadius;
+    let best = null, bd = 1e9;
+    for (const t of this.terminals) {
+      if (t.read) continue;
+      const d = Math.hypot(t.x + CFG.terminal.w / 2 - p.cx, t.y + CFG.terminal.h / 2 - p.cy) / TS;
+      if (d > R) continue;
+      if (d < bd) { bd = d; best = t; }
+    }
+    return best;
+  }
+
+  // E: открыть лор терминала и выдать «запас древних»
+  readTerminal(t) {
+    if (!t) return false;
+    this.lore = { id: t.id, title: t.title, body: t.body };
+    this.loreT = 0;
+    if (t.read) return false;
+    t.read = true;
+    this.terminalsRead = this.terminals.filter(x => x.read).length;
+    for (const id in CFG.terminal.reward) this.inventory.add(Number(id), CFG.terminal.reward[id]);
+    this.particles.place(t.x + CFG.terminal.w / 2, t.y + CFG.terminal.h / 2);
+    this.notice('запас древних: +' + CFG.terminal.reward[3] + ' FERRITE, +' +
+                CFG.terminal.reward[4] + ' BIOGEL', '#ffc07a');
+    this.doSave();
+    return true;
+  }
+
+  closeLore() { this.lore = null; }
+
+  // M5: волна сканера. Ставим таймер, цели собираем в updateScan
+  useScanner() {
+    if (!this.player.hasScanner) { this.notice('нужен сканер', '#c9b3ff'); return false; }
+    if (this.scanCd > 0) return false;
+    this.scanCd = CFG.scanner.cooldown;
+    this.scanT = CFG.scanner.holdTime;
+    this.scanTick = 0;
+    this.scanTargets = this.collectScanTargets();
+    this.particles.place(this.player.cx, this.player.cy);
+    return true;
+  }
+
+  // Что подсвечиваем: дропы FERRITE, непрочитанные терминалы, живые хищники
+  collectScanTargets() {
+    const R = CFG.scanner.radius;
+    const p = this.player;
+    const C = CFG.scanner.colors;
+    const out = [];
+    const inRange = (x, y) => Math.hypot(x - p.cx, y - p.cy) / TS <= R;
+
+    for (const d of this.drops) {
+      if (d.type !== TILE.FERRITE) continue;
+      if (!inRange(d.cx, d.cy)) continue;
+      out.push({ wx: d.cx, wy: d.cy, kind: 'ferrite', color: C.ferrite, w: d.w, h: d.h });
+    }
+    // феррит в породе — иначе сканер бесполезен: дропов мало, руда в стенах
+    const world = this.world;
+    const t0x = Math.max(0, Math.floor((p.cx - R * TS) / TS));
+    const t1x = Math.min(world.cols - 1, Math.floor((p.cx + R * TS) / TS));
+    const t0y = Math.max(0, Math.floor((p.cy - R * TS) / TS));
+    const t1y = Math.min(world.rows - 1, Math.floor((p.cy + R * TS) / TS));
+    for (let ty = t0y; ty <= t1y; ty++) {
+      for (let tx = t0x; tx <= t1x; tx++) {
+        if (world.tiles[ty * world.cols + tx] !== TILE.FERRITE) continue;
+        const wx = tx * TS + TS / 2, wy = ty * TS + TS / 2;
+        if (!inRange(wx, wy)) continue;
+        out.push({ wx, wy, kind: 'ferrite', color: C.ferrite, w: TS, h: TS });
+      }
+    }
+    for (const t of this.terminals) {
+      if (t.read) continue;
+      const wx = t.x + CFG.terminal.w / 2, wy = t.y + CFG.terminal.h / 2;
+      if (!inRange(wx, wy)) continue;
+      out.push({ wx, wy, kind: 'terminal', color: C.terminal, w: CFG.terminal.w, h: CFG.terminal.h });
+    }
+    for (const c of this.crawlers) {
+      if (c.dead) continue;
+      if (!inRange(c.cx, c.cy)) continue;
+      out.push({ wx: c.cx, wy: c.cy, kind: 'crawler', color: C.crawler, w: c.w, h: c.h });
+    }
+    return out;
+  }
+
+  updateScan(dt) {
+    this.scanCd = Math.max(0, this.scanCd - dt);
+    if (this.scanT <= 0) { this.scanTargets = []; return; }
+    this.scanT = Math.max(0, this.scanT - dt);
+    // Цели обновляем не каждый кадр: хищники двигаются, но 6 раз в секунду достаточно
+    this.scanTick -= dt;
+    if (this.scanTick <= 0) {
+      this.scanTick = CFG.scanner.tick;
+      this.scanTargets = this.collectScanTargets();
+    }
+  }
+
+  // Радиус волны в тайлах прямо сейчас: 0 → R за waveTime
+  get scanRadius() {
+    if (this.scanT <= 0) return 0;          // волны нет — и радиуса нет
+    const S = CFG.scanner;
+    const k = clamp(1 - this.scanT / S.holdTime, 0, 1);   // 0 → 1 за holdTime
+    const grow = clamp(k / (S.waveTime / S.holdTime), 0, 1);
+    return S.radius * grow;
   }
 
   // Урон хищникам от летящих ящиков: сила удара = скорость ящика
@@ -2589,15 +2896,30 @@ class Game {
     this.time += dt;
     const inp = this.input;
 
-    // Пока открыто меню крафта, клавиши 1..3 принадлежат ему, а не режимам
+    // Пока открыто меню крафта, цифры принадлежат ему, а не режимам
+    // (M5: рецептов стало четыре, поэтому 4-я цифра тоже уходит в меню)
     if (!this.craftOpen && inp.consume('Digit1')) this.setMode(MODE.DIRT);
     if (!this.craftOpen && inp.consume('Digit2')) this.setMode(MODE.STONE);
     if (!this.craftOpen && inp.consume('Digit3')) this.setMode(MODE.FERRITE);
-    if (inp.consume('Digit4')) this.setMode(MODE.DIG);
-    if (inp.consume('Digit5')) this.setMode(MODE.DEMOLISH);
-    if (inp.consume('Digit6')) this.setMode(MODE.ANCHOR);
-    if (inp.consume('Digit7')) this.setMode(MODE.BENCH);
+    if (!this.craftOpen && inp.consume('Digit4')) this.setMode(MODE.DIG);
+    if (!this.craftOpen && inp.consume('Digit5')) this.setMode(MODE.DEMOLISH);
+    if (!this.craftOpen && inp.consume('Digit6')) this.setMode(MODE.ANCHOR);
+    if (!this.craftOpen && inp.consume('Digit7')) this.setMode(MODE.BENCH);
     if (inp.consume('KeyC')) this.toggleCraft();
+
+    // M5: лор-панель забирает Esc, иначе Q/E не должны мешать движению
+    if (this.lore) {
+      this.loreT += dt;
+      if (inp.consume('Escape') || inp.consume('Enter') || inp.consume('KeyE')) this.closeLore();
+    } else {
+      if (inp.consume('KeyQ')) this.useScanner();
+      if (inp.consume('KeyE')) {
+        const t = this.terminalNear();
+        if (t) this.readTerminal(t);
+      }
+    }
+    this.updateScan(dt);
+    this.promptTerminal = this.lore ? null : this.terminalNear();
 
     if (inp.consume('KeyF')) this.flipGravity();
 
@@ -2632,9 +2954,9 @@ class Game {
     for (const d of this.drops) d.step(dt, this.world, g);
 
     this.updateCrawlers(dt);
-    // Меню крафта забирает мышь: мир живёт, но игрок не копает и не строит
+    // Меню крафта и панель лора забирают мышь: мир живёт, но игрок не копает
     if (this.craftOpen) this.updateCraft(dt);
-    else this.updateMouse(dt);
+    else if (!this.lore) this.updateMouse(dt);
     this.collectDrops();
 
     this.particles.update(dt, g);
@@ -2672,8 +2994,14 @@ class Game {
     this.player.dead = false;
     this.player.invuln = CFG.health.respawnInvuln;
     this.crawlers = [];
+    this.spawnTerminals();
     this.spawnCrawlers();
     this.spawnCaveGel();
+    this.spawnDeepCrawlers();
+    this.scanT = 0;
+    this.scanCd = 0;
+    this.scanTargets = [];
+    this.lore = null;
     this.deaths = 0;
     this.deathT = 0;
     this.hurtScreen = 0;
@@ -2773,6 +3101,27 @@ class Game {
       this.player.hasLaser = !!d.player.laser;
       this.player.hasArmor = !!d.player.armor;
       this.player.hasGravityGun = !!d.player.gun;
+      // M5: сканер переживает F5
+      this.player.hasScanner = !!d.player.scanner;
+    }
+
+    // M5: терминалы. Координаты берём из сейва — иначе после F5
+    // обелиски телепортировались бы в новые случайные точки
+    if (d.terminals && d.terminals.length) {
+      const known = {};
+      for (const t of this.terminals) known[t.id] = t;
+      this.terminals = d.terminals.map((s, i) => {
+        const text = CFG.terminal.texts.find(x => x.id === s.id) || CFG.terminal.texts[i % CFG.terminal.texts.length];
+        const base = known[text.id] || { id: text.id, index: i, title: text.title, body: text.body };
+        return {
+          id: text.id, index: i, title: text.title, body: text.body,
+          tx: s.tx, ty: s.ty, deep: !!s.deep,
+          x: s.tx * TS + (TS - CFG.terminal.w) / 2,
+          y: (s.ty + 1) * TS - CFG.terminal.h,
+          read: !!s.read
+        };
+      });
+      this.terminalsRead = this.terminals.filter(t => t.read).length;
     }
     this.drops = (d.drops || []).map(s => {
       const dr = new Drop(s.x, s.y, s.t);
@@ -2948,6 +3297,7 @@ class Game {
 
     this.drawTiles(ctx, camX, camY);
     this.drawCrates(ctx);
+    this.drawTerminals(ctx);
     this.drawCrawlers(ctx);
     this.drawDrops(ctx);
     this.drawPlayer(ctx);
@@ -2958,14 +3308,241 @@ class Game {
     this.drawLaserBeam(ctx);
     this.drawDig(ctx);
     this.drawGhost(ctx);
+    this.drawPrompt(ctx);
     this.drawCursor(ctx);
+    // M5: волна сканера — поверх мира, сквозь стены
+    this.drawScan(ctx);
 
     ctx.restore();
 
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    // M5: темнота Глубоких пещер и края сканера — экранные слои под HUD
+    this.drawDeepFog(ctx);
+    this.drawScanEdges(ctx);
     this.drawHud(ctx);
     this.drawCrosshair(ctx);
   }
+
+  /* ---------- M5: терминалы, сканер, глубина ---------- */
+
+  drawTerminals(ctx) {
+    const T = CFG.terminal;
+    for (const t of this.terminals) {
+      const x = Math.round(t.x), y = Math.round(t.y);
+      const pulse = 0.5 + 0.5 * Math.sin(this.time * 2.4 + t.index * 2);
+      const lit = !t.read;
+
+      if (lit) {
+        // ореол: обелиск должно быть видно издалека, он и есть цель исследования
+        const g = ctx.createRadialGradient(x + T.w / 2, y + T.h / 2, 4, x + T.w / 2, y + T.h / 2, T.w * 1.8);
+        g.addColorStop(0, 'rgba(110,231,255,' + (0.22 + 0.12 * pulse).toFixed(3) + ')');
+        g.addColorStop(1, 'rgba(110,231,255,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(x - T.w, y - T.h, T.w * 3, T.h * 3);
+      }
+
+      // корпус: сужающийся кверху обелиск
+      ctx.beginPath();
+      ctx.moveTo(x + 4, y + T.h);
+      ctx.lineTo(x + T.w - 4, y + T.h);
+      ctx.lineTo(x + T.w - 7, y + 2);
+      ctx.lineTo(x + 7, y + 2);
+      ctx.closePath();
+      ctx.fillStyle = t.read ? '#101820' : '#101c26';
+      ctx.fill();
+      ctx.strokeStyle = t.read ? 'rgba(70,95,115,0.7)' : 'rgba(110,231,255,0.55)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // руны: три короткие чёрточки, которые гаснут вместе с терминалом
+      const ra = t.read ? 0.16 : 0.55 + 0.45 * pulse;
+      ctx.globalAlpha = ra;
+      ctx.fillStyle = t.read ? T.dark : T.color;
+      for (let i = 0; i < 3; i++) {
+        const ry = y + 9 + i * 7;
+        ctx.fillRect(x + 9, ry, T.w - 18, 2);
+        if (!t.read) {
+          ctx.globalAlpha = ra * 0.5;
+          ctx.fillRect(x + 9, ry - 2, T.w - 18, 1);
+          ctx.globalAlpha = ra;
+        }
+      }
+      ctx.globalAlpha = 1;
+
+      // подставка
+      ctx.fillStyle = t.read ? '#1a2530' : '#1d3040';
+      ctx.fillRect(x + 2, y + T.h - 4, T.w - 4, 4);
+    }
+  }
+
+  // Волна сканера: расходящийся круг + метки целей. Рисуется над тайлами,
+  // поэтому «видно сквозь стены» — это не просвечивание, а маркеры поверх
+  drawScan(ctx) {
+    if (this.scanT <= 0) return;
+    const S = CFG.scanner;
+    const p = this.player;
+    const r = this.scanRadius * TS;
+    const fade = clamp(this.scanT / 0.55, 0, 1);
+    if (r < 1) return;
+
+    ctx.save();
+    // кольцо
+    ctx.globalAlpha = S.ringAlpha * fade;
+    ctx.strokeStyle = '#9fe6ff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(p.cx, p.cy, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = S.ringAlpha * fade * 0.3;
+    ctx.lineWidth = 6;
+    ctx.stroke();
+
+    // Свечение идёт узкой полосой у фронта волны: заливка всего круга
+    // превращала экран в молоко и прятала сами метки
+    ctx.globalAlpha = fade;
+    const g = ctx.createRadialGradient(p.cx, p.cy, Math.max(0, r - TS * 4), p.cx, p.cy, r);
+    g.addColorStop(0, 'rgba(120,210,255,0)');
+    g.addColorStop(0.75, 'rgba(140,220,255,0.05)');
+    g.addColorStop(1, 'rgba(170,235,255,0.16)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(p.cx, p.cy, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    // метки: руда — точка, терминал — ромб, хищник — треугольник
+    for (const t of this.scanTargets) {
+      const d = Math.hypot(t.wx - p.cx, t.wy - p.cy);
+      if (d > r) continue;
+      ctx.globalAlpha = fade * (0.6 + 0.4 * (1 - d / Math.max(1, r)));
+      ctx.strokeStyle = t.color;
+      ctx.fillStyle = t.color;
+      ctx.lineWidth = 1.5;
+      if (t.kind === 'ferrite') {
+        // Метка должна читаться поверх такой же синей руды в стене:
+        // тёмная подложка + яркое кольцо, а не просто квадрат
+        ctx.globalAlpha *= 0.85;
+        ctx.fillStyle = 'rgba(4,10,20,0.75)';
+        ctx.beginPath();
+        ctx.arc(t.wx, t.wy, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = t.color;
+        ctx.beginPath();
+        ctx.arc(t.wx, t.wy, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = t.color;
+        ctx.beginPath();
+        ctx.arc(t.wx, t.wy, 7.5, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (t.kind === 'terminal') {
+        ctx.beginPath();
+        ctx.moveTo(t.wx, t.wy - 9);
+        ctx.lineTo(t.wx + 8, t.wy);
+        ctx.lineTo(t.wx, t.wy + 9);
+        ctx.lineTo(t.wx - 8, t.wy);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.globalAlpha *= 0.35;
+        ctx.fill();
+      } else {
+        // хищник: треугольник с тёмной подложкой — красный силуэт не должен
+        // сливаться с красными глазками самого хищника
+        ctx.globalAlpha *= 0.8;
+        ctx.fillStyle = 'rgba(4,10,20,0.72)';
+        ctx.beginPath();
+        ctx.arc(t.wx, t.wy, 11, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = fade;
+        ctx.fillStyle = t.color;
+        ctx.strokeStyle = t.color;
+        ctx.beginPath();
+        ctx.moveTo(t.wx, t.wy - 7);
+        ctx.lineTo(t.wx + 6.5, t.wy + 5);
+        ctx.lineTo(t.wx - 6.5, t.wy + 5);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  // Метки за пределами экрана: радиус 25 тайлов заметно больше кадра
+  // (20x11 тайлов при зуме 2), поэтому дальние цели показываем стрелками у края.
+  // Без этого «сканер на 25» на деле означал бы «сканер на пол-экрана»
+  drawScanEdges(ctx) {
+    if (this.scanT <= 0 || !this.scanTargets.length) return;
+    const z = CFG.camera.zoom;
+    const inset = 26;
+    const fade = clamp(this.scanT / 0.55, 0, 1);
+    const p = this.player;
+    // экранные координаты игрока — центр отсчёта для направлений
+    const sx0 = (p.cx - this.camera.x - this.camera.ox) * z;
+    const sy0 = (p.cy - this.camera.y - this.camera.oy) * z;
+    const seen = {};
+    for (const t of this.scanTargets) {
+      const sx = (t.wx - this.camera.x - this.camera.ox) * z;
+      const sy = (t.wy - this.camera.y - this.camera.oy) * z;
+      if (sx > inset && sx < this.vw - inset && sy > inset && sy < this.vh - inset) continue;
+      // не дублируем стрелки одного типа в одном направлении — иначе край пестрит
+      const ang = Math.atan2(sy - sy0, sx - sx0);
+      const key = t.kind + Math.round(ang / 0.35);
+      if (seen[key]) continue;
+      seen[key] = 1;
+
+      // точка на рамке по направлению от игрока
+      const dx = Math.cos(ang), dy = Math.sin(ang);
+      const halfW = this.vw / 2 - inset, halfH = this.vh / 2 - inset;
+      const k = Math.min(halfW / Math.max(1e-4, Math.abs(dx)), halfH / Math.max(1e-4, Math.abs(dy)));
+      const ex = this.vw / 2 + dx * k;
+      const ey = this.vh / 2 + dy * k;
+
+      ctx.save();
+      ctx.translate(ex, ey);
+      ctx.rotate(ang);
+      ctx.globalAlpha = 0.85 * fade;
+      ctx.fillStyle = t.color;
+      ctx.beginPath();
+      ctx.moveTo(7, 0);
+      ctx.lineTo(-4, -5);
+      ctx.lineTo(-4, 5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha = 0.35 * fade;
+      ctx.strokeStyle = t.color;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Темнота глубины: чем ниже игрок, тем теснее круг света вокруг него.
+  // Тайлы не перерисовываем — это экранный слой, он ничего не стоит
+  drawDeepFog(ctx) {
+    const D = CFG.deep;
+    const p = this.player;
+    const pRow = p.cy / TS;
+    // Плавно темнеет за 8 рядов до входа в зону: игрок должен чувствовать спуск
+    const k = clamp((pRow - (CFG.layers.deepTopRow - 8)) / 8, 0, 1);
+    if (k <= 0.001) return;
+
+    const sx = (p.cx - this.camera.x - this.camera.ox) * CFG.camera.zoom;
+    const sy = (p.cy - this.camera.y - this.camera.oy) * CFG.camera.zoom;
+    const R = D.lightRadius * TS * CFG.camera.zoom;
+
+    // 1) общая вуаль: глубина просто темнее, но не «выключает» картинку
+    ctx.fillStyle = 'rgba(3,6,11,' + (0.46 * k).toFixed(3) + ')';
+    ctx.fillRect(0, 0, this.vw, this.vh);
+
+    // 2) круг света вокруг игрока: видно, куда копать, но не дальше
+    const g = ctx.createRadialGradient(sx, sy, R * 0.3, sx, sy, R * 1.9);
+    g.addColorStop(0, 'rgba(2,5,10,0)');
+    g.addColorStop(0.5, 'rgba(2,5,10,' + (0.24 * k).toFixed(3) + ')');
+    g.addColorStop(1, 'rgba(1,3,7,' + (0.72 * k * D.vignette).toFixed(3) + ')');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, this.vw, this.vh);
+  }
+
 
   // Перекрестие в экранных пикселях: остаётся тонким при любом зуме
   drawCrosshair(ctx) {
@@ -3256,10 +3833,26 @@ class Game {
     }
   }
 
-  // Кольцо радиуса копания — показывается коротко после переворота гравитации, обучения ради
+  // Кольцо радиуса: короткая вспышка после переворота гравитации
+  // или волна сканера, которая живёт дольше и ярче
   drawRadius(ctx) {
-    if (this.radiusEcho <= 0) return;
+    const scanning = this.scanT > 0;
+    if (!scanning && this.radiusEcho <= 0) return;
     const p = this.player;
+    if (scanning) {
+      // саму волну рисует drawScan; здесь только слабый «фантом» границы
+      const a = clamp(this.scanT / CFG.scanner.holdTime, 0, 1);
+      ctx.globalAlpha = 0.18 * a;
+      ctx.strokeStyle = '#9fe6ff';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 10]);
+      ctx.beginPath();
+      ctx.arc(p.cx, p.cy, CFG.scanner.radius * TS, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+      return;
+    }
     const a = this.radiusEcho / CFG.dig.radiusEcho;
     ctx.globalAlpha = 0.28 * a;
     ctx.strokeStyle = '#9fd8ff';
@@ -3547,11 +4140,19 @@ class Game {
     ctx.textBaseline = 'top';
     ctx.font = '11px ' + CFG.render.font;
     ctx.fillStyle = 'rgba(170,195,225,0.55)';
+    const inDeep = this.player.cy / TS >= CFG.layers.deepTopRow;
     ctx.fillText(Math.round(this.fps) + ' FPS · тел ' + (this.drops.length + this.crates.length) +
-                 ' · хищников ' + this.crawlers.length, 16, 14);
+                 ' · хищников ' + this.crawlers.length + (inDeep ? ' · ГЛУБОКИЕ ПЕЩЕРЫ' : ''),
+                 16, 14);
+    if (inDeep) {
+      ctx.fillStyle = 'rgba(150,120,255,0.65)';
+      ctx.fillText('ряд ' + Math.floor(this.player.cy / TS) + ' · света мало',
+                   16, 30);
+    }
 
     this.drawHealthBar(ctx, x, y + h + 8);
     this.drawCraft(ctx);
+    this.drawLore(ctx);
     this.drawPhasePanel(ctx);
     this.drawGravityArrow(ctx);
     this.drawModeBar(ctx);
@@ -3693,6 +4294,47 @@ class Game {
       ctx.fillRect(ix + 10, iy + 2, 4, 8);
       ix += 18;
     }
+    // M5: сканер — два полукруга, как радар
+    if (p.hasScanner) {
+      ctx.strokeStyle = '#b98bff';
+      ctx.lineWidth = 1.6;
+      for (let k = 1; k <= 2; k++) {
+        ctx.beginPath();
+        ctx.arc(ix + 1, iy + 6, k * 4.5, -Math.PI / 2.4, Math.PI / 2.4);
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#b98bff';
+      ctx.fillRect(ix, iy + 5, 2, 2);
+      ix += 18;
+    }
+
+    // M5: счётчик прочитанных терминалов — под иконками экипировки
+    const found = this.terminalsRead || 0;
+    const total = this.terminals.length || CFG.terminal.count;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = '10px ' + CFG.render.font;
+    ctx.fillStyle = found >= total ? '#ffc07a' : 'rgba(255,192,122,0.78)';
+    ctx.fillText('Терминалы: ' + found + '/' + total, x + 2, iy + 26);
+
+    // Кулдаун сканера: маленькая полоска под счётчиком
+    if (p.hasScanner) {
+      const S = CFG.scanner;
+      const cw = 54, chh = 3;
+      const cy2 = iy + 36;
+      ctx.fillStyle = 'rgba(150,180,220,0.18)';
+      ctx.fillRect(x + 2, cy2, cw, chh);
+      const ready = this.scanCd <= 0;
+      ctx.fillStyle = ready ? '#b98bff' : 'rgba(160,130,220,0.55)';
+      const w2 = ready ? cw : cw * (1 - this.scanCd / S.cooldown);
+      ctx.fillRect(x + 2, cy2, w2, chh);
+      if (ready) {
+        ctx.font = '9px ' + CFG.render.font;
+        ctx.fillStyle = 'rgba(185,139,255,0.85)';
+        ctx.fillText('Q', x + cw + 6, cy2 + 1);
+      }
+    }
+    ctx.textBaseline = 'top';
 
     // Укрытие: во время прилива это главный вопрос игрока «я в безопасности?»
     if (this.tide.id === 'CATASTROPHE' || this.tide.id === 'WARNING') {
@@ -3733,7 +4375,7 @@ class Game {
     ctx.fillText('ВЕРСТАК', b.x + 18, b.y + 24);
     ctx.font = '11px ' + CFG.render.font;
     ctx.fillStyle = 'rgba(160,185,215,0.8)';
-    ctx.fillText('1–3 или ЛКМ · Enter создать · C закрыть', b.x + 18, b.y + 42);
+    ctx.fillText('1–4 или ЛКМ · Enter создать · C закрыть', b.x + 18, b.y + 42);
 
     for (let i = 0; i < CFG.recipes.length; i++) {
       const r = CFG.recipes[i];
@@ -3763,9 +4405,20 @@ class Game {
       } else if (r.id === 'armor') {
         ctx.fillStyle = 'rgba(30,40,52,0.7)';
         ctx.fillRect(b.x + 30, ry + 23, 14, 6);
-      } else {
+      } else if (r.id === 'gun') {
         ctx.fillStyle = 'rgba(10,30,50,0.8)';
         ctx.fillRect(b.x + 30, ry + 27, 14, 5);
+      } else {
+        // сканер: три расходящиеся дуги
+        ctx.strokeStyle = 'rgba(20,10,40,0.85)';
+        ctx.lineWidth = 2;
+        for (let k = 1; k <= 3; k++) {
+          ctx.beginPath();
+          ctx.arc(b.x + 26, ry + 30, k * 5, -Math.PI / 3, Math.PI / 3);
+          ctx.stroke();
+        }
+        ctx.fillStyle = 'rgba(20,10,40,0.85)';
+        ctx.fillRect(b.x + 25, ry + 27, 3, 6);
       }
 
       // название и цена
@@ -3894,6 +4547,80 @@ class Game {
     ctx.restore();
   }
 
+  // Подсказка «[E] Прочитать» над терминалом: прицел игрока не должен
+  // превращаться в поиск горячей клавиши наугад
+  drawPrompt(ctx) {
+    const t = this.promptTerminal;
+    if (!t || this.lore) return;
+    const T = CFG.terminal;
+    const cx = t.x + T.w / 2;
+    const cy = t.y - 12;
+    const label = '[E] Прочитать';
+    ctx.font = 'bold 10px ' + CFG.render.font;
+    const w = ctx.measureText(label).width + 14;
+    ctx.fillStyle = 'rgba(6,12,18,0.82)';
+    rr(ctx, cx - w / 2, cy - 9, w, 18, 5);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(110,231,255,0.5)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = '#bff2ff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, cx, cy + 0.5);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+  }
+
+  // Панель лора: затемнение + текст. Читается, пока не нажмёшь Esc/Enter/E
+  drawLore(ctx) {
+    const L = this.lore;
+    if (!L) return;
+    const a = clamp(this.loreT / 0.18, 0, 1);
+    const w = Math.min(560, this.vw - 80);
+    const h = 196;
+    const x = (this.vw - w) / 2, y = (this.vh - h) / 2;
+
+    ctx.globalAlpha = a;
+    ctx.fillStyle = 'rgba(3,6,11,0.72)';
+    ctx.fillRect(0, 0, this.vw, this.vh);
+
+    ctx.fillStyle = 'rgba(8,16,24,0.96)';
+    rr(ctx, x, y, w, h, 14);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(110,231,255,0.35)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // руническая полоса слева — «это находка, а не меню»
+    ctx.fillStyle = 'rgba(110,231,255,0.55)';
+    ctx.fillRect(x + 14, y + 22, 3, h - 44);
+
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.font = 'bold 11px ' + CFG.render.font;
+    ctx.fillStyle = '#8fd8ff';
+    ctx.fillText(L.title, x + 30, y + 22);
+
+    ctx.font = '13px ' + CFG.render.font;
+    ctx.fillStyle = 'rgba(220,236,250,0.92)';
+    const lines = String(L.body).split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillText(lines[i], x + 30, y + 52 + i * 22);
+    }
+
+    ctx.font = '10px ' + CFG.render.font;
+    ctx.fillStyle = 'rgba(150,180,215,0.7)';
+    ctx.fillText('Esc / Enter — закрыть', x + 30, y + h - 30);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = 'rgba(255,192,122,0.9)';
+    ctx.fillText('запас древних: +' + CFG.terminal.reward[3] + ' FERRITE · +' +
+                 CFG.terminal.reward[4] + ' BIOGEL', x + w - 20, y + h - 30);
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+  }
+
   // Выбранный режим: 1-3 материал, 4 копать, 5 снос, 6 якорь
   drawModeBar(ctx) {
     const items = [
@@ -3941,6 +4668,8 @@ class Game {
       ['F', 'гравитация'],
       ['H', 'биогель'],
       ['C', 'крафт'],
+      ['Q', 'сканер'],
+      ['E', 'читать'],
       ['ЛКМ', this.modeLabel()],
       ['ПКМ', 'телекинез']
     ];

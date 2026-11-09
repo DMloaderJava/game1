@@ -50,6 +50,10 @@ for (const m of ['spawnAftermathLoot', 'doSave', 'onPhaseChanged', 'wreckWave'])
   game[m] = (...a) => { const t0 = performance.now(); const r = orig(...a); const d = performance.now() - t0; if (d > 8) console.log('SLOW', m, d.toFixed(1), 'мс'); return r; };
 }
 
+// Прогрев: первые кадры после включения хвостовых фаз стоят дорого
+// (JIT + дорисовка текстур), это шум стенда, а не поведение игры
+for (let w = 0; w < 120; w++) frames(1);
+
 const times = [];
 let maxDrops = 0, maxAnchors = 0;
 // два цикла: CATASTROPHE → AFTERMATH → STABLE, сжимаем фазы

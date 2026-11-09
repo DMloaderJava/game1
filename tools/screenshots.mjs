@@ -335,4 +335,109 @@ frames(30);
   shot('16c-laser-armor');
   game.input.mouse.left = false;
 }
+// ---------- M5: терминалы, сканер, Глубокие пещеры ----------
+game.resetWorld();
+frames(30);
+
+// Терминал на поверхности: обелиск, подсказка [E]
+{
+  const t = game.terminals.find(x => !x.deep) || game.terminals[0];
+  game.crawlers.length = 0;                       // кадр про лор, не про бой
+  P.x = t.tx * 32 - 34;
+  P.y = (t.ty + 1) * 32 - P.h;
+  P.vx = P.vy = 0;
+  game.camera.snap(P);
+  frames(6);
+  game.player.hasScanner = true;
+  game.camera.snap(P);
+  frames(2);
+  shot('17-terminal');
+}
+
+// Панель лора после нажатия E
+{
+  const t = game.terminalNear() || game.terminals.find(x => !x.read);
+  game.readTerminal(t);
+  game.loreT = 1;
+  frames(4);
+  shot('17b-lore');
+  game.closeLore();
+}
+
+// Сканер: волна расходится, метки ресурсов и хищника сквозь стены
+{
+  const t = game.terminals[0];
+  const cx = t.tx + 4, cy = t.ty;
+  P.x = cx * 32; P.y = (cy + 1) * 32 - P.h;
+  P.vx = P.vy = 0;
+  game.camera.snap(P);
+  // насыпаем феррита в породу рядом и за стеной: сканер должен его найти
+  for (let i = 0; i < 14; i++) {
+    const fx = cx + 4 + (i % 5), fy = cy + 1 + Math.floor(i / 5);
+    game.world.set(fx, fy, 3, false);
+    if (i % 3 === 0) game.world.set(fx + 2, cy - 1 - Math.floor(i / 5), 3, false);
+  }
+  game.tiles.flush();
+  // хищник за стеной: сканер должен подсветить его красным
+  game.crawlers.length = 0;
+  const sc = new sandbox.__clsM3.Crawler(P.cx + 9 * 32, t.ty * 32 - CFG.crawler.h);
+  sc.home = { x: sc.cx, y: sc.cy };
+  game.crawlers.push(sc);
+  game.scanCd = 0;
+  game.useScanner();
+  game.scanTick = 0;
+  // Волна растянута по кадрам, а для кадра нужен готовый радиус:
+  // ~10 тайлов радиуса: фронт волны ещё в кадре (камера видит ~10 тайлов)
+  game.scanT = 1.66;
+  game.scanTick = 0;
+  game.scanTargets = game.collectScanTargets();
+  game.noticeT = 0;
+  game.camera.snap(P);
+  game.render();                  // кадр без update: таймер не должен съесть волну
+  shot('18-scanner');
+}
+
+// Глубокие пещеры: темнота, хищник, обелиск
+{
+  game.scanT = 0;
+  game.scanTargets = [];
+  const t = game.terminals.find(x => x.deep) || game.terminals[1];
+  const Wr = game.world;
+  // расчищаем пятачок вокруг глубинного терминала — как будто сюда докопались
+  for (let y = t.ty - 2; y <= t.ty + 1; y++) {
+    for (let x = t.tx - 6; x <= t.tx + 7; x++) Wr.set(x, y, 0, false);
+  }
+  Wr.set(t.tx, t.ty + 1, 2, false);
+  game.tiles.flush();
+  P.x = (t.tx - 5) * 32;
+  P.y = (t.ty + 1) * 32 - P.h;
+  P.vx = P.vy = 0;
+  game.camera.snap(P);
+  game.crawlers.length = 0;
+  const dc = new sandbox.__clsM3.Crawler((t.tx + 4) * 32, (t.ty + 1) * 32 - CFG.crawler.h);
+  dc.home = { x: dc.cx, y: dc.cy };
+  game.crawlers.push(dc);
+  frames(20);
+  game.camera.snap(P);
+  frames(2);
+  shot('19-deep-caves');
+}
+
+// Меню крафта: четыре рецепта, курсор на сканере
+{
+  const t = game.terminals[0];
+  const bx = Math.floor(P.cx / 32);
+  game.world.set(bx, P.y < 0 ? 0 : Math.floor(P.cy / 32), 5, true);
+  game.craftOpen = true;
+  game.craftT = 1;
+  game.craftSel = 3;
+  game.player.hasLaser = false;
+  game.player.hasArmor = false;
+  game.player.hasGravityGun = false;
+  game.player.hasScanner = false;
+  game.inventory.counts[3] = 9; game.inventory.counts[2] = 7; game.inventory.counts[4] = 2;
+  frames(2);
+  shot('20-craft-scanner');
+  game.craftOpen = false;
+}
 console.log('done');

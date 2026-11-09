@@ -173,6 +173,10 @@ const digTarget = { tx: Math.floor(P.cx / TS), ty: Math.floor((P.y + P.h) / TS) 
 ok('цель под игроком — DIRT', W.get(digTarget.tx, digTarget.ty) === TILE.DIRT, `type=${W.get(digTarget.tx, digTarget.ty)}`);
 
 const invBefore = game.inventory.counts[TILE.DIRT];
+// M5: мир стал глубже, над залом лежит плита, а под полом — порода на 100+ рядов.
+// DDA-подбор мог бы отдать дроп в руки игроку мгновенно (как раньше при дропе из-под ног),
+// поэтому до начала копания тратим очередь кадров: дроп должен падать физически
+frames(30);
 mouseToTile(digTarget.tx, digTarget.ty);
 mouse('down', digTarget.tx * TS + TS / 2, digTarget.ty * TS + TS / 2);
 frames(2);
@@ -186,12 +190,26 @@ ok('появился физический дроп', game.drops.length === baseG
 const dugDrop = game.drops.find(d => d.type === TILE.DIRT);
 ok('дроп нужного типа', !!dugDrop, `type=${dugDrop && dugDrop.type}`);
 
-// яма под игроком: дроп падает на дно — это ожидаемо, подбирать будем стеновой тайл
+// Яма рядом с игроком: дроп падает на дно физически и засыпает.
+// M5: яма вырыта в двух тайлах от игрока — иначе подбор мгновенный и падения не видно
 mouse('up', 0, 0);
-frames(90);
-ok('дроп упал и заснул в яме', !!dugDrop && dugDrop.sleeping, `drops=${game.drops.length} sleep=${dugDrop && dugDrop.sleeping}`);
-const pitDrop = dugDrop;
-ok('дроп в яме физически ниже пола', pitDrop.y > digTarget.ty * TS, `y=${pitDrop.y.toFixed(1)}`);
+frames(10);
+const pitX = digTarget.tx + 2, pitY = digTarget.ty;
+W.set(pitX, pitY, TILE.EMPTY, false);
+W.set(pitX, pitY + 1, TILE.EMPTY, false);
+game.tiles.flush();
+const dropY0 = pitY * TS + 2;
+const pitDrop = new sandbox.__cls.Drop(pitX * TS + 10, dropY0, TILE.DIRT);
+pitDrop.vx = 0; pitDrop.vy = 0;
+game.drops.push(pitDrop);
+const dropsBeforePit = game.drops.length;
+frames(4);
+ok('дроп в яме начинает падать', pitDrop.y > dropY0 + 2, `dy=${(pitDrop.y - dropY0).toFixed(1)}`);
+frames(120);
+ok('дроп упал и заснул в яме', pitDrop.sleeping === true,
+   `drops=${game.drops.length}/${dropsBeforePit} sleep=${pitDrop.sleeping} y=${(pitDrop.y / TS).toFixed(2)}`);
+ok('дроп в яме физически ниже пола', pitDrop.y > pitY * TS, `y=${pitDrop.y.toFixed(1)}`);
+ok('дроп в яме не подобрался: игрок далеко', game.drops.indexOf(pitDrop) >= 0);
 
 // подбор вплотную: дроп появляется на игроке — должен подобраться за кадр
 const invNow = game.inventory.counts[TILE.STONE];
@@ -600,7 +618,7 @@ game.tide.t = 20;   // 80 секунд до прилива
 game.inventory.counts[TILE.FERRITE] = 7;
 game.doSave();
 const saved = JSON.parse(sandbox.localStorage.getItem(CFG.save.key));
-ok('сейв записан', !!saved && saved.v === 2 && saved.tiles.length > 0, 'v=' + (saved && saved.v));
+ok('сейв записан', !!saved && saved.v === 3 && saved.tiles.length > 0, 'v=' + (saved && saved.v));
 ok('в сейве есть фаза', saved.cycle && saved.cycle.phase === 'STABLE', JSON.stringify(saved.cycle));
 
 // загрузка STABLE: таймер продолжается
@@ -666,7 +684,9 @@ ok('M3: биогель зелёный', CFG.resources.find(r => r.id === ITEM.BI
 
 // --- хищники в пещерах
 const caveTop = CFG.layers.skyRows + CFG.layers.ceilingRows;
-ok('M3: спавнится 2-3 хищника', g3.crawlers.length >= 2 && g3.crawlers.length <= 3, `n=${g3.crawlers.length}`);
+// M5: к трём хищникам зала добавились пятеро в Глубоких пещерах
+const caveCrawlers = g3.crawlers.filter(c => c.cy / TS < CFG.layers.deepTopRow);
+ok('M3: спавнится 2-3 хищника в зале', caveCrawlers.length >= 2 && caveCrawlers.length <= 3, `n=${caveCrawlers.length}`);
 ok('M3: хищники под землёй', g3.crawlers.every(c => c.cy > caveTop * TS),
    g3.crawlers.map(c => (c.cy / TS).toFixed(1)).join(','));
 ok('M3: размер хищника 32x24', g3.crawlers.every(c => c.w === 32 && c.h === 24));
@@ -1047,7 +1067,7 @@ g7.craftOpen = false;
 pressG(g7, 'KeyC');
 stepG(g7, 1);
 ok('M4: C открывает меню рядом с верстаком', g7.craftOpen === true);
-ok('M4: в меню 3 рецепта', CFG.recipes.length === 3, String(CFG.recipes.length));
+ok('M4: в меню 3 рецепта M4 (+1 сканер в M5)', CFG.recipes.length === 4, String(CFG.recipes.length));
 
 // --- меню не открывается без верстака
 const gNoBench = new (sandbox.__cls.Game)(view);
@@ -1200,6 +1220,383 @@ ok('M4: иконки экипировки в HUD', /hasLaser/.test(String(g9.dra
    /hasArmor/.test(String(g9.drawHealthBar)) && /hasGravityGun/.test(String(g9.drawHealthBar)));
 ok('M4: в панели режимов есть верстак (7)', /ВЕРСТАК|bench/.test(String(g9.drawModeBar)) || /Digit7/.test(String(g9.update)));
 ok('M4: C подсказана в управлении', /крафт/.test(String(g9.drawControls)));
+
+// ================================================================
+// M5: эхо древних — сканер, терминалы, Глубокие пещеры
+// ================================================================
+sandbox.localStorage.removeItem(CFG.save.key);
+const gM5 = new (sandbox.__cls.Game)(view);
+const PM5 = gM5.player;
+stepG(gM5, 60);
+
+// --- 1. мир стал глубже
+ok('M5: мир вырос до 200x130', gM5.world.cols === 200 && gM5.world.rows === 130,
+   `${gM5.world.cols}x${gM5.world.rows}`);
+ok('M5: Глубокие пещеры начинаются с 50-го ряда', CFG.layers.deepTopRow === 50 && gM5.world.deepRow === 50);
+ok('M5: под старым дном есть 30 новых рядов породы',
+   gM5.world.rows - 100 === 30 && gM5.world.solid(100, 128), `rows=${gM5.world.rows}`);
+
+// физический замер концентрации FERRITE: считаем по тайлам, а не по конфигу
+function ferriteRatioIn(fromRow, toRow) {
+  let f = 0, rock = 0;
+  for (let y = fromRow; y < toRow; y++) {
+    for (let x = 0; x < gM5.world.cols; x++) {
+      const t = gM5.world.tiles[y * gM5.world.cols + x];
+      if (t === TILE.FERRITE) { f++; rock++; }
+      else if (t === TILE.STONE) rock++;
+    }
+  }
+  return f / Math.max(1, rock);
+}
+const ratioShallow = ferriteRatioIn(22, 45);      // старый слой камня
+const ratioDeep = ferriteRatioIn(60, 128);        // глубина
+ok('M5: в глубине FERRITE ~15%', ratioDeep > 0.10 && ratioDeep < 0.22,
+   `глубина ${(ratioDeep * 100).toFixed(1)}%`);
+ok('M5: на старой глубине концентрация осталась ~5%', ratioShallow < 0.09,
+   `${(ratioShallow * 100).toFixed(1)}%`);
+ok('M5: в глубине FERRITE втрое больше, чем наверху', ratioDeep > ratioShallow * 2,
+   `${(ratioShallow * 100).toFixed(1)}% → ${(ratioDeep * 100).toFixed(1)}%`);
+
+// физическая копка в глубине: игрок стоит на полу пещеры, ЛКМ по соседнему тайлу
+{
+  const w = gM5.world;
+  // ищем полость в глубине: воздух, под ним опора
+  let spot = null;
+  for (let ty = CFG.layers.deepTopRow + 3; ty < w.rows - 3 && !spot; ty++) {
+    for (let tx = 60; tx < 150; tx++) {
+      if (!w.solid(tx, ty) && !w.solid(tx, ty - 1) && w.solid(tx, ty + 1) && w.solid(tx + 2, ty)) {
+        spot = { tx, ty }; break;
+      }
+    }
+  }
+  ok('M5: в глубине есть полости, где можно стоять', !!spot, JSON.stringify(spot));
+  const keepX = PM5.x, keepY = PM5.y;
+  PM5.x = spot.tx * TS; PM5.y = (spot.ty + 1) * TS - PM5.h;
+  PM5.vx = 0; PM5.vy = 0;
+  gM5.camera.snap(PM5);
+  gM5.tiles.flush();
+  stepG(gM5, 5);
+  const deepTile = { tx: spot.tx + 2, ty: spot.ty };
+  const deepType = w.get(deepTile.tx, deepTile.ty);
+  const invBeforeDeep = gM5.inventory.counts[deepType];
+  const dropsBeforeDeep = gM5.drops.length;
+  gM5.dig = null;
+  gM5.updateDig(CFG.step, { x: deepTile.tx * TS + TS / 2, y: deepTile.ty * TS + TS / 2 });
+  ok('M5: в глубине копание начинается', !!gM5.dig && gM5.dig.tx === deepTile.tx,
+     `dig=${JSON.stringify(gM5.dig && { tx: gM5.dig.tx, ty: gM5.dig.ty })}`);
+  let guard = 0;
+  while (w.get(deepTile.tx, deepTile.ty) !== TILE.EMPTY && guard++ < 120) {
+    gM5.updateDig(CFG.step, { x: deepTile.tx * TS + TS / 2, y: deepTile.ty * TS + TS / 2 });
+  }
+  ok('M5: глубинный тайл скопан за конечное время', w.get(deepTile.tx, deepTile.ty) === TILE.EMPTY,
+     `кадров=${guard}`);
+  ok('M5: из глубинного тайла выпал дроп', gM5.drops.length > dropsBeforeDeep,
+     `${dropsBeforeDeep} → ${gM5.drops.length}`);
+  gM5.dig = null;
+  gM5.drops.length = dropsBeforeDeep;
+  gM5.inventory.counts[deepType] = invBeforeDeep;
+  PM5.x = keepX; PM5.y = keepY;
+  gM5.camera.snap(PM5);
+  stepG(gM5, 10);
+}
+
+// --- 2. хищники в глубине
+const deepCrawlers = gM5.crawlers.filter(c => c.cy / TS >= CFG.layers.deepTopRow);
+ok('M5: в Глубоких пещерах 5-6 хищников', deepCrawlers.length >= 5 && deepCrawlers.length <= 6,
+   `n=${deepCrawlers.length}`);
+ok('M5: глубинные хищники помечены', deepCrawlers.every(c => c.deep === true));
+ok('M5: в зале осталось 3 хищника',
+   gM5.crawlers.filter(c => c.cy / TS < CFG.layers.deepTopRow).length === CFG.crawler.count,
+   `n=${gM5.crawlers.filter(c => c.cy / TS < CFG.layers.deepTopRow).length}`);
+ok('M5: глубина не пустая — там есть где стоять',
+   deepCrawlers.every(c => !gM5.world.solid(Math.floor(c.cx / TS), Math.floor(c.cy / TS))));
+
+// --- 3. терминалы
+const T5 = CFG.terminal;
+ok('M5: терминалов 3', gM5.terminals.length === 3, `n=${gM5.terminals.length}`);
+ok('M5: два терминала в глубине, один на поверхности',
+   gM5.terminals.filter(t => t.deep).length === 2 && gM5.terminals.filter(t => !t.deep).length === 1,
+   gM5.terminals.map(t => (t.deep ? 'deep' : 'top') + '@' + t.tx + ',' + t.ty).join(' '));
+ok('M5: терминалы стоят на полу, а не в породе',
+   gM5.terminals.every(t => !gM5.world.solid(t.tx, t.ty) && gM5.world.solid(t.tx, t.ty + 1)),
+   gM5.terminals.map(t => `${t.tx},${t.ty}:${gM5.world.get(t.tx, t.ty)}/${gM5.world.get(t.tx, t.ty + 1)}`).join(' '));
+ok('M5: тексты терминалов — три разных куска лора',
+   new Set(gM5.terminals.map(t => t.id)).size === 3);
+const loreText = T5.texts.map(t => t.body).join(' ');
+ok('M5: есть лор про протокол ядра', /протокол стабилизации ядра нарушен/.test(loreText));
+ok('M5: есть лор про приливы как агонию планеты', /гравитационные приливы — это агония планеты/.test(loreText));
+ok('M5: есть лор про ушедшую экспедицию', /экспедиция не вернулась, они ушли глубже/.test(loreText));
+ok('M5: награда за терминал +5 FERRITE и +1 BIOGEL',
+   T5.reward[3] === 5 && T5.reward[4] === 1, JSON.stringify(T5.reward));
+
+// далеко от терминала: E ничего не открывает
+{
+  const t0 = gM5.terminals[1];
+  PM5.x = (t0.tx + 12) * TS; PM5.y = gM5.world.surfaceRow * TS - PM5.h;
+  gM5.camera.snap(PM5);
+  stepG(gM5, 2);
+  pressG(gM5, 'KeyE');
+  stepG(gM5, 1);
+  ok('M5: E вдали от терминала ничего не открывает', gM5.lore === null, `lore=${!!gM5.lore}`);
+  ok('M5: счётчик терминалов на нуле', gM5.terminalsRead === 0, String(gM5.terminalsRead));
+}
+
+// вплотную: E читает лор и выдаёт запас древних
+{
+  const t0 = gM5.terminals[1];
+  PM5.x = (t0.tx - 1) * TS; PM5.y = (t0.ty + 1) * TS - PM5.h;
+  PM5.vx = 0; PM5.vy = 0;
+  gM5.camera.snap(PM5);
+  stepG(gM5, 3);
+  ok('M5: терминал в радиусе взаимодействия даёт подсказку', gM5.promptTerminal === t0,
+     `prompt=${gM5.promptTerminal && gM5.promptTerminal.id}`);
+  const fer0 = gM5.inventory.counts[TILE.FERRITE];
+  const gel0 = gM5.inventory.counts[ITEM.BIOGEL];
+  pressG(gM5, 'KeyE');
+  stepG(gM5, 1);
+  ok('M5: E открывает панель лора', !!gM5.lore && gM5.lore.id === t0.id,
+     JSON.stringify(gM5.lore && gM5.lore.id));
+  ok('M5: в панели есть текст терминала', !!gM5.lore && gM5.lore.body.length > 30);
+  ok('M5: терминал гаснет после прочтения', t0.read === true);
+  ok('M5: выдан запас древних +5 FERRITE +1 BIOGEL',
+     gM5.inventory.counts[TILE.FERRITE] === fer0 + 5 && gM5.inventory.counts[ITEM.BIOGEL] === gel0 + 1,
+     `ferrite ${fer0} → ${gM5.inventory.counts[TILE.FERRITE]}, biogel ${gel0} → ${gM5.inventory.counts[ITEM.BIOGEL]}`);
+  ok('M5: счётчик терминалов стал 1/3', gM5.terminalsRead === 1 && gM5.terminals.length === 3,
+     `${gM5.terminalsRead}/${gM5.terminals.length}`);
+
+  // панель лора забирает мышь: копания не начинается
+  gM5.input.mouse.left = true;
+  const beforeDig = gM5.dig;
+  stepG(gM5, 5);
+  ok('M5: под панелью лора мир не копается', gM5.dig === null && beforeDig === null);
+  gM5.input.mouse.left = false;
+
+  pressG(gM5, 'Escape');
+  stepG(gM5, 1);
+  ok('M5: Escape закрывает панель лора', gM5.lore === null);
+
+  // повторное E: терминал погас и больше не взаимодействуется
+  pressG(gM5, 'KeyE');
+  stepG(gM5, 1);
+  ok('M5: погасший терминал не открывается снова', gM5.lore === null && gM5.promptTerminal === null,
+     `lore=${!!gM5.lore} prompt=${!!gM5.promptTerminal}`);
+  ok('M5: награду нельзя получить дважды',
+     gM5.inventory.counts[TILE.FERRITE] === fer0 + 5 && gM5.inventory.counts[ITEM.BIOGEL] === gel0 + 1);
+}
+const readTerminalId = gM5.terminals[1].id;
+const readTerminalPos = { tx: gM5.terminals[1].tx, ty: gM5.terminals[1].ty };
+
+// --- 4. сканер: рецепт и экипировка
+ok('M5: рецепт сканера 5 FERRITE + 5 STONE + 1 BIOGEL', (() => {
+  const r = CFG.recipes.find(x => x.id === 'scanner');
+  return !!r && r.cost[3] === 5 && r.cost[2] === 5 && r.cost[4] === 1;
+})(), JSON.stringify(CFG.recipes.find(x => x.id === 'scanner')));
+ok('M5: без сканера Q не срабатывает', (() => {
+  PM5.hasScanner = false;
+  gM5.scanT = 0; gM5.scanCd = 0;
+  pressG(gM5, 'KeyQ');
+  stepG(gM5, 1);
+  return gM5.scanT === 0;
+})());
+
+// верстак рядом и крафт сканера через реальный путь: C → 4 → ресурсы
+{
+  const s2 = gM5.world.surfaceRow;
+  const bx5 = Math.floor(PM5.cx / TS) + 4;
+  for (let i = 0; i < 2; i++) {
+    gM5.world.set(bx5 + i, s2 - 1, TILE.EMPTY, false);
+    gM5.world.set(bx5 + i, s2 - 2, TILE.EMPTY, false);
+    gM5.world.set(bx5 + i, s2, TILE.STONE, false);
+  }
+  gM5.world.set(bx5, s2 - 1, TILE.WORKBENCH, true);
+  gM5.world.set(bx5 + 1, s2 - 1, TILE.WORKBENCH, true);
+  gM5.tiles.flush();
+  PM5.x = (bx5 - 1) * TS;
+  PM5.y = s2 * TS - PM5.h;
+  gM5.camera.snap(PM5);
+  gM5.craftOpen = false;
+  stepG(gM5, 2);
+  pressG(gM5, 'KeyC');
+  stepG(gM5, 1);
+  ok('M5: меню крафта открывается с 4 рецептами', gM5.craftOpen === true && CFG.recipes.length === 4);
+  gM5.inventory.counts[TILE.FERRITE] = 5;
+  gM5.inventory.counts[TILE.STONE] = 5;
+  gM5.inventory.counts[ITEM.BIOGEL] = 1;
+  pressG(gM5, 'Digit4');
+  stepG(gM5, 1);
+  ok('M5: сканер крафтится на верстаке и экипируется', PM5.hasScanner === true,
+     `scanner=${PM5.hasScanner} ferrite=${gM5.inventory.counts[TILE.FERRITE]}`);
+  ok('M5: сканер списал 5 FERRITE + 5 STONE + 1 BIOGEL',
+     gM5.inventory.counts[TILE.FERRITE] === 0 && gM5.inventory.counts[TILE.STONE] === 0 &&
+     gM5.inventory.counts[ITEM.BIOGEL] === 0,
+     `f=${gM5.inventory.counts[TILE.FERRITE]} s=${gM5.inventory.counts[TILE.STONE]} g=${gM5.inventory.counts[ITEM.BIOGEL]}`);
+  ok('M5: сканер нельзя скрафтить дважды', gM5.craft(CFG.recipes.find(r => r.id === 'scanner')) === false);
+  pressG(gM5, 'Escape');
+  stepG(gM5, 1);
+}
+
+// --- 5. сканер: волна, радиус, кулдаун
+gM5.scanCd = 0; gM5.scanT = 0;
+pressG(gM5, 'KeyQ');
+stepG(gM5, 1);
+ok('M5: Q включает волну', gM5.scanT > 0 && gM5.scanTargets.length >= 0,
+   `scanT=${gM5.scanT.toFixed(2)} целей=${gM5.scanTargets.length}`);
+ok('M5: кулдаун сканера 5 секунд', Math.abs(CFG.scanner.cooldown - 5) < 1e-9 && gM5.scanCd > 4.9,
+   `cd=${gM5.scanCd.toFixed(2)}`);
+ok('M5: радиус сканирования 25 тайлов', CFG.scanner.radius === 25);
+
+// радиус растёт: волна расходится, а не появляется целиком
+const r1 = gM5.scanRadius;
+stepG(gM5, 40);
+const r2 = gM5.scanRadius;
+ok('M5: волна расходится от игрока', r2 > r1 && r1 < 25, `${r1.toFixed(1)} → ${r2.toFixed(1)} тайлов`);
+pressG(gM5, 'KeyQ');
+stepG(gM5, 1);
+ok('M5: во время кулдауна Q не срабатывает повторно', gM5.scanCd > 0 && gM5.scanT < CFG.scanner.holdTime);
+
+// цели: терминал, хищник и феррит в радиусе
+{
+  // ставим игрока к непрочитанному терминалу, подводим хищника и феррит
+  const t1 = gM5.terminals.find(t => !t.read);
+  PM5.x = t1.x - 6 * TS;
+  PM5.y = t1.y + CFG.terminal.h - PM5.h;
+  gM5.camera.snap(PM5);
+  // феррит в 6 тайлах: тайл в породе рядом
+  const fx = t1.tx + 6, fy = t1.ty + 3;
+  gM5.world.set(fx, fy, TILE.FERRITE, false);
+  gM5.tiles.flush();
+  // хищник в 8 тайлах
+  gM5.crawlers.length = 0;
+  const cScan = new Crawler((t1.tx + 8) * TS, t1.ty * TS - CFG.crawler.h);
+  cScan.home = { x: cScan.cx, y: cScan.cy };
+  gM5.crawlers.push(cScan);
+  // дроп FERRITE в 3 тайлах
+  const fd = new sandbox.__cls.Drop(t1.tx * TS - 3 * TS, t1.ty * TS, TILE.FERRITE);
+  gM5.drops.push(fd);
+
+  gM5.scanCd = 0; gM5.scanT = 0;
+  gM5.scanTargets = gM5.collectScanTargets();
+  const kinds = {};
+  for (const t of gM5.scanTargets) kinds[t.kind] = (kinds[t.kind] || 0) + 1;
+  ok('M5: волна видит терминал', kinds.terminal >= 1, JSON.stringify(kinds));
+  ok('M5: волна видит хищника', kinds.crawler >= 1, JSON.stringify(kinds));
+  ok('M5: волна видит феррит (дроп и руда)', kinds.ferrite >= 2, JSON.stringify(kinds));
+  ok('M5: цвета меток — синий/оранжевый/красный',
+     CFG.scanner.colors.ferrite === '#63b8ff' && CFG.scanner.colors.terminal === '#ffa63d' &&
+     CFG.scanner.colors.crawler === '#ff3b48');
+
+  // за пределами радиуса цели не попадают
+  const farDrop = new sandbox.__cls.Drop(PM5.cx + 40 * TS, PM5.cy, TILE.FERRITE);
+  gM5.drops.push(farDrop);
+  const withFar = gM5.collectScanTargets();
+  ok('M5: за 25 тайлами цели не подсвечиваются',
+     !withFar.some(t => Math.hypot(t.wx - PM5.cx, t.wy - PM5.cy) / TS > 25.5),
+     `max=${Math.max(...withFar.map(t => Math.hypot(t.wx - PM5.cx, t.wy - PM5.cy) / TS)).toFixed(1)}`);
+
+  // прочитанный терминал больше не подсвечивается
+  const readOnes = withFar.filter(t => t.kind === 'terminal');
+  ok('M5: прочитанный терминал сканер не подсвечивает',
+     readOnes.every(t => t.wx !== gM5.terminals[1].x + CFG.terminal.w / 2 ||
+                         gM5.terminals[1].read === false));
+
+  gM5.drops.pop();
+  gM5.world.set(fx, fy, TILE.STONE, false);
+  gM5.tiles.flush();
+}
+
+// подсветка гаснет через 2 секунды, кулдаун переживает это
+gM5.scanCd = 0; gM5.scanT = 0;
+pressG(gM5, 'KeyQ');
+stepG(gM5, 1);
+stepG(gM5, Math.ceil(2.05 * 60));
+ok('M5: подсветка держится ~2 с и гаснет', gM5.scanT === 0 && gM5.scanTargets.length === 0,
+   `scanT=${gM5.scanT.toFixed(2)} целей=${gM5.scanTargets.length}`);
+gM5.scanCd = 0;
+
+// --- 6. сохранение
+{
+  gM5.doSave();
+  const raw = JSON.parse(sandbox.localStorage.getItem(CFG.save.key));
+  ok('M5: сейв версии 3', raw.v === 3, `v=${raw.v}`);
+  ok('M5: в сейве есть сканер', raw.player.scanner === true);
+  ok('M5: в сейве есть список терминалов с координатами',
+     raw.terminals.length === 3 && raw.terminals.every(t => typeof t.tx === 'number' && typeof t.ty === 'number'));
+  ok('M5: в сейве отмечен прочитанный терминал',
+     raw.terminals.filter(t => t.read).length === 1 &&
+     raw.terminals.find(t => t.read).id === readTerminalId);
+
+  const gReload = new (sandbox.__cls.Game)(view);
+  stepG(gReload, 5);
+  ok('M5: hasScanner переживает перезагрузку', gReload.player.hasScanner === true);
+  ok('M5: счётчик терминалов переживает перезагрузку',
+     gReload.terminalsRead === 1 && gReload.terminals.length === 3,
+     `${gReload.terminalsRead}/${gReload.terminals.length}`);
+  const same = gReload.terminals.find(t => t.tx === readTerminalPos.tx && t.ty === readTerminalPos.ty);
+  ok('M5: координаты терминалов не съехали после F5', !!same && same.read === true,
+     same ? `${same.tx},${same.ty}` : 'нет совпадения');
+  ok('M5: два терминала после загрузки всё ещё в глубине',
+     gReload.terminals.filter(t => t.ty >= CFG.layers.deepTopRow).length === 2);
+
+  // старый сейв v2 не должен ломать загрузку
+  const legacy = JSON.parse(sandbox.localStorage.getItem(CFG.save.key));
+  legacy.v = 2;
+  delete legacy.terminals;
+  delete legacy.player.scanner;
+  sandbox.localStorage.setItem(CFG.save.key, JSON.stringify(legacy));
+  let legacyOk = true;
+  let gLegacy = null;
+  try { gLegacy = new (sandbox.__cls.Game)(view); stepG(gLegacy, 3); } catch (e) { legacyOk = false; }
+  ok('M5: сейв M4 (v2) читается без ошибок', legacyOk && !!gLegacy);
+  ok('M5: на сейве v2 терминалы заспавнены заново', !!gLegacy && gLegacy.terminals.length === 3);
+  sandbox.localStorage.removeItem(CFG.save.key);
+}
+
+// --- 7. интерфейс и рендер
+ok('M5: Q и E есть в плашке управления',
+   /'Q'/.test(String(gM5.drawControls)) && /'E'/.test(String(gM5.drawControls)) &&
+   /сканер/.test(String(gM5.drawControls)) && /читать/.test(String(gM5.drawControls)));
+ok('M5: иконка сканера в HUD', /hasScanner/.test(String(gM5.drawHealthBar)));
+ok('M5: счётчик терминалов в HUD', /Терминалы:/.test(String(gM5.drawHealthBar)));
+ok('M5: индикатор кулдауна сканера в HUD', /scanCd/.test(String(gM5.drawHealthBar)));
+ok('M5: сканер рисует волну поверх мира', /drawScan/.test(String(gM5.render)) &&
+   /scanTargets/.test(String(gM5.drawScan)));
+ok('M5: терминалы рисуются обелисками', /drawTerminals/.test(String(gM5.render)) &&
+   /обелиск|moveTo/.test(String(gM5.drawTerminals)));
+ok('M5: подсказка «[E] Прочитать» нарисована', /\[E\] Прочитать/.test(String(gM5.drawPrompt)));
+ok('M5: глубина затемняется экранным слоем', /drawDeepFog/.test(String(gM5.render)) &&
+   /createRadialGradient/.test(String(gM5.drawDeepFog)));
+ok('M5: без console.log в новом коде', !/console\.(log|warn|error)/.test(String(gM5.useScanner) + String(gM5.readTerminal) + String(gM5.spawnTerminals) + String(gM5.drawScan)));
+
+// полотно тайлов выросло, но в кадр по-прежнему попадает один drawImage
+ok('M5: слой тайлов размером с новый мир',
+   gM5.tiles.canvas.height === 130 * TS, `h=${gM5.tiles.canvas.height}`);
+{
+  const before = calls.drawImage;
+  gM5.render();
+  ok('M5: рендер мира — один drawImage за кадр, а не 130 рядов',
+     calls.drawImage - before === 1, `dt=${calls.drawImage - before}`);
+}
+
+// камера в глубине не выходит за мир
+{
+  PM5.x = 100 * TS; PM5.y = 120 * TS - PM5.h;
+  gM5.camera.snap(PM5);
+  stepG(gM5, 3);
+  const camBottom = gM5.camera.y + gM5.camera.h;
+  ok('M5: камера удерживается в новых границах мира',
+     camBottom <= gM5.world.rows * TS + 0.5 && gM5.camera.y >= 0,
+     `bottom=${(camBottom / TS).toFixed(1)} рядов`);
+}
+
+// --- 8. производительность не провалилась
+{
+  const t0 = performance.now();
+  const N = 240;
+  for (let i = 0; i < N; i++) { gM5.update(CFG.step); gM5.render(); }
+  const perFrame = (performance.now() - t0) / N;
+  ok('M5: кадр в глубине укладывается в бюджет', perFrame < 25,
+     `${perFrame.toFixed(2)} мс/кадр (считая рендер)`);
+}
 
 // ---------------------------------------------------------------- итог
 const passed = results.filter(r => r.pass).length;
