@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>GRAVITY: VOID — ревью M7 «Мобильное управление и Фиксы»</title>
+<title>GRAVITY: VOID — ревью M8.2 «Сюжет и Ремонт»</title>
 <style>
   :root {
     --bg: #070910;
@@ -156,20 +156,21 @@
 
 <header class="hero">
   <div class="wrap">
-    <div class="eyebrow">GRAVITY: VOID · протокол ревью · M7</div>
-    <h1>Мобильное управление и Фиксы <span class="sub">— ревью</span></h1>
-    <div class="verdict">
-      <span class="tag">ПРИНЯТА С ЗАМЕЧАНИЯМИ</span>
-      <p>Баг с улетающим ящиком закрыт — и причин было <b>три</b>, а не одна. Колесо режимов и
-         мобильное управление работают, мультитач проверен тестом (бег + прыжок одновременно).
-         Главное замечание: на телефоне <b>режимы</b> остались только на маленькой плашке сверху —
-         джойстик листает ходьбу, а не режимы, и это самый слабый элемент новой раскладки.</p>
+    <div class="eyebrow">GRAVITY: VOID · протокол ревью · M8.2</div>
+    <h1>Сюжет и Ремонт <span class="sub">— ревью</span></h1>
+    <div class="verdict" style="background:linear-gradient(90deg,rgba(86,209,143,0.12),rgba(86,209,143,0.02));border-color:rgba(86,209,143,0.35)">
+      <span class="tag" style="background:var(--ok);color:#04170d">ПРИНЯТА</span>
+      <p style="color:#d6f3e3">Сюжетный слой вынесен в <b>narrative.js</b> и не тронул игру ни на строку:
+         пять обёрток над <code>Game.prototype</code> вместо врезки в код. Корабль с тремя стадиями
+         ремонта, журнал с «Ядро: 1/3», пять архивов, три фрагмента и резонит — всё на месте,
+         62/62 новых проверок, старые 344/344 целы.</p>
     </div>
 
     <div class="chips" id="chips">
       <span class="chip" id="chip-shots"><span class="led"></span><span>скриншоты: проверяю…</span></span>
       <span class="chip" id="chip-game"><span class="led"></span><span>игра: не проверена</span></span>
-      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>автопроверки: 344 / 344</span></span>
+      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>сюжет: 62 / 62</span></span>
+      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>игра: 344 / 344</span></span>
       <span class="chip"><span class="led" style="background:var(--ok)"></span><span>зависимостей: 0</span></span>
     </div>
   </div>
@@ -177,7 +178,8 @@
 
 <nav class="toc wrap">
   <a href="#play">▶ Играть</a>
-  <a href="#criteria">Критерии M7</a>
+  <a href="#connect">Подключение</a>
+  <a href="#criteria">Критерии M8.2</a>
   <a href="#works">Что работает</a>
   <a href="#defects">Дефекты</a>
   <a href="#scope">Скоуп</a>
@@ -192,12 +194,12 @@
     <h2><span class="num">01</span>Сборка</h2>
 
     <div class="stage" id="stage">
-      <img class="poster" id="poster" src="screenshots/26-touch-idle.png" alt="Кадр из игры GRAVITY: VOID на телефоне">
+      <img class="poster" id="poster" src="screenshots/43-touch-quest.png" alt="Кадр из игры GRAVITY: VOID на телефоне">
       <div class="veil" id="veil">
-        <h3>GRAVITY: VOID — M7</h3>
-        <p>ПК: A / D — идти · Space — прыжок · F — гравитация · колесо — режимы ·
-           ЛКМ — действие · ПКМ — телекинез · C — крафт · Q — сканер · E — читать<br>
-           Телефон: джойстик слева, восемь кнопок справа, можно бежать и прыгать одновременно</p>
+        <h3>GRAVITY: VOID — M8.2</h3>
+        <p><b>E</b> у люка корабля — меню ремонта · <b>E</b> у обелиска — архив ·
+           <b>E</b> у кристалла — фрагмент или резонит · <b>Backspace</b> — сброс мира и сюжета<br>
+           Сюжет подключается строкой <code>&lt;script src="narrative.js"&gt;</code> после игры</p>
         <div class="btnrow">
           <button class="btn" id="play-btn" type="button">Запустить игру</button>
           <a class="btn ghost" href="gravity-void.html" target="_blank" rel="noopener">Открыть в новой вкладке</a>
@@ -205,359 +207,386 @@
       </div>
     </div>
 
+    <p class="hint" style="margin-top:12px">Во фрейме на этой странице сюжет <b>не подключён</b> —
+       ровно потому, что им нельзя править <code>gravity-void.html</code>. Это честная проверка
+       того, что игра работает и без него. Чтобы поиграть с сюжетом — добавьте одну строку из §02
+       и откройте <code>gravity-void.html</code> или <code>index.html</code>.</p>
+
     <div class="btnrow" style="margin-top:12px">
-      <a class="btn ghost" href="M7.md">M7.md</a>
-      <a class="btn ghost" href="M6.md">M6.md</a>
-      <a class="btn ghost" href="tools/verify.mjs">tools/verify.mjs</a>
-      <a class="btn ghost" href="tools/touch-shots.mjs">tools/touch-shots.mjs</a>
+      <a class="btn ghost" href="M82.md">M82.md</a>
+      <a class="btn ghost" href="narrative.js">narrative.js</a>
+      <a class="btn ghost" href="tools/verify-narrative.mjs">tools/verify-narrative.mjs</a>
+      <a class="btn ghost" href="tools/narrative-shots.mjs">tools/narrative-shots.mjs</a>
+    </div>
+  </section>
+
+  <section id="connect">
+    <h2><span class="num">02</span>Подключение — одна строчка</h2>
+    <p class="hint">В конец <code>gravity-void.html</code>, после закрывающего <code>&lt;/script&gt;</code>
+       самой игры и перед <code>&lt;/body&gt;</code>:</p>
+    <pre><span class="c">// хвост gravity-void.html</span>
+} catch (e) {
+  showFallback((e &amp;&amp; e.stack) || e);
+}
+&lt;/script&gt;
+
+&lt;script src="narrative.js"&gt;&lt;/script&gt;   <span class="c">← эта строка, единственная правка</span>
+&lt;/body&gt;
+&lt;/html&gt;</pre>
+
+    <div class="grid g2" style="margin-top:14px">
+      <div class="card ok">
+        <h3><span class="dot"></span>Почему после игры, а не в &lt;head&gt;</h3>
+        <ul class="tight sm">
+          <li>Сюжет расширяет класс <code>Game</code> и берёт уже созданный экземпляр
+              <code>game</code>. Оба появляются только после скрипта игры.</li>
+          <li><code>game</code> объявлен через <code>let</code>: следующему <code>&lt;script&gt;</code>
+              той же страницы он виден, а свойством <code>window</code> — нет.</li>
+          <li>Если игра ещё не готова, <code>narrative.js</code> до 2 секунд пробует подключиться
+              снова; если <code>Game</code> нет вовсе — предупреждение в консоль и всё.</li>
+          <li>Работает и без правки файла: <code>Narrative.attach(game)</code> из консоли
+              после загрузки страницы.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3><span class="dot" style="background:var(--accent)"></span>Пять обёрток вместо врезки в код</h3>
+        <ul class="tight sm">
+          <li><code>update</code> — сначала <code>narrative.preUpdate()</code>, потом оригинал.</li>
+          <li><code>drawTerminals</code> — рисует мир сюжета: корабль, фрагменты, жилы, архивы, подсказки.</li>
+          <li><code>drawHud</code> — карточка журнала, меню ремонта, панель архива, финал.</li>
+          <li><code>updateMouse</code> — в меню ремонта мышь принадлежит меню, а не копанию.</li>
+          <li><code>resetWorld</code> — <code>Backspace</code> сбрасывает и сюжет.</li>
+        </ul>
+      </div>
     </div>
   </section>
 
   <section id="criteria">
-    <h2><span class="num">02</span>Критерии M7</h2>
+    <h2><span class="num">03</span>Критерии M8.2</h2>
     <table>
       <thead><tr><th>Критерий</th><th>Как сделано</th><th></th></tr></thead>
       <tbody>
-        <tr><td>Баг с улетающим ящиком исправлен</td>
-            <td>Лимит скорости в захвате 400 px/s (было 950 — как у свободного падения),
-                отдельное демпфирование 26, цель притяжения не ближе 34 px к центру игрока,
-                при отпускании остаётся 20 % скорости, ящик разводится с игроком по массам.
-                Замер: 950 → 400 px/s, прыжок за кадр 15.8 → 6.7 px</td>
+        <tr><td>Класс <code>Ship</code> со стадиями 0–3</td>
+            <td><code>repairStage</code> 0…3, <code>interact(game)</code> открывает меню ремонта,
+                <code>update(game)</code> следит за сменой стадии</td>
             <td><span class="pill ok">да</span></td></tr>
-        <tr><td>Колесо мыши переключает режимы</td>
-            <td>Вниз — следующий, вверх — предыдущий, по кругу 1→7→1. Цифры 1–7 остались.
-                Очередь щелчков разбирается в <code>update</code>, при крафте колесо не работает</td>
+        <tr><td>Цены ровно из задания</td>
+            <td>20 FERRITE + 10 STONE → 30 STONE + 10 FERRITE → 5 RESONITE.
+                Проверено тестом по каждому числу</td>
             <td><span class="pill ok">да</span></td></tr>
-        <tr><td>Слот режима пульсирует при смене</td>
-            <td><code>modeSwitchT</code> 0.45 с: активный слот раздувается на 3 px и подсвечивается
-                ореолом, затем гаснет</td>
+        <tr><td>Награда при смене стадии</td>
+            <td>Рецепт в журнал, очки (+500 / +750 / +1000) и предмет в руки:
+                резак, броня, пушка. Ровно один раз на стадию — через <code>lastStage</code></td>
             <td><span class="pill ok">да</span></td></tr>
-        <tr><td>На мобильном джойстик и кнопки</td>
-            <td>Определение по <code>(pointer: coarse)</code> или <code>maxTouchPoints</code>.
-                Джойстик слева (аналоговый, мёртвая зона 16 %), 8 кнопок справа, все ≥ 48 px
-                с отступом 20 px. Портрет — сетка 2×4, ландшафт — 4×2</td>
+        <tr><td>Журнал: «Ядро: 1/3» в HUD</td>
+            <td><code>QuestLog.text()</code> возвращает эту строку дословно; в HUD ещё три ромбика,
+                стадия корабля и очки</td>
             <td><span class="pill ok">да</span></td></tr>
-        <tr><td>Мультитач: движение + прыжок</td>
-            <td>Каждый палец ведёт свой элемент по <code>identifier</code>; тач кормит те же клавиши,
-                что клавиатура. Тест: джойстик держит <code>vx &gt; 60</code>, второй палец даёт
-                <code>vy &lt; −100</code>, джойстик при этом не отбирается</td>
+        <tr><td>Пять терминалов с текстами</td>
+            <td>Дневник капитана, экспедиция, протокол «Присвоение», инструкция по сборке,
+                финальный аккорд — первые строки дословно из задания</td>
             <td><span class="pill ok">да</span></td></tr>
-        <tr><td>Кнопки не перекрывают HUD</td>
-            <td>Тест: верх кнопок ниже низа HUD-столбца. Панель прилива на тач-устройстве
-                переехала в левый верхний угол — правый низ занят кнопками, правый верх ресурсами</td>
+        <tr><td>Три фрагмента на карте</td>
+            <td>(59,13), (103,13), (167,13) — зал, три разные трети карты</td>
             <td><span class="pill ok">да</span></td></tr>
-        <tr><td>HUD крупнее, подсказки клавиш скрыты</td>
-            <td>Шрифты HUD ×1.2, панель ресурсов шире на 15 %; плашка <code>A / D / Space</code>
-                на тач-устройстве не рисуется вовсе</td>
+        <tr><td>Сбор по клавише E</td>
+            <td><code>preUpdate</code> забирает E раньше игры; у каждого объекта своя подсказка</td>
             <td><span class="pill ok">да</span></td></tr>
-        <tr><td><code>review.html</code> обновлён</td>
-            <td>Эта страница</td>
+        <tr><td>С 3/3 открывается финал</td>
+            <td><code>Ship.canActivateCore()</code> требует собранный двигатель <b>и</b> три фрагмента;
+                без ядра активация не срабатывает (тест)</td>
+            <td><span class="pill ok">да</span></td></tr>
+        <tr><td>Только <code>narrative.js</code>, игра не тронута</td>
+            <td><code>git diff</code> по <code>gravity-void.html</code> пуст; старые 344/344 проходят
+                без единой правки</td>
             <td><span class="pill ok">да</span></td></tr>
       </tbody>
     </table>
   </section>
 
   <section id="works">
-    <h2><span class="num">03</span>Что работает</h2>
+    <h2><span class="num">04</span>Что работает</h2>
 
     <div class="grid g2">
       <div class="card ok">
-        <h3><span class="dot"></span>Ящик больше не выстреливает</h3>
+        <h3><span class="dot"></span>Корабль VOID-7</h3>
         <ul class="tight">
-          <li>Скорость в захвате ограничена 400 px/s — это в 2.4 раза медленнее свободного падения
-              и медленнее, чем летит брошенный лазером обломок.</li>
-          <li>Цель притяжения не заходит в центр игрока: при наведении на себя ящик останавливается
-              рядом, а не получает рывок в обратную сторону.</li>
-          <li>Отпустил ПКМ — осталось 20 % скорости, тело сразу подчиняется гравитации.</li>
-          <li>Ящик, который едет в игрока, толкает его по массам (3 : 1), а не проходит насквозь.</li>
+          <li>Стоит на поверхности у старта (тайлы 38–47): корпус с обшивкой, купол кабины,
+              пробоины, мёртвый двигатель с искрами, три точки-индикатора стадий.</li>
+          <li>Люк пульсирует, когда рядом игрок. <b>E</b> открывает меню ремонта.</li>
+          <li>После стадии 1 в кабине загорается свет, после 2 — заплатки вместо пробоин,
+              после 3 — живое ядро резонанса в двигателе.</li>
+          <li>Меню: четыре строки с ценами, «не хватает 2 × STONE, 6 × FERRITE», порядок стадий
+              не перескочить, попадание мышью и пальцем, на узком экране сжимается до 0.78.</li>
         </ul>
       </div>
+
       <div class="card ok">
-        <h3><span class="dot"></span>Колесо мыши</h3>
+        <h3><span class="dot"></span>Журнал квестов</h3>
         <ul class="tight">
-          <li>Семь режимов по кругу: копать, строить, снос, якорь, верстак — без отрыва от мыши.</li>
-          <li>Три щелчка подряд листают три режима, а не один: очередь копится и разбирается за кадр.</li>
-          <li>Активный слот пульсирует — видно, что смена произошла, даже краем глаза.</li>
-          <li>Открыт крафт — колесо молчит, режимы не листаются под меню.</li>
+          <li>Карточка «МИССИЯ · ЯДРО» слева снизу: строка <code>Ядро: 2/3</code>, три ромбика,
+              «корабль 2/3» и очки.</li>
+          <li>На телефоне карточка стоит над джойстиком — проверено пересечением прямоугольников
+              с сеткой кнопок и джойстиком: <code>ок / ок</code>.</li>
+          <li>Очки: +250 за фрагмент, +100 за архив, +500/+750/+1000 за стадии, +2000 за финал.</li>
         </ul>
       </div>
+
       <div class="card ok">
-        <h3><span class="dot"></span>Джойстик и кнопки</h3>
+        <h3><span class="dot"></span>Пять архивов</h3>
         <ul class="tight">
-          <li>Джойстик аналоговый: нажал на треть — идёшь в треть скорости, а не рывком.</li>
-          <li>Восемь кнопок: прыжок, гравитация, действие, телекинез, крафт, сканер, чтение, биогель.</li>
-          <li>Иконки нарисованы векторами, поэтому не превращаются в квадратики в чужом шрифте.</li>
-          <li>Нажатие вспыхивает: ореол + заливка + белая иконка на 0.16 с.</li>
+          <li>Отдельные обелиски с рунами: первые три в зале, два — в Глубоких пещерах
+              (ряды 67 и 93).</li>
+          <li>Панель чтения со своим текстом и честной наградой «архив открыт: +100 очков» —
+              панель игры всегда дописывала бы «+5 FERRITE».</li>
+          <li>Текст переносится по словам: на 430 px строка архива влезает целиком.</li>
         </ul>
       </div>
+
       <div class="card ok">
-        <h3><span class="dot"></span>Мультитач</h3>
+        <h3><span class="dot"></span>Фрагменты и резонит</h3>
         <ul class="tight">
-          <li>Бег джойстиком и прыжок вторым пальцем — одновременно, без потери одного из них.</li>
-          <li>Отпускание кнопки не сбрасывает движение, отпускание джойстика не мешает прыжку.</li>
-          <li>Свободный палец в правой части экрана ставит прицел под палец и держит действие:
-              копать можно, не целясь мышью.</li>
+          <li>Три фрагмента — светящиеся осколки, качаются в воздухе, подписаны «1/3…3/3».
+              Сбор по <b>E</b>, сразу счётчик и сейв.</li>
+          <li>Резонит — новый ресурс id 8, три жилы по 2 единицы в глубине (6 при нужде 5).</li>
+          <li>Своя вспышка у резонита: штатный <code>Particles.pickup</code> ищет цвет в таблице
+              ресурсов игры, а id 8 там нет.</li>
         </ul>
       </div>
+
       <div class="card ok">
-        <h3><span class="dot"></span>Тач-UX</h3>
+        <h3><span class="dot"></span>Финал</h3>
         <ul class="tight">
-          <li>Первый тап убирает «Тапните для старта» и просит полноэкранный режим — только из жеста
-              браузер это и разрешает.</li>
-          <li>Панель прилива ушла в левый верхний угол, чтобы не спорить с кнопками и ресурсами.</li>
-          <li>Меню крафта масштабируется целиком: на 430×780 панель сжата до 0.81, все четыре
-              строки и цены видны.</li>
-          <li>Прицел на телефоне — кольцо радиусом 16 px: палец закрывает точку, целиться надо по кольцу.</li>
+          <li>Двигатель собран + 3/3 фрагментов → в меню открывается «ФИНАЛЬНЫЙ АККОРД».</li>
+          <li>Панель: «Ядро собрано. Корабль слушает.» + итоговые очки, закрывается Esc/Enter/E.</li>
         </ul>
       </div>
+
       <div class="card ok">
-        <h3><span class="dot"></span>ПК не пострадал</h3>
+        <h3><span class="dot"></span>Сохранение и сброс</h3>
         <ul class="tight">
-          <li>На ПК тач-слой не создаётся вовсе: ни обработчиков, ни отрисовки, ни лишних объектов.</li>
-          <li>Профиль даже чуть легче M6: p50 8.30 против 8.77 мс.</li>
-          <li>Все прежние проверки зелёные, поправлен один тест — и он вернулся к прежнему виду.</li>
+          <li>Свой ключ <code>gravity-void-narrative-v1</code>: стадии, фрагменты, архивы, жилы,
+              резонит и очки. Формат сейва игры не тронут.</li>
+          <li>Новая игра подхватывает сюжет из сейва (проверено отдельным экземпляром).
+              <b>Backspace</b> сбрасывает и мир, и сюжет.</li>
         </ul>
       </div>
     </div>
   </section>
 
   <section id="defects">
-    <h2><span class="num">04</span>Дефекты и ограничения</h2>
-
-    <div class="grid g2">
-      <div class="card bad">
-        <h3><span class="dot"></span>На телефоне неудобно менять режим</h3>
-        <ul class="tight">
-          <li>Режимы остались только на плашке сверху — это тап по слоту 44 px, и он не всегда
-              попадает с первого раза. Джойстик листает ходьбу, а не режимы.</li>
-          <li>Это главный кандидат на доработку: жест двумя пальцами по джойстику или крупная
-              кнопка «режим» с меню.</li>
-        </ul>
-      </div>
-      <div class="card warn">
-        <h3><span class="dot"></span>Телекинез на телефоне — два пальца</h3>
-        <ul class="tight">
-          <li>Нужно поставить прицел свободным пальцем и держать кнопку «◎»: одна рука не справится.</li>
-          <li>Припуск на попадание 22 экранных px частично спасает, но это обход, а не решение.</li>
-        </ul>
-      </div>
-      <div class="card warn">
-        <h3><span class="dot"></span>Сброса мира на телефоне нет</h3>
-        <ul class="tight">
-          <li><code>Backspace</code> остался единственным способом начать заново — на телефоне
-              приходится перезагружать страницу.</li>
-          <li>Осознанно не добавлял: сброс мира без подтверждения на телефоне слишком легко нажать.</li>
-        </ul>
-      </div>
-      <div class="card warn">
-        <h3><span class="dot"></span>Определение тача грубое</h3>
-        <ul class="tight">
-          <li>Ноутбук с тачскрином получит экранные кнопки и скроет подсказки клавиатуры, хотя
-              играть на нём будут мышью.</li>
-          <li>Лечится переключателем «тач/мышь», но в спеке его нет — не добавлял самовольно.</li>
-        </ul>
-      </div>
-      <div class="card warn">
-        <h3><span class="dot"></span>Полноэкранный режим в песочнице не срабатывает</h3>
-        <ul class="tight">
-          <li>Если игра открыта во фрейме без <code>allowfullscreen</code>, запрос отклоняется.
-              Игра продолжает работать — подсказка просто исчезает.</li>
-          <li>В отдельной вкладке (<code>index.html</code>) работает как надо.</li>
-        </ul>
-      </div>
-      <div class="card ok">
-        <h3><span class="dot"></span>Регрессия</h3>
-        <ul class="tight">
-          <li>Все 288 проверок M0–M6 зелёные. Один тест пришлось откатить: <code>drawHud</code>
-              на время стал обёрткой с масштабированием, и проверка «в HUD есть полоска здоровья»
-              перестала его видеть. Масштаб сделал по шрифтам (<code>fs()</code>), обёртку убрал,
-              тест вернулся к прежней формулировке — подгонки нет.</li>
-        </ul>
-      </div>
-    </div>
+    <h2><span class="num">05</span>Дефекты и ограничения</h2>
+    <table>
+      <thead><tr><th>Что</th><th>Почему</th><th>Насколько важно</th></tr></thead>
+      <tbody>
+        <tr><td><b>Резонита нет в HUD игры</b></td>
+            <td>Чтобы он попал в правый столбец ресурсов, нужна правка <code>CFG.resources</code>
+                внутри <code>gravity-void.html</code> — а его по условию трогать нельзя.
+                Резонит виден в меню ремонта как цена стадии и в подсказке «не хватает».</td>
+            <td><span class="pill warn">известно</span></td></tr>
+        <tr><td><b>Терминал игры и архив могут стоять рядом</b></td>
+            <td>Древние терминалы игры расставляются от сида, архивы — по фиксированным точкам.
+                E отдаётся ближайшему сюжетному объекту; терминал читается, когда рядом
+                нет архива/фрагмента/жилы (тест это проверяет).</td>
+            <td><span class="pill warn">косметика</span></td></tr>
+        <tr><td><b>Корабль не летит</b></td>
+            <td>Финал — текстовая панель. Анимация отлёта потребовала бы менять мир игры
+                (удалять корпус, двигать камеру), а это уже не «сюжетный слой».</td>
+            <td><span class="pill warn">скоуп</span></td></tr>
+        <tr><td><b>Во фрейме на этой странице сюжета нет</b></td>
+            <td>Фрейм грузит <code>gravity-void.html</code> без строки подключения — так и задумано.
+                С сюжетом — после правки из §02.</td>
+            <td><span class="pill">ожидаемо</span></td></tr>
+        <tr><td><b>Формат рецептов «свой»</b></td>
+            <td>Открытые рецепты — строки в журнале плюс предмет в руках игрока
+                (<code>hasLaser/hasArmor/hasGravityGun</code>). В меню крафта игры новые рецепты
+                не появляются: это потребовало бы правки <code>CFG.recipes</code>.</td>
+            <td><span class="pill warn">известно</span></td></tr>
+      </tbody>
+    </table>
   </section>
 
   <section id="scope">
-    <h2><span class="num">05</span>Скоуп</h2>
+    <h2><span class="num">06</span>Скоуп и решения</h2>
     <table>
       <thead><tr><th>Что</th><th>Почему так</th><th>Что делать</th></tr></thead>
       <tbody>
         <tr>
-          <td><b>Тач-слой рисуется в Canvas, а не DOM</b><br><span class="muted sm">решение по спеке</span></td>
-          <td>Спека прямо просит Canvas «чтобы сохранить единый стиль». Плюс DOM-кнопки перехватили бы
-              события мыши на канвасе и ломали бы управление на гибридных устройствах.</td>
+          <td><b>Ноль правок в gravity-void.html</b><br><span class="muted sm">требование задания</span></td>
+          <td>Вместо врезки — пять обёрток над методами <code>Game.prototype</code>. Побочный плюс:
+              игру можно проверить и с сюжетом, и без него, а падение сюжета не роняет игру —
+              всё в <code>try/catch</code> с предупреждением в консоль.</td>
+          <td>Если разрешите править игру — первым делом резонит в HUD и рецепты в меню крафта.</td>
+        </tr>
+        <tr>
+          <td><b>Резонит = id 8</b><br><span class="muted sm">архитектура</span></td>
+          <td>0–5 в игре заняты тайлами и биогелем. 8 — свободный ключ в том же инвентаре, поэтому
+              сейв игры его сохраняет, а сюжет — восстанавливает.</td>
           <td>Фиксирую.</td>
         </tr>
         <tr>
-          <td><b>Тач кормит те же клавиши</b><br><span class="muted sm">архитектура</span></td>
-          <td>Один источник истины: тесты ПК-управления покрывают и мобильное, а физика прыжка
-              с coyote-time не потребовала ни одной правки.</td>
+          <td><b>Своя панель архива</b><br><span class="muted sm">честность текста</span></td>
+          <td>Панель лора игры всегда пишет «запас древних: +5 FERRITE, +1 BIOGEL». Для архива,
+              который даёт очки, это была бы ложь. Стиль тот же, слова — свои.</td>
+          <td>Можно переиспользовать панель игры, если ложная строка не смущает.</td>
+        </tr>
+        <tr>
+          <td><b>Точки «приземляются» на пол</b><br><span class="muted sm">устойчивость</span></td>
+          <td>Координаты заданы под штатный сид. После загрузки чужого сейва карта другая —
+              <code>settle()</code> ищет рядом свободное место с полом под ним.</td>
           <td>Фиксирую.</td>
         </tr>
         <tr>
-          <td><b>Восемь кнопок, а не пять из спеки</b><br><span class="muted sm">расширение</span></td>
-          <td>В спеке пять (прыжок, гравитация, действие, телекинез, крафт/сканер). Пришлось разделить
-              крафт и сканер (это разные действия) и добавить чтение терминала и биогель — без них
-              половина игры на телефоне недоступна.</td>
-          <td>Можно сократить до пяти, если решите, что плотно.</td>
-        </tr>
-        <tr>
-          <td><b>Лимит скорости 400 px/s</b><br><span class="muted sm">из спеки</span></td>
-          <td>В спеке «например, не более 400 px/s». Взял ровно это значение — оно оказалось
-              разумным: медленнее игрока (265 px/s бега не превышает 400 с запасом на рывок).</td>
-          <td>Число в <code>CFG.tele.holdSpeed</code>.</td>
-        </tr>
-        <tr>
-          <td><b>Полноэкранный режим — best effort</b><br><span class="muted sm">трактовка</span></td>
-          <td>Спека просит «включить аудио/фуллскрин». Аудио в игре нет вовсе, а фуллскрин браузер
-              разрешает только из жеста и только вне ограничивающего iframe.</td>
-          <td>Ничего, если в вашем окружении не срабатывает — это ограничение платформы.</td>
+          <td><b>Отдельный ключ сейва</b><br><span class="muted sm">совместимость</span></td>
+          <td>Формат сохранения игры (<code>v:3</code>) не тронут: сюжет пишет свой JSON и читает его
+              сам. Старые сейвы игры продолжают грузиться.</td>
+          <td>Фиксирую.</td>
         </tr>
       </tbody>
     </table>
   </section>
 
   <section id="questions">
-    <h2><span class="num">06</span>Запросы ревью</h2>
+    <h2><span class="num">07</span>Запросы ревью</h2>
     <div class="grid g2">
       <div class="card">
-        <h3>1. Как реализован мультитач?</h3>
-        <p class="sm muted">Слушаю <code>touchstart/move/end/cancel</code> <b>на канвасе</b>
-        (не на <code>window</code>, чтобы не ловить жесты страницы), но состояние веду не «событиями
-        для игры», а <b>теми же клавишами</b>, что и клавиатура. Каждый палец — запись в
-        <code>Map</code> по <code>identifier</code>: джойстик, кнопка или свободный прицел.
-        Поэтому мультитач получается бесплатно: игра видит <code>Space</code> и <code>touchX</code>
-        одновременно, а <code>touchend</code> одного пальца не трогает состояние другого.
-        DOM-кнопки не использовал: они перехватили бы мышь на канвасе, сломали бы управление на
-        гибридных устройствах и потребовали бы отдельного стиля.</p>
+        <h3>1. Как реализован <code>Ship.interact / update</code> без правки игры?</h3>
+        <p class="sm muted">Через обёртку <code>Game.prototype.update</code>: сюжет получает кадр
+        первым (<code>preUpdate</code>) и, если рядом люк, забирает <b>E</b> себе —
+        <code>interact()</code> открывает меню. После оригинала вызывается
+        <code>narrative.update()</code>, который дёргает <code>Ship.update(game)</code>: тот сравнивает
+        <code>repairStage</code> с <code>lastStage</code> и выдаёт награду ровно один раз.
+        Награда — и запись в журнал, и реальный предмет в руки игрока.</p>
       </div>
       <div class="card">
-        <h3>2. Пойман ли баг с ящиком и в чём причина?</h3>
-        <p class="sm muted">Пойман, и причин три. <b>Первая</b>: лимит скорости тела в захвате был
-        взят из физики падения — 950 px/s, в 2.4 раза быстрее игрока. <b>Вторая</b>: цель
-        притяжения обрезалась только по радиусу телекинеза, поэтому при наведении на себя она
-        попадала в центр игрока, разница «цель − тело» проходила через ноль, и знак менялся —
-        тело получало рывок назад. <b>Третья</b>: <code>releaseGrab</code> не гасил скорость,
-        и набранные 900+ px/s жили после отпускания. Плюс ящик не сталкивался с игроком.
-        Замер до: 950 px/s и прыжок 15.8 px за кадр. После: 400 px/s, 6.7 px, после отпускания 20 %.</p>
+        <h3>2. Почему сюжетные объекты не конфликтуют с терминалами игры?</h3>
+        <p class="sm muted">У <code>E</code> один владелец за кадр. <code>preUpdate</code> смотрит
+        ближайший <b>сюжетный</b> объект в радиусе 2.4 тайла: если он есть — <code>E</code>
+        потребляется и до игры не доходит. Если нет — <code>E</code> остаётся игре, и она читает
+        свой терминал как раньше (это отдельная проверка в тесте). Пока открыта панель архива
+        или меню ремонта, <code>update</code> игры вообще не получает ввод мыши.</p>
       </div>
       <div class="card">
-        <h3>3. Что ещё вынести на экранные кнопки?</h3>
-        <p class="sm muted">Восемь кнопок — это предел, дальше экран превращается в пульт.
-        Не хватает трёх вещей: <b>переключателя режимов</b> (сейчас тап по маленькой плашке сверху —
-        самое слабое место раскладки), <b>паузы</b> и <b>сброса мира</b>, которого на телефоне нет
-        вовсе. Спорный кандидат — сделать телекинез одним пальцем («палец тянет ящик» без кнопки),
-        но это уже переделка логики захвата, а не интерфейса.</p>
+        <h3>3. Что делать с резонитом и рецептами, если правки игры разрешат?</h3>
+        <p class="sm muted">Две строчки: <code>CFG.resources.push({id: 8, name: 'RESONITE', …})</code> —
+        и резонит сам появится в правом столбце HUD (счётчик, пульсация, сейв: всё уже готово).
+        Второе — <code>CFG.recipes</code>: три новых рецепта, которые <code>Ship.update</code> уже
+        раздаёт в <code>log.blueprints</code>; останется показать их в меню крафта.
+        Плюс анимацию отлёта корабля в финале.</p>
       </div>
     </div>
   </section>
 
   <section id="shots">
-    <h2><span class="num">07</span>Скриншоты</h2>
+    <h2><span class="num">08</span>Скриншоты</h2>
     <div class="shots" id="shot-grid">
+      <figure class="shot">
+        <img src="screenshots/32-quest-start.png" alt="Старт с журналом квестов" loading="lazy">
+        <figcaption><b>Старт</b>Карточка «МИССИЯ · ЯДРО» с «Ядро: 0/3»; корабль — правее по поверхности.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/33-ship.png" alt="Корабль и подсказка ремонта" loading="lazy">
+        <figcaption><b>Корабль VOID-7</b>Три точки стадий, пробоина, мёртвый двигатель, подсказка «[E] Ремонт корабля».</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/34-ship-menu.png" alt="Меню ремонта, ресурсов не хватает" loading="lazy">
+        <figcaption><b>Меню ремонта</b>Четыре строки, цены, честное «не хватает 2 × STONE, 6 × FERRITE».</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/35-ship-menu-ready.png" alt="Меню ремонта после двух стадий" loading="lazy">
+        <figcaption><b>Две стадии готовы</b>Галочки, «Двигатель — не хватает 2 × RESONITE», рецепты в подвале.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/36-fragment.png" alt="Фрагмент ядра" loading="lazy">
+        <figcaption><b>Фрагмент</b>Светящийся осколок над уступом, подпись «2/3», подсказка «[E] Взять фрагмент».</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/37-core-2of3.png" alt="Собрано два фрагмента" loading="lazy">
+        <figcaption><b>Ядро 2/3</b>Счётчик и ромбики обновились, уведомление висит над игроком.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/38-archive-near.png" alt="Архивный терминал" loading="lazy">
+        <figcaption><b>Архив</b>Обелиск с рунами и подсказкой «[E] Прочитать архив».</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/39-archive-lore.png" alt="Панель архива" loading="lazy">
+        <figcaption><b>Протокол «Присвоение»</b>Своя панель: текст, «+100 очков» вместо чужой награды.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/40-resonite.png" alt="Жила резонита в глубине" loading="lazy">
+        <figcaption><b>Резонит</b>Фиолетовые кристаллы в Глубоких пещерах, подсказка «[E] Добыть резонит».</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/41-ship-repaired.png" alt="Отремонтированный корабль" loading="lazy">
+        <figcaption><b>Корабль готов</b>Заплатки, свет в кабине, ядро резонанса в двигателе, «[E] Активировать ядро».</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="screenshots/42-ending.png" alt="Финальная панель" loading="lazy">
+        <figcaption><b>Финальный аккорд</b>«Ядро собрано. Корабль слушает.» и итоговые очки.</figcaption>
+      </figure>
       <figure class="shot phone">
-        <img src="screenshots/25-touch-hint.png" alt="Подсказка старта на телефоне" loading="lazy">
-        <figcaption><b>M7 · Старт</b>«Тапните для старта», джойстик и блок кнопок, HUD крупнее на 20 %.</figcaption>
+        <img src="screenshots/43-touch-quest.png" alt="Сюжет на телефоне" loading="lazy">
+        <figcaption><b>Телефон</b>Карточка журнала над джойстиком, кнопки не перекрыты (430×780).</figcaption>
       </figure>
       <figure class="shot phone">
-        <img src="screenshots/26-touch-idle.png" alt="Мобильный интерфейс в покое" loading="lazy">
-        <figcaption><b>M7 · Покой</b>Джойстик с мёртвой зоной, панель прилива в левом верхнем углу.</figcaption>
+        <img src="screenshots/44-touch-ship-menu.png" alt="Меню ремонта на телефоне" loading="lazy">
+        <figcaption><b>Телефон · ремонт</b>Панель ужата до 0.78, все четыре строки и цены видны.</figcaption>
       </figure>
       <figure class="shot phone">
-        <img src="screenshots/27-touch-multitouch.png" alt="Бег и прыжок одновременно" loading="lazy">
-        <figcaption><b>M7 · Мультитач</b>Бег джойстиком и прыжок вторым пальцем одновременно.</figcaption>
+        <img src="screenshots/45-touch-fragment.png" alt="Фрагмент на телефоне" loading="lazy">
+        <figcaption><b>Телефон · фрагмент</b>Подсказка без «[E]»: на телефоне за действие отвечает кнопка.</figcaption>
       </figure>
       <figure class="shot phone">
-        <img src="screenshots/28-touch-modes.png" alt="Смена режима" loading="lazy">
-        <figcaption><b>M7 · Режимы</b>Слот переключён и пульсирует, кнопки не перекрывают HUD.</figcaption>
-      </figure>
-      <figure class="shot phone">
-        <img src="screenshots/29-touch-dig.png" alt="Копание на телефоне" loading="lazy">
-        <figcaption><b>M7 · Действие</b>Свободный палец ставит прицел и держит ЛКМ.</figcaption>
-      </figure>
-      <figure class="shot phone">
-        <img src="screenshots/30-touch-telekinesis.png" alt="Телекинез на телефоне" loading="lazy">
-        <figcaption><b>M7 · Телекинез</b>Захват кнопкой «◎», трос к ящику, скорость ограничена.</figcaption>
-      </figure>
-      <figure class="shot phone">
-        <img src="screenshots/31-touch-craft.png" alt="Меню крафта на телефоне" loading="lazy">
-        <figcaption><b>M7 · Крафт</b>Панель ужата до 0.81: все четыре рецепта и цены видны.</figcaption>
+        <img src="screenshots/46-touch-archive.png" alt="Панель архива на телефоне" loading="lazy">
+        <figcaption><b>Телефон · архив</b>Текст переносится по словам: строки не уезжают за экран.</figcaption>
       </figure>
       <figure class="shot">
-        <img src="screenshots/27-touch-multitouch-land.png" alt="Ландшафтная ориентация" loading="lazy">
-        <figcaption><b>M7 · Ландшафт</b>900×430: сетка кнопок 4×2 вдоль нижнего края.</figcaption>
-      </figure>
-      <figure class="shot">
-        <img src="screenshots/31-touch-craft-land.png" alt="Крафт в ландшафте" loading="lazy">
-        <figcaption><b>M7 · Ландшафт</b>Панель крафта в альбомной ориентации.</figcaption>
-      </figure>
-      <figure class="shot">
-        <img src="screenshots/01-start.png" alt="ПК-версия" loading="lazy">
-        <figcaption><b>M7 · ПК</b>Тач-слой не создаётся: ни кнопок, ни джойстика, прежние подсказки клавиш.</figcaption>
-      </figure>
-      <figure class="shot">
-        <img src="screenshots/05-telekinesis.png" alt="Телекинез мышью" loading="lazy">
-        <figcaption><b>M7 · Телекинез</b>ПК: прежний захват ПКМ, но со скоростью 400 px/s и без пролёта сквозь игрока.</figcaption>
-      </figure>
-      <figure class="shot">
-        <img src="screenshots/16b-craft-menu.png" alt="Меню крафта на ПК" loading="lazy">
-        <figcaption><b>M7 · Крафт</b>ПК-вариант панели: прежний размер, попадание мышью по строкам.</figcaption>
-      </figure>
-      <figure class="shot">
-        <img src="screenshots/24-light-sources.png" alt="Свет в глубине" loading="lazy">
-        <figcaption><b>M6 · Свет</b>Фонарь, кристаллы и терминал — без изменений.</figcaption>
-      </figure>
-      <figure class="shot">
-        <img src="screenshots/13b-crawler.png" alt="Хищники" loading="lazy">
-        <figcaption><b>M6 · Хищник</b>Спрайты и полоска HP — без изменений.</figcaption>
-      </figure>
-      <figure class="shot">
-        <img src="screenshots/18-scanner.png" alt="Сканер" loading="lazy">
-        <figcaption><b>M5 · Сканер</b>Волна и метки, теперь ещё и кнопкой на телефоне.</figcaption>
-      </figure>
-      <figure class="shot">
-        <img src="screenshots/17-terminal.png" alt="Терминал" loading="lazy">
-        <figcaption><b>M5 · Терминал</b>Чтение по «E» на ПК и по кнопке на телефоне.</figcaption>
+        <img src="screenshots/44-touch-ship-menu-land.png" alt="Меню ремонта в ландшафте" loading="lazy">
+        <figcaption><b>Ландшафт</b>900×430: меню ремонта на полный размер, кнопки 4×2.</figcaption>
       </figure>
     </div>
   </section>
 
   <section id="verify">
-    <h2><span class="num">08</span>Как проверено</h2>
-    <pre><span class="c"># 344 автопроверки логики, физики, интерфейса и критериев M0–M7</span>
+    <h2><span class="num">09</span>Как проверено</h2>
+    <pre><span class="c"># сюжет: 62 проверки поверх настоящей игры</span>
 cd tools
-node verify.mjs            <span class="c"># → 344/344 проверок пройдено</span>
-node screenshots.mjs       <span class="c"># → 34 кадра ПК-версии</span>
-node touch-shots.mjs       <span class="c"># → 7 кадров мобильной (430×780)</span>
-SUF=-land TW=900 TH=430 node touch-shots.mjs  <span class="c"># → +7 кадров в ландшафте</span>
-node perf.mjs              <span class="c"># → p50 8.30 мс, p95 10.43 мс на кадр</span>
+node verify-narrative.mjs   <span class="c"># → 62/62 проверок пройдено</span>
+
+<span class="c"># игра без сюжета — не сломана</span>
+node verify.mjs             <span class="c"># → 344/344 проверок пройдено</span>
+
+<span class="c"># кадры</span>
+node narrative-shots.mjs    <span class="c"># → 11 кадров ПК (32…42)</span>
+node narrative-touch-shots.mjs               <span class="c"># → 4 кадра телефона (43…46)</span>
+SUF=-land TW=900 TH=430 node narrative-touch-shots.mjs  <span class="c"># → +4 в ландшафте</span>
+
+node perf.mjs               <span class="c"># → p50 5.84 мс, p95 7.24, p99 12.55</span>
 node verify-review-page.mjs <span class="c"># → структура страницы и запуск игры во фрейме</span></pre>
 
     <div class="grid g2" style="margin-top:14px">
       <div class="card">
-        <h3>Что покрыто в M7</h3>
+        <h3>Что покрыто в M8.2</h3>
         <ul class="tight sm">
-          <li>Захват: 120 кадров гулящей цели — скорость не выше <code>holdSpeed</code>,
-              прыжок за кадр в пределах шага, лимит ниже лимита свободного падения.</li>
-          <li>Отпускание: 900 px/s превращаются в ≤ 80, гравитация возвращается, тело не разгоняется.</li>
-          <li>Коллизия: тяга «строго в игрока» — минимальная дистанция больше габарита пары.</li>
-          <li>Колесо: вперёд, назад, через край в обе стороны, три щелчка = три режима, при крафте молчит.</li>
-          <li>Пульсация слота включается и затухает, цифры 1–7 живы.</li>
-          <li>Тач: определение устройства, 8 кнопок, ≥ 48 px, отступ 20 px, джойстик слева,
-              кнопки ниже HUD, HUD ×1.2, клавиатурные подсказки скрыты, ландшафт перестраивается.</li>
-          <li>Мультитач: бег + прыжок, джойстик не отбирается, отпускание кнопки не сбрасывает бег.</li>
-          <li>Кнопки жмут и отпускают ровно свои клавиши, дают вспышку; на ПК тач-слой выключен.</li>
-          <li>Крафт: панель влезает в экран, на узком масштабируется, попадание с тем же масштабом.</li>
+          <li>Подключение: сюжет есть, классы доступны, терминалы игры на месте.</li>
+          <li>Корабль: ровная площадка под корпусом, меню по <code>E</code>, цены 20+10 / 30+10 / 5.</li>
+          <li>Стадии: без ресурсов не собирается, перескок запрещён, награда — рецепт + очки + предмет.</li>
+          <li>Фрагменты: сбор, счётчик 0/3 → 1/3 → 3/3, повторный сбор не накручивает.</li>
+          <li>Финал: без ядра закрыт, с 3/3 открывается, панель закрывается Esc.</li>
+          <li>Архивы: пять текстов из задания, панель открывается/закрывается, <code>E</code> у терминала игры жив.</li>
+          <li>Сейв: пишется, подхватывается новой игрой, сбрасывается <code>Backspace</code>.</li>
+          <li>Отрисовка не падает; меню ремонта влезает в экран, карточка журнала не перекрывает кнопки и джойстик.</li>
         </ul>
       </div>
       <div class="card">
         <h3>Чего проверки не делают</h3>
         <ul class="tight sm">
-          <li>Не проверяют на реальном телефоне: тач-события эмулируются в headless, браузерные
-              жесты (свайп от края, зум) не воспроизводятся.</li>
-          <li>Не проверяют удобство пальца: «попадает ли большой палец в кнопку» — только руками.</li>
-          <li>Не ловят конфликт с системными жестами iOS/Android.</li>
-          <li>Не браузерный FPS: цифры — время JS+draw в headless-canvas.</li>
+          <li>Не проходят игру руками от начала до финала: маршрут «найти все три фрагмента»
+              в тесте телепортирует игрока к точкам.</li>
+          <li>Не проверяют читаемость текста на реальном телефоне при ярком солнце.</li>
+          <li>Не проверяют поведение при чужом сейве на каждой возможной карте — только
+              «точка попала в породу → ищем рядом пол».</li>
+          <li>Не измеряют FPS в браузере: цифры — время JS+draw в headless-canvas.</li>
         </ul>
       </div>
     </div>
@@ -566,11 +595,13 @@ node verify-review-page.mjs <span class="c"># → структура стран�
   <footer>
     <div class="btnrow">
       <a class="btn ghost" href="gravity-void.html">Открыть игру</a>
+      <a class="btn ghost" href="index.html">index.html (фрейм)</a>
       <a class="btn ghost" href="README.md">README</a>
-      <a class="btn ghost" href="M7.md">M7.md</a>
-      <a class="btn ghost" href="M6.md">M6.md</a>
+      <a class="btn ghost" href="M82.md">M82.md</a>
+      <a class="btn ghost" href="narrative.js">narrative.js</a>
     </div>
-    <p>Ветка <code>arena/b1bb672b-game1</code> · M7: фикс телекинеза, колесо режимов, тач-джойстик и кнопки.</p>
+    <p>M8.2: сюжетный слой <code>narrative.js</code> — корабль, журнал, пять архивов, три фрагмента ядра.
+       Игра не тронута: 344/344 старых проверок и 62/62 новых.</p>
   </footer>
 </main>
 <script>
