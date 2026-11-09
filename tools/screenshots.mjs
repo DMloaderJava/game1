@@ -293,4 +293,46 @@ frames(20);
   frames(1);
   shot('15b-crawler-jump');
 }
+// ---------- M4: верстак, крафт, инструменты ----------
+game.resetWorld();
+frames(30);
+{
+  const Wr = game.world, s2 = Wr.surfaceRow;
+  const bx = Math.floor(P.cx / 32) + 3;
+  const by = s2 - 1;                       // верстак стоит НА полу, а не в нём
+  for (let i = 0; i < 2; i++) Wr.set(bx + i, by, 5, true);
+  game.tiles.flush();
+  game.inventory.counts[1] = 12; game.inventory.counts[2] = 9;
+  game.inventory.counts[3] = 8; game.inventory.counts[4] = 2;
+  game.mode = 7;
+  P.x = bx * 32 - 40;
+  game.camera.snap(P);
+  frames(4);
+  shot('16-workbench');
+
+  // меню крафта
+  game.craftOpen = false;
+  game.toggleCraft();
+  game.craftT = 1;
+  game.craftSel = 0;
+  frames(2);
+  shot('16b-craft-menu');
+
+  // резак: луч при копании + броня
+  game.craftOpen = false;
+  game.player.hasLaser = true;
+  game.player.hasArmor = true;
+  game.player.hasGravityGun = true;
+  game.mode = 4;
+  // Для кадра ставим состояние копания напрямую: луч рисуется по нему
+  const dtx = Math.floor(P.cx / 32) + 2;
+  const dty = game.world.surfaceRow;
+  game.world.set(dtx, dty, 2, false);
+  game.tiles.flush();
+  game.dig = { tx: dtx, ty: dty, type: 2, progress: 0.12, max: 0.25 };
+  game.camera.snap(P);
+  game.render();          // кадр без update: иначе отпущенная ЛКМ сбрасывает копание
+  shot('16c-laser-armor');
+  game.input.mouse.left = false;
+}
 console.log('done');

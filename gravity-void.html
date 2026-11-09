@@ -51,13 +51,13 @@
 /* ============================================================
    Типы тайлов
    ============================================================ */
-const TILE = { EMPTY: 0, DIRT: 1, STONE: 2, FERRITE: 3 };
+const TILE = { EMPTY: 0, DIRT: 1, STONE: 2, FERRITE: 3, WORKBENCH: 5 };
 
 // BIOGEL — не тайл, а только предмет: id выше диапазона тайлов
 const ITEM = { BIOGEL: 4 };
 
 // Режимы ЛКМ: 1-3 материал, 4 копать, 5 снос, 6 якорь
-const MODE = { DIRT: TILE.DIRT, STONE: TILE.STONE, FERRITE: TILE.FERRITE, DIG: 4, DEMOLISH: 5, ANCHOR: 6 };
+const MODE = { DIRT: TILE.DIRT, STONE: TILE.STONE, FERRITE: TILE.FERRITE, DIG: 4, DEMOLISH: 5, ANCHOR: 6, BENCH: 7 };
 
 /* ============================================================
    CFG — все числа прототипа собраны здесь
@@ -143,6 +143,27 @@ const CFG = {
   },
 
   save: { key: 'gravity-void-save-v1', autosave: 10 },
+
+  // M4: верстак и крафт
+  bench: {
+    cost: { 1: 10, 2: 5, 3: 2 },   // 10 DIRT + 5 STONE + 2 FERRITE
+    width: 2,                       // тайлов в ширину
+    placeRadius: 5,                 // как у якоря
+    craftRadius: 3,                 // на каком расстоянии открывается меню
+    color: '#8a5a2b'
+  },
+
+  // M4: рецепты. Порядок = порядок строк в меню
+  recipes: [
+    { id: 'laser', name: 'ЛАЗЕРНЫЙ РЕЗАК', cost: { 3: 3, 2: 2 }, color: '#ff5b4a',
+      hint: 'копание ×2' },
+    { id: 'armor', name: 'УКРЕПЛЁННЫЙ КОСТЮМ', cost: { 3: 5, 2: 10 }, color: '#9fb3c8',
+      hint: 'урон −30%' },
+    { id: 'gun', name: 'ГРАВИТАЦИОННАЯ ПУШКА', cost: { 3: 8, 4: 2 }, color: '#7ad0ff',
+      hint: 'радиус 8 → 15' }
+  ],
+  laser: { speed: 2, beam: '#ff4a3a' },
+  armor: { reduce: 0.3, body: '#9aa8b8', shade: '#7d8a99' },
 
   // M3: здоровье и смерть
   health: {
@@ -230,7 +251,9 @@ const CFG = {
     radiusEcho: 0.9                     // вспышка радиуса после переворота гравитации
   },
 
-  tele: { range: 8, stiffness: 90, damping: 15, maxSpeed: 950, pushImpulse: 620, pushCooldown: 0.15 },
+  tele: { range: 8, rangeGun: 15, stiffness: 90, stiffnessGun: 135,
+          damping: 15, maxSpeed: 950, pushImpulse: 620, pushCooldown: 0.15,
+          crateDamage: 15 },
 
   pickup: { pad: 3 },                   // допуск на пересечение с игроком
 
@@ -255,8 +278,8 @@ const CFG = {
 
   particles: { max: 300, digMin: 3, digMax: 5, pickup: 6, life: 0.4, flip: 10 },
 
-  binds: ['KeyA', 'KeyD', 'Space', 'KeyF', 'KeyH', 'Digit1', 'Digit2', 'Digit3',
-          'Digit4', 'Digit5', 'Digit6', 'Escape', 'Backspace']
+  binds: ['KeyA', 'KeyD', 'Space', 'KeyF', 'KeyH', 'KeyC', 'Digit1', 'Digit2', 'Digit3',
+          'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Enter', 'Escape', 'Backspace']
 };
 
 const TS = CFG.tile;
@@ -264,6 +287,9 @@ const TS = CFG.tile;
 // Быстрый доступ к описанию ресурса по id тайла
 const RES = {};
 for (const r of CFG.resources) RES[r.id] = r;
+// Верстак — не ресурс, но тайл: цвет нужен и буферу тайлов, и частицам
+RES[TILE.WORKBENCH] = { id: TILE.WORKBENCH, name: 'ВЕРСТАК',
+  color: '#8a5a2b', shade: '#5b3a1a', light: '#c08a4a' };
 
 /* ============================================================
    Утилиты
@@ -470,6 +496,38 @@ class TileLayer {
     }
   }
 
+  // Верстак: коричневая столешница с инструментами. Рисуется потайлово,
+  // но читается как один объект 2×1 (второй тайл получает «продолжение»)
+  drawBenchTile(tx, ty, detail) {
+    const c = this.ctx;
+    const px = tx * TS, py = ty * TS;
+    c.clearRect(px, py, TS, TS);
+    // ножки
+    c.fillStyle = '#4a2f16';
+    c.fillRect(px + 3, py + TS - 9, 4, 9);
+    c.fillRect(px + TS - 7, py + TS - 9, 4, 9);
+    // столешница
+    c.fillStyle = '#8a5a2b';
+    c.fillRect(px, py + 8, TS, TS - 14);
+    c.fillStyle = '#c08a4a';
+    c.fillRect(px, py + 8, TS, 3);
+    if (!detail) return;
+    c.globalAlpha = 0.25;
+    c.fillStyle = '#5b3a1a';
+    for (let i = 0; i < 3; i++) c.fillRect(px + 2 + i * 11, py + 14, 7, 2);
+    c.globalAlpha = 1;
+    // инструменты: молоток и тиски — только на левом тайле
+    const leftHalf = this.world.get(tx - 1, ty) !== TILE.WORKBENCH;
+    if (leftHalf) {
+      c.fillStyle = '#d8dde5';
+      c.fillRect(px + 6, py + 13, 2, 9);          // ручка
+      c.fillStyle = '#9aa4b0';
+      c.fillRect(px + 3, py + 11, 8, 4);          // молоток
+      c.fillStyle = '#3d4a58';
+      c.fillRect(px + TS - 12, py + 20, 9, 3);    // тиски
+    }
+  }
+
   // Силуэт: цвет породы + кромки на открытых гранях. Дешево и даёт читаемость.
   drawBase(tx, ty) {
     const c = this.ctx;
@@ -479,6 +537,7 @@ class TileLayer {
 
     c.clearRect(px, py, TS, TS);
     if (type === TILE.EMPTY) return;
+    if (type === TILE.WORKBENCH) { this.drawBenchTile(tx, ty, false); return; }
 
     const rock = RES[type === TILE.FERRITE ? TILE.STONE : type];
     c.fillStyle = rock.color;
@@ -505,6 +564,7 @@ class TileLayer {
     const c = this.ctx;
     const type = this.world.tiles[ty * this.world.cols + tx];
     if (type === TILE.EMPTY) return;
+    if (type === TILE.WORKBENCH) { this.drawBenchTile(tx, ty, true); return; }
     const px = tx * TS;
     const py = ty * TS;
     const rock = RES[type === TILE.FERRITE ? TILE.STONE : type];
@@ -1144,7 +1204,9 @@ const Save = {
         tiles: this.packTiles(game.world),
         anchors: game.anchors.map(a => ({ x: a.x, y: a.y })),
         inventory: game.inventory.counts,
-        player: { x: game.player.x, y: game.player.y, g: game.player.gravityTarget },
+        player: { x: game.player.x, y: game.player.y, g: game.player.gravityTarget,
+                  laser: game.player.hasLaser, armor: game.player.hasArmor,
+                  gun: game.player.hasGravityGun },
         drops: game.drops.map(d => ({ x: d.x, y: d.y, t: d.type })),
         crates: game.crates.map(c => ({ x: c.x, y: c.y })),
         cycle: { phase: game.tide.id, timeLeft: game.tide.left }
@@ -1259,6 +1321,11 @@ class Player {
     this.invuln = 0;        // неуязвимость после респавна
     this.dead = false;
     this.lastImpact = 0;
+
+    // M4: инструменты не тратятся, крафтятся один раз
+    this.hasLaser = false;
+    this.hasArmor = false;
+    this.hasGravityGun = false;
   }
 
   get cx() { return this.x + this.w / 2; }
@@ -1604,8 +1671,8 @@ class Input {
     canvas.addEventListener('mousemove', (e) => this.setMouse(e));
     canvas.addEventListener('mousedown', (e) => {
       this.setMouse(e);
-      if (e.button === 0) this.mouse.left = true;
-      if (e.button === 2) this.mouse.right = true;
+      if (e.button === 0) { this.mouse.left = true; this.pressed.add('MouseLeft'); }
+      if (e.button === 2) { this.mouse.right = true; this.pressed.add('MouseRight'); }
       e.preventDefault();
     });
     window.addEventListener('mouseup', (e) => {
@@ -1662,6 +1729,10 @@ class Game {
 
     this.drops = [];
     this.crawlers = [];
+    this.craftOpen = false;
+    this.craftSel = 0;
+    this.craftT = 0;               // анимация открытия
+    this.benchHintT = 0;           // «нужен верстак»
     this.deathT = 0;
     this.deaths = 0;
     this.hurtScreen = 0;
@@ -1782,10 +1853,15 @@ class Game {
     return null;
   }
 
+  // Радиус телекинеза: пушка расширяет его с 8 до 15 тайлов
+  get teleRange() {
+    return this.player.hasGravityGun ? CFG.tele.rangeGun : CFG.tele.range;
+  }
+
   inTeleRange(body) {
     const p = this.player;
     const d = Math.hypot(body.cx - p.cx, body.cy - p.cy) / TS;
-    return d <= CFG.tele.range;
+    return d <= this.teleRange;
   }
 
   tileDistance(tx, ty) {
@@ -1849,6 +1925,11 @@ class Game {
     if (!this.world.inBounds(tx, ty)) return;
 
     if (this.world.solid(tx, ty)) {
+      if (this.world.get(tx, ty) === TILE.WORKBENCH) {
+        this.denyT = CFG.build.denyHold;   // верстак вечный
+        this.notice('верстак не сносится', '#ffb0b0');
+        return;
+      }
       if (!this.world.isPlaced(tx, ty)) {
         this.denyT = CFG.build.denyHold;   // природный тайл — не сносится
         return;
@@ -1959,6 +2040,136 @@ class Game {
     return false;
   }
 
+  /* ---------- M4: верстак и крафт ---------- */
+
+  // Тайл верстака стоит в мире как обычный тайл с ID; ищем его в радиусе крафта
+  benchNear() {
+    const p = this.player;
+    const R = CFG.bench.craftRadius;
+    const tx0 = Math.floor(p.cx / TS) - R, tx1 = Math.floor(p.cx / TS) + R;
+    const ty0 = Math.floor(p.cy / TS) - R, ty1 = Math.floor(p.cy / TS) + R;
+    for (let ty = ty0; ty <= ty1; ty++) {
+      for (let tx = tx0; tx <= tx1; tx++) {
+        if (this.world.get(tx, ty) !== TILE.WORKBENCH) continue;
+        if (this.tileDistance(tx, ty) <= R) return { tx, ty };
+      }
+    }
+    return null;
+  }
+
+  canAffordBench() {
+    for (const id in CFG.bench.cost) if (!this.inventory.has(Number(id), CFG.bench.cost[id])) return false;
+    return true;
+  }
+
+  canPlaceBenchAt(tx, ty) {
+    const w = CFG.bench.width;
+    if (!this.world.inBounds(tx, ty) || !this.world.inBounds(tx + w - 1, ty)) return false;
+    if (this.tileDistance(tx, ty) > CFG.bench.placeRadius) return false;
+    for (let i = 0; i < w; i++) {
+      // воздух на обоих рядах и пол под верстаком
+      if (this.world.solid(tx + i, ty) || this.world.solid(tx + i, ty - 1)) return false;
+      if (!this.world.solid(tx + i, ty + 1)) return false;
+      // не внутрь игрока
+      const px = this.player.x, py = this.player.y;
+      if ((tx + i) * TS < px + this.player.w && (tx + i + 1) * TS > px &&
+          ty * TS < py + this.player.h && (ty + 1) * TS > py) return false;
+    }
+    return true;
+  }
+
+  placeBench(mw) {
+    if (this.anchorCd > 0) return;
+    const tx = Math.floor(mw.x / TS);
+    const ty = Math.floor(mw.y / TS);
+    const w = CFG.bench.width;
+    if (!this.canPlaceBenchAt(tx, ty)) { this.lastDeny = 'нельзя'; this.denyT = CFG.build.denyHold; return; }
+    if (!this.canAffordBench()) { this.lastDeny = 'нет ресурсов'; this.denyT = CFG.build.denyHold; return; }
+
+    for (const id in CFG.bench.cost) this.inventory.spend(Number(id), CFG.bench.cost[id]);
+    for (let i = 0; i < w; i++) this.world.set(tx + i, ty, TILE.WORKBENCH, true);
+    this.tiles.flush();
+    this.anchorCd = 0.25;
+    this.camera.shake(0.4);
+    this.particles.place(tx * TS + TS, ty * TS + TS / 2);
+  }
+
+  // Меню крафта: C открывает рядом с верстаком, C или Esc закрывает
+  toggleCraft() {
+    if (this.craftOpen) { this.craftOpen = false; return; }
+    if (!this.benchNear()) {
+      this.benchHintT = 1.6;
+      this.notice('Нужен верстак', '#ffb0b0');
+      return;
+    }
+    this.craftOpen = true;
+    this.craftT = 0;
+    this.craftSel = 0;
+  }
+
+  recipeDone(r) {
+    const p = this.player;
+    if (r.id === 'laser') return p.hasLaser;
+    if (r.id === 'armor') return p.hasArmor;
+    return p.hasGravityGun;
+  }
+
+  canCraft(r) {
+    if (this.recipeDone(r)) return false;
+    for (const id in r.cost) if (!this.inventory.has(Number(id), r.cost[id])) return false;
+    return true;
+  }
+
+  craft(r) {
+    if (!r || !this.craftOpen || !this.benchNear()) return false;
+    if (this.recipeDone(r)) { this.notice('уже скрафчено', '#9bf7b4'); return false; }
+    if (!this.canCraft(r)) { this.notice('нет ресурсов', '#ffb0b0'); return false; }
+    for (const id in r.cost) this.inventory.spend(Number(id), r.cost[id]);
+
+    const p = this.player;
+    if (r.id === 'laser') p.hasLaser = true;
+    else if (r.id === 'armor') p.hasArmor = true;
+    else p.hasGravityGun = true;
+
+    this.particles.place(p.cx, p.cy);
+    this.camera.shake(0.35);
+    this.notice(r.name + ' — готово', '#9bf7b4');
+    this.doSave();
+    return true;
+  }
+
+  // Ввод в меню: мышь по строкам или клавиши 1..3 / Enter
+  updateCraft(dt) {
+    this.craftT = Math.min(1, this.craftT + dt * 6);
+    if (!this.benchNear()) { this.craftOpen = false; this.notice('верстак далеко', '#ffb0b0'); return; }
+    const inp = this.input;
+    if (inp.consume('Escape')) { this.craftOpen = false; return; }
+
+    const n = CFG.recipes.length;
+    for (let i = 0; i < n; i++) {
+      if (inp.consume('Digit' + (i + 1))) { this.craftSel = i; this.craft(CFG.recipes[i]); return; }
+    }
+    if (inp.consume('Enter') || inp.consume('NumpadEnter')) { this.craft(CFG.recipes[this.craftSel]); return; }
+
+    // Наведение мышью: строки рисуются в drawCraft по этим же координатам
+    const m = inp.mouse;
+    const box = this.craftLayout();
+    if (m.x > box.x && m.x < box.x + box.w && m.y > box.y + box.headH && m.y < box.y + box.h) {
+      const idx = Math.floor((m.y - box.y - box.headH) / box.rowH);
+      if (idx >= 0 && idx < n) {
+        this.craftSel = idx;
+        if (inp.consume('MouseLeft') || (inp.mouse.left && !this.prevLeft)) this.craft(CFG.recipes[idx]);
+      }
+    }
+  }
+
+  // Геометрия панели: одна функция для отрисовки и для попадания мышью
+  craftLayout() {
+    const w = 460, rowH = 62, headH = 54;
+    const h = headH + rowH * CFG.recipes.length + 16;
+    return { x: (this.vw - w) / 2, y: (this.vh - h) / 2, w, h, headH, rowH };
+  }
+
   /* ---------- M3: спавн хищников и биогеля ---------- */
 
   // Свободное место в зале: есть твёрдый пол и 2 тайла воздуха над ним
@@ -2053,10 +2264,12 @@ class Game {
   damagePlayer(amount, source) {
     const p = this.player;
     if (p.invuln > 0 || p.dead || amount <= 0) return;
-    p.health = Math.max(0, p.health - amount);
+    // M4: броня гасит 30% любого урона
+    const dmg = p.hasArmor ? Math.round(amount * (1 - CFG.armor.reduce)) : amount;
+    p.health = Math.max(0, p.health - dmg);
     p.hurtT = CFG.health.flashTime;
     this.hurtScreen = CFG.health.hurtScreen;
-    this.camera.shake(Math.min(1, amount / 30));
+    this.camera.shake(Math.min(1, dmg / 30));
     this.particles.hurt(p.cx, p.cy);
     this.lastDamage = source || 'урон';
     if (p.health <= 0) this.killPlayer(source);
@@ -2210,6 +2423,7 @@ class Game {
     if (m === MODE.DIG) { this.dig = null; return; }
     if (m === MODE.DEMOLISH) { this.demolishAt(mw, 1); return; }
     if (m === MODE.ANCHOR) { this.placeAnchor(mw); this.holdAnchor = true; return; }
+    if (m === MODE.BENCH) { this.placeBench(mw); return; }
     this.placeBlock(mw, m);
   }
 
@@ -2230,14 +2444,16 @@ class Game {
     let tx = mw.x, ty = mw.y;
     const dx = tx - p.cx, dy = ty - p.cy;
     const dist = Math.hypot(dx, dy);
-    const maxD = CFG.tele.range * TS;
+    const maxD = this.teleRange * TS;
     if (dist > maxD) {
       tx = p.cx + (dx / dist) * maxD;
       ty = p.cy + (dy / dist) * maxD;
     }
 
-    b.vx += (tx - b.cx) * CFG.tele.stiffness * dt;
-    b.vy += (ty - b.cy) * CFG.tele.stiffness * dt;
+    // Пушка тянет на 50% сильнее
+    const pull = this.player.hasGravityGun ? CFG.tele.stiffnessGun : CFG.tele.stiffness;
+    b.vx += (tx - b.cx) * pull * dt;
+    b.vy += (ty - b.cy) * pull * dt;
     const damp = Math.exp(-CFG.tele.damping * dt);
     b.vx *= damp;
     b.vy *= damp;
@@ -2283,8 +2499,10 @@ class Game {
     }
 
     const type = this.world.get(tx, ty);
+    if (type === TILE.WORKBENCH) { this.dig = null; this.lastDeny = 'верстак'; return; }
     if (!this.dig || this.dig.tx !== tx || this.dig.ty !== ty) {
-      this.dig = { tx, ty, type, progress: 0, max: CFG.dig.times[type] };
+      const speed = this.player.hasLaser ? CFG.laser.speed : 1;
+      this.dig = { tx, ty, type, progress: 0, max: CFG.dig.times[type] / speed };
       this.digDustT = 0;
     }
 
@@ -2307,6 +2525,7 @@ class Game {
   mineTile(tx, ty) {
     const type = this.world.get(tx, ty);
     if (type === TILE.EMPTY) return;
+    if (type === TILE.WORKBENCH) return;      // верстак не копается
 
     this.world.set(tx, ty, TILE.EMPTY);
     this.tiles.flush();           // тайл сразу исчезает из буфера
@@ -2359,6 +2578,8 @@ class Game {
     if (inp.consume('Digit4')) this.setMode(MODE.DIG);
     if (inp.consume('Digit5')) this.setMode(MODE.DEMOLISH);
     if (inp.consume('Digit6')) this.setMode(MODE.ANCHOR);
+    if (inp.consume('Digit7')) this.setMode(MODE.BENCH);
+    if (inp.consume('KeyC')) this.toggleCraft();
 
     if (inp.consume('KeyF')) this.flipGravity();
 
@@ -2393,7 +2614,9 @@ class Game {
     for (const d of this.drops) d.step(dt, this.world, g);
 
     this.updateCrawlers(dt);
-    this.updateMouse(dt);
+    // Меню крафта забирает мышь: мир живёт, но игрок не копает и не строит
+    if (this.craftOpen) this.updateCraft(dt);
+    else this.updateMouse(dt);
     this.collectDrops();
 
     this.particles.update(dt, g);
@@ -2528,6 +2751,10 @@ class Game {
       this.player.x = d.player.x;
       this.player.y = d.player.y;
       this.player.gravityTarget = d.player.g || 1;
+      // M4: экипировка переживает F5
+      this.player.hasLaser = !!d.player.laser;
+      this.player.hasArmor = !!d.player.armor;
+      this.player.hasGravityGun = !!d.player.gun;
     }
     this.drops = (d.drops || []).map(s => {
       const dr = new Drop(s.x, s.y, s.t);
@@ -2710,6 +2937,7 @@ class Game {
     this.drawAnchors(ctx);
     this.drawProtected(ctx);
     this.drawRadius(ctx);
+    this.drawLaserBeam(ctx);
     this.drawDig(ctx);
     this.drawGhost(ctx);
     this.drawCursor(ctx);
@@ -2936,10 +3164,18 @@ class Game {
     ctx.fillRect(-halfW + 3, halfH - 4, 6, 6 + swing * 0.5);
     ctx.fillRect(halfW - 9, halfH - 4, 6, 6 - swing * 0.5);
 
-    // Корпус
-    ctx.fillStyle = '#dfe9f7';
+    // Корпус: с бронёй игрок темнее и получает серую обводку
+    ctx.fillStyle = p.hasArmor ? CFG.armor.body : '#dfe9f7';
     rr(ctx, -halfW, -halfH, p.w, p.h - 2, 7);
     ctx.fill();
+    if (p.hasArmor) {
+      ctx.strokeStyle = CFG.armor.shade;
+      ctx.lineWidth = 2;
+      rr(ctx, -halfW + 1, -halfH + 1, p.w - 2, p.h - 4, 6);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(60,70,84,0.55)';
+      ctx.fillRect(-halfW + 3, halfH - 8, p.w - 6, 3);
+    }
 
     // Ранец — со стороны спины
     ctx.fillStyle = '#9db2cc';
@@ -3018,6 +3254,30 @@ class Game {
     ctx.globalAlpha = 1;
   }
 
+  // Луч резака: тонкая красная линия от игрока к тайлу, пока идёт копание
+  drawLaserBeam(ctx) {
+    if (!this.player.hasLaser || !this.dig) return;
+    const p = this.player;
+    const tx = this.dig.tx * TS + TS / 2;
+    const ty = this.dig.ty * TS + TS / 2;
+    const a = 0.55 + 0.45 * Math.sin(this.time * 30);
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.strokeStyle = CFG.laser.beam;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(p.cx, p.cy);
+    ctx.lineTo(tx, ty);
+    ctx.stroke();
+    ctx.globalAlpha = a * 0.35;
+    ctx.lineWidth = 5;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#ffd0c8';
+    ctx.fillRect(tx - 2, ty - 2, 4, 4);
+    ctx.restore();
+  }
+
   drawDig(ctx) {
     const d = this.dig;
     if (!d) return;
@@ -3094,19 +3354,25 @@ class Game {
           !this.world.solid(tx, ty + 1) && !this.world.solid(tx, ty - 1)) ok = false;
     } else if (m === MODE.DEMOLISH) {
       const a = this.anchorAt(tx, ty);
-      ok = a ? true : this.world.isPlaced(tx, ty);
+      // Верстак вечный: снести его нельзя, иначе нечем крафтить
+      const bench = this.world.get(tx, ty) === TILE.WORKBENCH;
+      ok = !bench && (a ? true : this.world.isPlaced(tx, ty));
+    } else if (m === MODE.BENCH) {
+      ok = this.canPlaceBenchAt(tx, ty);
     } else {
       ok = this.canPlaceAt(tx, ty, RES[m]);
     }
 
     const col = ok ? 'rgba(86,209,143,0.9)' : 'rgba(255,90,90,0.9)';
+    const wide = m === MODE.BENCH ? CFG.bench.width : 1;
     ctx.globalAlpha = 0.28;
-    ctx.fillStyle = ok ? (m === MODE.ANCHOR ? CFG.anchor.color : RES[m].color) : '#ff5a5a';
-    ctx.fillRect(px, py, TS, TS);
+    ctx.fillStyle = ok ? (m === MODE.ANCHOR ? CFG.anchor.color
+                        : m === MODE.BENCH ? CFG.bench.color : RES[m].color) : '#ff5a5a';
+    ctx.fillRect(px, py, TS * wide, TS);
     ctx.globalAlpha = 1;
     ctx.strokeStyle = col;
     ctx.lineWidth = 1.5;
-    ctx.strokeRect(px + 0.75, py + 0.75, TS - 1.5, TS - 1.5);
+    ctx.strokeRect(px + 0.75, py + 0.75, TS * wide - 1.5, TS - 1.5);
   }
 
   drawCursor(ctx) {
@@ -3267,6 +3533,7 @@ class Game {
                  ' · хищников ' + this.crawlers.length, 16, 14);
 
     this.drawHealthBar(ctx, x, y + h + 8);
+    this.drawCraft(ctx);
     this.drawPhasePanel(ctx);
     this.drawGravityArrow(ctx);
     this.drawModeBar(ctx);
@@ -3374,6 +3641,41 @@ class Game {
     ctx.fillStyle = 'rgba(240,248,255,0.95)';
     ctx.fillText(Math.round(p.health) + ' / ' + p.maxHealth, x + H.w / 2, y + h / 2 + 0.5);
 
+    // M4: экипировка — резак и броня рядом с HP
+    let ix = x + 6;
+    const iy = y + h + 8;
+    if (p.hasLaser) {
+      ctx.fillStyle = '#ff5b4a';
+      ctx.beginPath();
+      ctx.arc(ix + 6, iy + 6, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,210,200,0.9)';
+      ctx.fillRect(ix + 5, iy + 6, 6, 2);
+      ix += 18;
+    }
+    if (p.hasArmor) {
+      ctx.fillStyle = '#9fb3c8';
+      ctx.beginPath();
+      ctx.moveTo(ix + 6, iy);
+      ctx.lineTo(ix + 12, iy + 3);
+      ctx.lineTo(ix + 11, iy + 9);
+      ctx.lineTo(ix + 6, iy + 12);
+      ctx.lineTo(ix + 1, iy + 9);
+      ctx.lineTo(ix, iy + 3);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#dfe9f7';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ix += 18;
+    }
+    if (p.hasGravityGun) {
+      ctx.fillStyle = '#7ad0ff';
+      ctx.fillRect(ix, iy + 4, 10, 4);
+      ctx.fillRect(ix + 10, iy + 2, 4, 8);
+      ix += 18;
+    }
+
     // Укрытие: во время прилива это главный вопрос игрока «я в безопасности?»
     if (this.tide.id === 'CATASTROPHE' || this.tide.id === 'WARNING') {
       const safe = this.isSheltered();
@@ -3383,6 +3685,115 @@ class Game {
       ctx.fillText(safe ? 'под куполом' : 'открыто', x + H.w, y - 6);
     }
     ctx.textAlign = 'left';
+  }
+
+  // Полупрозрачная панель крафта по центру: 3 строки, цена, кнопка
+  drawCraft(ctx) {
+    if (!this.craftOpen) return;
+    const b = this.craftLayout();
+    const t = clamp(this.craftT, 0, 1);
+    const ease = 1 - (1 - t) * (1 - t);
+
+    ctx.save();
+    ctx.globalAlpha = ease;
+    ctx.translate(0, (1 - ease) * 12);
+
+    // затемнение мира и панель
+    ctx.fillStyle = 'rgba(4,6,11,0.55)';
+    ctx.fillRect(0, 0, this.vw, this.vh);
+    ctx.fillStyle = 'rgba(9,13,21,0.94)';
+    rr(ctx, b.x, b.y, b.w, b.h, 14);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(150,180,220,0.28)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.font = 'bold 15px ' + CFG.render.font;
+    ctx.fillStyle = '#e8f2ff';
+    ctx.fillText('ВЕРСТАК', b.x + 18, b.y + 24);
+    ctx.font = '11px ' + CFG.render.font;
+    ctx.fillStyle = 'rgba(160,185,215,0.8)';
+    ctx.fillText('1–3 или ЛКМ · Enter создать · C закрыть', b.x + 18, b.y + 42);
+
+    for (let i = 0; i < CFG.recipes.length; i++) {
+      const r = CFG.recipes[i];
+      const ry = b.y + b.headH + i * b.rowH;
+      const on = i === this.craftSel;
+      const done = this.recipeDone(r);
+      const can = this.canCraft(r);
+
+      if (on) {
+        ctx.fillStyle = 'rgba(120,190,255,0.12)';
+        rr(ctx, b.x + 10, ry + 4, b.w - 20, b.rowH - 8, 10);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(127,212,255,0.5)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+
+      // иконка
+      ctx.fillStyle = r.color;
+      if (done) ctx.globalAlpha = 0.45;
+      rr(ctx, b.x + 22, ry + 15, 30, 30, 7);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      if (r.id === 'laser') {
+        ctx.fillStyle = '#2a0d0a';
+        ctx.fillRect(b.x + 28, ry + 29, 18, 2);
+      } else if (r.id === 'armor') {
+        ctx.fillStyle = 'rgba(30,40,52,0.7)';
+        ctx.fillRect(b.x + 30, ry + 23, 14, 6);
+      } else {
+        ctx.fillStyle = 'rgba(10,30,50,0.8)';
+        ctx.fillRect(b.x + 30, ry + 27, 14, 5);
+      }
+
+      // название и цена
+      ctx.font = 'bold 13px ' + CFG.render.font;
+      ctx.fillStyle = done ? 'rgba(155,247,180,0.85)' : '#e8f2ff';
+      ctx.fillText(r.name, b.x + 64, ry + 22);
+
+      ctx.font = '11px ' + CFG.render.font;
+      ctx.fillStyle = 'rgba(160,185,215,0.75)';
+      ctx.fillText(r.hint, b.x + 64, ry + 40);
+
+      // Кнопка
+      const bw = 92, bh = 26;
+      const btnX = b.x + b.w - bw - 18, by = ry + b.rowH / 2 - bh / 2;
+
+      // Цена: справа налево, чтобы не наезжать на длинные названия
+      let cx = btnX - 14;
+      const ids = Object.keys(r.cost).reverse();
+      for (const id of ids) {
+        const res = RES[Number(id)];
+        const need = r.cost[id];
+        const have = this.inventory.counts[Number(id)] || 0;
+        ctx.font = '11px ' + CFG.render.font;
+        const numW = ctx.measureText(String(need)).width;
+        ctx.fillStyle = have >= need ? 'rgba(226,240,255,0.9)' : '#ff8a8a';
+        ctx.textAlign = 'right';
+        ctx.fillText(String(need), cx, ry + 25);
+        ctx.textAlign = 'left';
+        ctx.fillStyle = res.color;
+        rr(ctx, cx - numW - 12, ry + 20, 8, 8, 2);
+        ctx.fill();
+        cx -= numW + 34;
+      }
+      const bx = btnX;
+      ctx.fillStyle = done ? 'rgba(86,209,143,0.18)' : can ? 'rgba(99,200,255,0.9)' : 'rgba(150,170,195,0.14)';
+      rr(ctx, bx, by, bw, bh, 8);
+      ctx.fill();
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 11px ' + CFG.render.font;
+      ctx.fillStyle = done ? '#56d18f' : can ? '#04121d' : 'rgba(170,190,215,0.5)';
+      ctx.fillText(done ? 'ГОТОВО' : 'СОЗДАТЬ', bx + bw / 2, by + bh / 2 + 0.5);
+      ctx.textAlign = 'left';
+    }
+    ctx.restore();
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
   }
 
   drawPhasePanel(ctx) {
@@ -3473,7 +3884,8 @@ class Game {
       { key: '3', mode: MODE.FERRITE, color: RES[TILE.FERRITE].color },
       { key: '4', mode: MODE.DIG, color: '#dfe8f6' },
       { key: '5', mode: MODE.DEMOLISH, color: '#e0a0a0' },
-      { key: '6', mode: MODE.ANCHOR, color: CFG.anchor.color }
+      { key: '6', mode: MODE.ANCHOR, color: CFG.anchor.color },
+      { key: '7', mode: MODE.BENCH, color: CFG.bench.color }
     ];
     const sw = 30, gap = 6;
     const total = items.length * sw + (items.length - 1) * gap;
@@ -3510,6 +3922,7 @@ class Game {
       ['Space', 'прыжок'],
       ['F', 'гравитация'],
       ['H', 'биогель'],
+      ['C', 'крафт'],
       ['ЛКМ', this.modeLabel()],
       ['ПКМ', 'телекинез']
     ];
@@ -3572,6 +3985,7 @@ class Game {
     if (m === MODE.DIG) return 'копать';
     if (m === MODE.DEMOLISH) return 'снос';
     if (m === MODE.ANCHOR) return 'якорь';
+    if (m === MODE.BENCH) return 'верстак';
     return 'строить ' + RES[m].name;
   }
 

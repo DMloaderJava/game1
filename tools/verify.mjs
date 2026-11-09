@@ -990,6 +990,179 @@ ok('M3: управление 1..6 не сломано',
    /Digit6/.test(String(sandbox.__game.update)) && /KeyF/.test(String(sandbox.__game.update)));
 ok('M3: H подсказана в панели управления', /KeyH|биогель/.test(String(sandbox.__game.drawControls)));
 
+// ================================================================
+// M4: технологии и крафт
+// ================================================================
+const TILE_WB = 5;
+const MODE_BENCH = 7;
+
+sandbox.localStorage.removeItem(CFG.save.key);
+const g7 = new (sandbox.__cls.Game)(view);
+const P7 = g7.player;
+stepG(g7, 60);
+g7.craftOpen = false;
+
+// --- верстак: постановка за 10 DIRT + 5 STONE + 2 FERRITE
+const benchCost = CFG.bench.cost;
+ok('M4: цена верстака 10 DIRT + 5 STONE + 2 FERRITE',
+   benchCost[1] === 10 && benchCost[2] === 5 && benchCost[3] === 2, JSON.stringify(benchCost));
+ok('M4: верстак — тайл с ID 5 и режим по клавише 7',
+   TILE.WORKBENCH === 5 && MODE_BENCH === 7 && /Digit7/.test(String(g7.update)));
+
+// ставим на ровном полу рядом с игроком
+const bx = Math.floor(P7.cx / TS) + 3;
+const by = Math.floor((P7.y + P7.h - 0.001) / TS);        // ряд пола: верстак стоит на нём
+for (let i = 0; i < 2; i++) g7.world.set(bx + i, by, TILE.EMPTY, false);
+g7.world.set(bx, by, TILE.EMPTY, false);
+g7.tiles.flush();
+g7.inventory.counts[TILE.DIRT] = 10;
+g7.inventory.counts[TILE.STONE] = 5;
+g7.inventory.counts[TILE.FERRITE] = 2;
+g7.mode = MODE_BENCH;
+g7.placeBench({ x: bx * TS + TS / 2, y: by * TS + TS / 2 });
+ok('M4: верстак поставлен на 2 тайла', g7.world.get(bx, by) === TILE_WB && g7.world.get(bx + 1, by) === TILE_WB,
+   `t1=${g7.world.get(bx, by)} t2=${g7.world.get(bx + 1, by)}`);
+ok('M4: ресурсы за верстак списаны',
+   g7.inventory.counts[TILE.DIRT] === 0 && g7.inventory.counts[TILE.STONE] === 0 &&
+   g7.inventory.counts[TILE.FERRITE] === 0,
+   `d=${g7.inventory.counts[TILE.DIRT]} s=${g7.inventory.counts[TILE.STONE]} f=${g7.inventory.counts[TILE.FERRITE]}`);
+
+// без ресурсов верстак не ставится
+const bx2 = bx + 5;
+g7.world.set(bx2, by, TILE.EMPTY, false); g7.world.set(bx2 + 1, by, TILE.EMPTY, false);
+g7.world.set(bx2, by + 1, TILE.STONE, false); g7.world.set(bx2 + 1, by + 1, TILE.STONE, false);
+g7.placeBench({ x: bx2 * TS + TS / 2, y: by * TS + TS / 2 });
+ok('M4: без ресурсов верстак не ставится', g7.world.get(bx2, by) !== TILE_WB);
+
+// верстак не копается и не сносится
+g7.mineTile(bx, by);
+ok('M4: верстак не копается', g7.world.get(bx, by) === TILE_WB);
+g7.demolishAt({ x: bx * TS + TS / 2, y: by * TS + TS / 2 }, 1);
+ok('M4: верстак не сносится', g7.world.get(bx, by) === TILE_WB);
+
+// --- меню крафта: C рядом с верстаком
+P7.x = bx * TS - TS; P7.y = by * TS - P7.h;
+g7.camera.snap(P7);
+g7.craftOpen = false;
+pressG(g7, 'KeyC');
+stepG(g7, 1);
+ok('M4: C открывает меню рядом с верстаком', g7.craftOpen === true);
+ok('M4: в меню 3 рецепта', CFG.recipes.length === 3, String(CFG.recipes.length));
+
+// --- меню не открывается без верстака
+const gNoBench = new (sandbox.__cls.Game)(view);
+stepG(gNoBench, 30);
+gNoBench.player.x = 5 * TS; gNoBench.player.y = gNoBench.world.surfaceRow * TS - gNoBench.player.h;
+gNoBench.camera.snap(gNoBench.player);
+gNoBench.craftOpen = false;
+pressG(gNoBench, 'KeyC');
+stepG(gNoBench, 1);
+ok('M4: без верстака меню не открывается', gNoBench.craftOpen === false);
+ok('M4: без верстака есть подсказка «Нужен верстак»', /Нужен верстак/.test(String(gNoBench.toggleCraft)));
+
+// --- резак: копание в 2 раза быстрее
+g7.craftOpen = false;
+g7.inventory.counts[TILE.FERRITE] = 3;
+g7.inventory.counts[TILE.STONE] = 2;
+g7.craftOpen = true;
+const laserRecipe = CFG.recipes.find(r => r.id === 'laser');
+ok('M4: рецепт резака 3 FERRITE + 2 STONE', laserRecipe.cost[3] === 3 && laserRecipe.cost[2] === 2);
+ok('M4: резак создаётся и экипируется', g7.craft(laserRecipe) === true && P7.hasLaser === true);
+ok('M4: резак списал ресурсы',
+   g7.inventory.counts[TILE.FERRITE] === 0 && g7.inventory.counts[TILE.STONE] === 0);
+ok('M4: повторный крафт резака невозможен', g7.craft(laserRecipe) === false);
+
+// тайминг копания: DIRT 0.15 → 0.075, STONE 0.5 → 0.25, FERRITE 0.7 → 0.35
+g7.craftOpen = false;
+function digTime(g, type, hasLaser) {
+  g.player.hasLaser = hasLaser;
+  const s2 = g.world.surfaceRow;
+  // внутри мира: world.get за границей возвращает камень, легко получить ложный тип
+  const tx = 120 + Math.floor(Math.random() * 20);
+  // тайл прямо под ногами игрока: он на него встаёт
+  g.world.set(tx, s2, type, false);
+  g.world.set(tx, s2 - 1, TILE.EMPTY, false);
+  g.tiles.flush();
+  g.player.x = tx * TS + 5; g.player.y = s2 * TS - g.player.h;
+  g.player.vx = 0; g.player.vy = 0;
+  g.camera.snap(g.player);
+  g.dig = null;
+  g.tooFarT = 0;
+  g.updateDig(CFG.step, { x: tx * TS + TS / 2, y: s2 * TS + TS / 2 });
+  return g.dig && g.dig.max;
+}
+const g8 = new (sandbox.__cls.Game)(view);
+const plainDirt = digTime(g8, TILE.DIRT, false);
+const laserDirt = digTime(g8, TILE.DIRT, true);
+const plainStone = digTime(g8, TILE.STONE, false);
+const laserStone = digTime(g8, TILE.STONE, true);
+const laserFerrite = digTime(g8, TILE.FERRITE, true);
+ok('M4: без резака DIRT 0.15 с', Math.abs(plainDirt - 0.15) < 0.001, String(plainDirt));
+ok('M4: с резаком DIRT 0.075 с', Math.abs(laserDirt - 0.075) < 0.001, String(laserDirt));
+ok('M4: без резака STONE 0.5 с', Math.abs(plainStone - 0.5) < 0.001, String(plainStone));
+ok('M4: с резаком STONE 0.25 с', Math.abs(laserStone - 0.25) < 0.001, String(laserStone));
+ok('M4: с резаком FERRITE 0.35 с', Math.abs(laserFerrite - 0.35) < 0.001, String(laserFerrite));
+ok('M4: копание ускорено ровно в 2 раза', Math.abs(plainDirt / laserDirt - 2) < 0.001,
+   `${plainDirt} / ${laserDirt}`);
+ok('M4: резак рисует луч к тайлу', /drawLaserBeam/.test(String(g8.render)) && /laser\.beam/.test(String(g8.drawLaserBeam)));
+
+// --- броня: урон 10 → 7
+g7.craftOpen = true;
+g7.inventory.counts[TILE.FERRITE] = 5;
+g7.inventory.counts[TILE.STONE] = 10;
+const armorRecipe = CFG.recipes.find(r => r.id === 'armor');
+ok('M4: рецепт брони 5 FERRITE + 10 STONE', armorRecipe.cost[3] === 5 && armorRecipe.cost[2] === 10);
+ok('M4: броня создаётся и экипируется', g7.craft(armorRecipe) === true && P7.hasArmor === true);
+
+P7.health = 100; P7.invuln = 0;
+g7.damagePlayer(10, 'укус хищника');
+ok('M4: броня снижает укус 10 → 7', P7.health === 93, `hp=${P7.health}`);
+P7.hasArmor = false;
+P7.health = 100;
+g7.damagePlayer(10, 'укус хищника');
+ok('M4: без брони укус 10 → 10', P7.health === 90, `hp=${P7.health}`);
+P7.hasArmor = true;
+P7.health = 100;
+g7.damagePlayer(30, 'прилив');
+ok('M4: броня снижает урон прилива 30 → 21', P7.health === 79, `hp=${P7.health}`);
+
+// --- гравитационная пушка: радиус 8 → 15
+g7.craftOpen = true;
+g7.inventory.counts[TILE.FERRITE] = 8;
+g7.inventory.counts[ITEM.BIOGEL] = 2;
+const gunRecipe = CFG.recipes.find(r => r.id === 'gun');
+ok('M4: рецепт пушки 8 FERRITE + 2 BIOGEL', gunRecipe.cost[3] === 8 && gunRecipe.cost[4] === 2);
+const baseRange = g7.teleRange;
+ok('M4: без пушки радиус 8 тайлов', baseRange === 8, String(baseRange));
+ok('M4: пушка создаётся и экипируется', g7.craft(gunRecipe) === true && P7.hasGravityGun === true);
+ok('M4: с пушкой радиус 15 тайлов', g7.teleRange === 15, String(g7.teleRange));
+ok('M4: пушка усиливает притяжение', CFG.tele.stiffnessGun > CFG.tele.stiffness,
+   `${CFG.tele.stiffness} → ${CFG.tele.stiffnessGun}`);
+
+// тело за пределами старого радиуса теперь достаётся
+g7.craftOpen = false;
+const farDrop = new (sandbox.__cls.Drop)(P7.cx + 11 * TS, P7.cy, TILE.STONE);
+g7.drops.push(farDrop);
+ok('M4: пушка достаёт тело в 11 тайлах', g7.inTeleRange(farDrop) === true);
+P7.hasGravityGun = false;
+ok('M4: без пушки 11 тайлов вне радиуса', g7.inTeleRange(farDrop) === false);
+P7.hasGravityGun = true;
+
+// --- сохранение флагов
+g7.craftOpen = false;
+g7.doSave();
+const g9 = new (sandbox.__cls.Game)(view);
+ok('M4: флаги сохраняются после перезагрузки',
+   g9.player.hasLaser === true && g9.player.hasArmor === true && g9.player.hasGravityGun === true,
+   `laser=${g9.player.hasLaser} armor=${g9.player.hasArmor} gun=${g9.player.hasGravityGun}`);
+ok('M4: верстак сохраняется как тайл', g9.world.get(bx, by) === TILE_WB);
+
+// --- HUD
+ok('M4: иконки экипировки в HUD', /hasLaser/.test(String(g9.drawHealthBar)) &&
+   /hasArmor/.test(String(g9.drawHealthBar)) && /hasGravityGun/.test(String(g9.drawHealthBar)));
+ok('M4: в панели режимов есть верстак (7)', /ВЕРСТАК|bench/.test(String(g9.drawModeBar)) || /Digit7/.test(String(g9.update)));
+ok('M4: C подсказана в управлении', /крафт/.test(String(g9.drawControls)));
+
 // ---------------------------------------------------------------- итог
 const passed = results.filter(r => r.pass).length;
 console.log('\n=== РЕЗУЛЬТАТ ===');
