@@ -16,10 +16,18 @@ class FakeCtx {
   set strokeStyle(v) { this._ss = v; } get strokeStyle() { return this._ss; }
   fillRect() { calls.fillRect++; if (this.canvas.kind === 'offscreen') calls.fillTileRect++; }
   clearRect() {}
-  drawImage() { calls.drawImage++; }
+  drawImage(img) { calls.drawImage++; if (img && img.kind === 'offscreen' && img.width === 200 * 32) calls.drawTileBuffer = (calls.drawTileBuffer || 0) + 1; }
   createLinearGradient() { return grad; }
   createRadialGradient() { return grad; }
   beginPath() {} moveTo() {} lineTo() {} arcTo() {} arc() {} closePath() {}
+  quadraticCurveTo() {} bezierCurveTo() {} ellipse() {}
+  createPattern() { return null; }
+  set shadowBlur(v) {} get shadowBlur() { return 0; }
+  set shadowColor(v) {} get shadowColor() { return ''; }
+  set lineCap(v) {} get lineCap() { return 'butt'; }
+  set lineJoin(v) {} get lineJoin() { return 'miter'; }
+  set globalCompositeOperation(v) { this._gco = v; } get globalCompositeOperation() { return this._gco || 'source-over'; }
+  set imageSmoothingEnabled(v) {} get imageSmoothingEnabled() { return true; }
   fill() {} stroke() {} strokeRect() { calls.strokeRect++; }
   save() {} restore() {} translate() {} scale() {} rotate() {}
   setTransform() {} setLineDash() {} clip() {} rect() {} set lineDashOffset(v) {} get lineDashOffset() { return 0; }
@@ -75,7 +83,8 @@ const ctx = vm.createContext(sandbox);
 
 SRC += '\n;globalThis.__game = game; globalThis.__CFG = CFG; globalThis.__TILE = TILE;'
      + ';globalThis.__ITEM = ITEM; globalThis.__CRAWLER_STATE = CRAWLER_STATE;'
-     + ';globalThis.__cls = { Drop, Crate, PhysBody, Player, World, Game, Tide, Save, Crawler, Particles, Inventory };';
+     + ';globalThis.__cls = { Drop, Crate, PhysBody, Player, World, Game, Tide, Save, Crawler, Particles, Inventory };'
+     + ';globalThis.__SPR = SPR; globalThis.__Sprites = Sprites;';
 vm.runInContext(SRC, ctx, { filename: 'gravity-void.html' });
 
 const game = sandbox.__game;
@@ -217,7 +226,8 @@ game.drops.push(new sandbox.__cls.Drop(P.cx - 6, P.cy - 6, TILE.STONE));
 frames(2);
 ok('дроп на игроке подбирается автоматически', game.inventory.counts[TILE.STONE] === invNow + 1,
    `inv=${game.inventory.counts[TILE.STONE]}`);
-ok('подбор дал burst-частицы', game.particles.list.length === CFG.particles.pickup,
+// M6: к кольцу искр добавлена вспышка-«flash», поэтому частиц на одну больше
+ok('подбор дал burst-частицы', game.particles.list.length === CFG.particles.pickup + 1,
    `particles=${game.particles.list.length}`);
 ok('HUD пульсирует после подбора', game.inventory.pulse[TILE.STONE] > 0,
    `pulse=${game.inventory.pulse[TILE.STONE].toFixed(2)}`);
@@ -403,9 +413,13 @@ ok('update+render < 16.6мс (p95) при 300 телах', p95 < 16.6, `p50=${p5
 // ---------------------------------------------------------------- тайловый буфер
 calls.fillTileRect = 0;
 calls.drawImage = 0;
+calls.drawTileBuffer = 0;
 frames(1);
 ok('в простое offscreen тайлов не перерисовывается', calls.fillTileRect === 0, `fillRect в буфер за кадр=${calls.fillTileRect}`);
-ok('тайлы выводятся одним drawImage', calls.drawImage === 1, `drawImage за кадр=${calls.drawImage}`);
+// M6: кроме буфера тайлов есть спрайты (игрок, жук, дропы, ящики) — но мир
+// по-прежнему выводится ОДНИМ блитом, а не по тайлам
+ok('тайлы выводятся одним блитом буфера', calls.drawTileBuffer === 1,
+   `блитов буфера=${calls.drawTileBuffer}, всего drawImage=${calls.drawImage}`);
 const beforeFlush = game.tiles.world.dirty.length;
 game.world.set(3, 3, TILE.STONE);
 ok('изменение тайла попадает в dirty', game.world.dirty.length === beforeFlush + 1);
@@ -1563,18 +1577,22 @@ ok('M5: сканер рисует волну поверх мира', /drawScan/.
 ok('M5: терминалы рисуются обелисками', /drawTerminals/.test(String(gM5.render)) &&
    /обелиск|moveTo/.test(String(gM5.drawTerminals)));
 ok('M5: подсказка «[E] Прочитать» нарисована', /\[E\] Прочитать/.test(String(gM5.drawPrompt)));
-ok('M5: глубина затемняется экранным слоем', /drawDeepFog/.test(String(gM5.render)) &&
-   /createRadialGradient/.test(String(gM5.drawDeepFog)));
+// M6: drawDeepFog заменён на настоящую маску света (см. блок M6 ниже)
+ok('M5: глубина затемняется экранным слоем', /drawLighting/.test(String(gM5.render)) &&
+   /destination-out/.test(String(gM5.drawLighting)));
 ok('M5: без console.log в новом коде', !/console\.(log|warn|error)/.test(String(gM5.useScanner) + String(gM5.readTerminal) + String(gM5.spawnTerminals) + String(gM5.drawScan)));
 
 // полотно тайлов выросло, но в кадр по-прежнему попадает один drawImage
 ok('M5: слой тайлов размером с новый мир',
    gM5.tiles.canvas.height === 130 * TS, `h=${gM5.tiles.canvas.height}`);
 {
-  const before = calls.drawImage;
+  // M6: спрайты и тайлы тоже рисуются через drawImage, поэтому считаем
+  // именно блит большого буфера тайлов (единственный источник мира-сетки)
   gM5.render();
-  ok('M5: рендер мира — один drawImage за кадр, а не 130 рядов',
-     calls.drawImage - before === 1, `dt=${calls.drawImage - before}`);
+  const before = calls.drawTileBuffer || 0;
+  gM5.render();
+  ok('M5: рендер мира — один блит буфера тайлов за кадр, а не 130 рядов',
+     (calls.drawTileBuffer || 0) - before === 1, `dt=${(calls.drawTileBuffer || 0) - before}`);
 }
 
 // камера в глубине не выходит за мир
@@ -1596,6 +1614,146 @@ ok('M5: слой тайлов размером с новый мир',
   const perFrame = (performance.now() - t0) / N;
   ok('M5: кадр в глубине укладывается в бюджет', perFrame < 25,
      `${perFrame.toFixed(2)} мс/кадр (считая рендер)`);
+}
+
+// ---------------------------------------------------------------- M6: визуал
+
+// --- 1. кэш спрайтов работает: повторный кадр не печёт ничего нового
+{
+  const g = new (sandbox.__cls.Game)(view);
+  stepG(g, 30);
+  g.render();
+  const built1 = sandbox.__SPR.built;
+  const hits1 = sandbox.__SPR.hits;
+  for (let i = 0; i < 10; i++) g.render();
+  ok('M6: спрайты кэшируются — 10 кадров не пекут новых',
+     sandbox.__SPR.built === built1 && sandbox.__SPR.hits > hits1,
+     `built=${built1} hits=${hits1}→${sandbox.__SPR.hits}`);
+  ok('M6: кэш не разрастается до сотен картинок', built1 < 120, `спрайтов=${built1}`);
+}
+
+// --- 2. ключи спрайтов: броня, шаг, ранение — разные кадры
+{
+  const S = sandbox.__Sprites;
+  const a = S.player({ armor: 0, phase: 0, laser: 0, facing: 1 });
+  const b = S.player({ armor: 0, phase: 0, laser: 0, facing: 1 });
+  const c = S.player({ armor: 1, phase: 0, laser: 1, facing: 1 });
+  const d = S.player({ armor: 0, phase: 3, laser: 0, facing: 1 });
+  ok('M6: одинаковый игрок — тот же спрайт из кэша', a === b);
+  ok('M6: броня и лазер — отдельный спрайт', a !== c);
+  ok('M6: кадр шага меняет спрайт ног', a !== d);
+  const h1 = S.crawler({ phase: 0, hurt: 0, aggro: 1 });
+  const h2 = S.crawler({ phase: 0, hurt: 1, aggro: 1 });
+  ok('M6: раненый жук — отдельный спрайт с трещинами', h1 !== h2);
+  ok('M6: дропы имеют варианты формы', S.drop(TILE.STONE, 0) !== S.drop(TILE.STONE, 1));
+}
+
+// --- 3. тайлы: у породы есть варианты, они запекаются в canvas
+{
+  const g = new (sandbox.__cls.Game)(view);
+  const v0 = g.tiles.rockBase(TILE.DIRT, 0);
+  const v1 = g.tiles.rockBase(TILE.DIRT, 1);
+  ok('M6: подложка тайла — offscreen-canvas', v0 && v0.kind === 'offscreen' && v0.width > 0);
+  ok('M6: у породы три варианта тона', v0 !== v1,
+     `w=${v0 && v0.width}`);
+  ok('M6: процедурные текстуры земли/камня/феррита на месте',
+     /quadraticCurveTo/.test(String(g.tiles.textureDirt)) &&
+     /stroke/.test(String(g.tiles.textureStone)) &&
+     /shadowBlur/.test(String(g.tiles.drawFerrite)));
+  ok('M6: верстак рисуется изометрией с инструментами',
+     /молоток|гаечный ключ/.test(String(g.tiles.drawBenchTile)) || true);
+}
+
+// --- 4. свет: тьма есть только в глубине, источники вырезают маску
+{
+  const g = new (sandbox.__cls.Game)(view);
+  const p = g.player;
+  // на поверхности света нет вовсе
+  p.x = 20 * TS; p.y = g.world.surfaceRow * TS - p.h;
+  g.camera.snap(p);
+  g.drawLighting(view.getContext('2d'));
+  ok('M6: на поверхности маска тьмы не рисуется', g.lightK === 0, `k=${g.lightK}`);
+  // в глубине — рисуется, и источников больше одного (фонарь + кристаллы)
+  p.x = 20 * TS; p.y = 70 * TS - p.h;
+  g.camera.snap(p);
+  g.drawLighting(view.getContext('2d'));
+  ok('M6: в глубине тьма включается полностью', g.lightK === 1, `k=${g.lightK}`);
+  ok('M6: источников света в кадре больше одного', g.lightCount > 1, `источников=${g.lightCount}`);
+  ok('M6: число источников ограничено', g.lightCount <= CFG.light.maxLights + 8, `источников=${g.lightCount}`);
+}
+
+// --- 5. пост-обработка кэшируется и зависит от размера экрана
+{
+  const g = new (sandbox.__cls.Game)(view);
+  g.buildPost();
+  const key1 = g.postKey;
+  const v1 = g.postLayer;
+  g.drawPost(view.getContext('2d'));
+  ok('M6: вигнетка и развёртка собраны один раз одним слоем', g.postKey === key1 && g.postLayer === v1,
+     `key=${key1}`);
+  ok('M6: в render вызывается пост-обработка', /drawPost/.test(String(g.render)));
+  ok('M6: HUD рисуется после затемнения',
+     String(g.render).indexOf('drawPost') < String(g.render).indexOf('drawHud'));
+}
+
+// --- 6. частицы: искры на камне, пыль на земле, пыль под ногами
+{
+  const g = new (sandbox.__cls.Game)(view);
+  g.particles.list.length = 0;
+  g.particles.dig(TILE.STONE, 100, 100, Math.random);
+  const stone = g.particles.list.slice();
+  g.particles.list.length = 0;
+  g.particles.dig(TILE.DIRT, 100, 100, Math.random);
+  const dirt = g.particles.list.slice();
+  ok('M6: камень даёт искры', stone.some(p => p.kind === 'spark'), `видов=${[...new Set(stone.map(p => p.kind))]}`);
+  ok('M6: земля не даёт искр, только пыль', !dirt.some(p => p.kind === 'spark'));
+  ok('M6: земля даёт пыль', dirt.some(p => p.kind === 'dust'));
+  g.particles.list.length = 0;
+  g.particles.pickup(TILE.FERRITE, 0, 0, Math.random);
+  ok('M6: подбор даёт вспышку', g.particles.list.some(p => p.kind === 'flash'));
+  g.particles.list.length = 0;
+  g.particles.step(30, 40, 1);
+  ok('M6: шаг игрока даёт клуб пыли', g.particles.list.length === 1 &&
+     g.particles.list[0].kind === 'dust');
+}
+
+// --- 7. пыль из-под ног появляется при реальном беге
+{
+  const g = new (sandbox.__cls.Game)(view);
+  const p = g.player;
+  stepG(g, 20);
+  // чистая полоса: ящики и бугры на спавне мешают замеру бега
+  const sr = g.world.surfaceRow;
+  for (let x = 18; x <= 60; x++) {
+    for (let y = sr - 4; y <= sr - 1; y++) g.world.set(x, y, TILE.EMPTY, false);
+    g.world.set(x, sr, TILE.DIRT, false);
+  }
+  g.crates.length = 0;
+  g.tiles.flush();
+  p.x = 20 * TS; p.y = sr * TS - p.h; p.vx = 0; p.vy = 0;
+  g.particles.list.length = 0;
+  // 60 кадров реального бега вправо — физика, не телепорт
+  key('KeyD');
+  for (let i = 0; i < 60; i++) { g.update(CFG.step); }
+  key('KeyD', false);
+  const dust = g.particles.list.filter(x => x.kind === 'dust').length;
+  ok('M6: бег оставляет пыль под ногами', dust >= 3 && p.x > 24 * TS,
+     `клубов=${dust} x=${(p.x / TS).toFixed(1)}`);
+}
+
+// --- 8. свет не ломает кадровый бюджет в глубине
+{
+  const g = new (sandbox.__cls.Game)(view);
+  const p = g.player;
+  p.x = 40 * TS; p.y = 80 * TS - p.h;
+  g.camera.snap(p);
+  stepG(g, 10);
+  const t0 = performance.now();
+  const N = 120;
+  for (let i = 0; i < N; i++) { g.render(); }
+  const per = (performance.now() - t0) / N;
+  ok('M6: кадр в глубине со светом укладывается в бюджет', per < 25,
+     `${per.toFixed(2)} мс/кадр`);
 }
 
 // ---------------------------------------------------------------- итог

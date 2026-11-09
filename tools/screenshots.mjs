@@ -440,4 +440,105 @@ frames(30);
   shot('20-craft-scanner');
   game.craftOpen = false;
 }
+// ---------- M6: визуал ----------
+
+// 21: копание камня — искры на месте слома (сцена на поверхности, там свет есть)
+{
+  game.craftOpen = false;
+  const Wr = game.world;
+  const surf = Wr.surfaceRow;
+  for (let y = surf - 3; y <= surf + 6; y++) {
+    for (let x = 30; x <= 50; x++) Wr.set(x, y, TILE.EMPTY, false);
+  }
+  for (let y = surf + 7; y <= surf + 12; y++) {
+    for (let x = 30; x <= 50; x++) Wr.set(x, y, TILE.STONE, false);
+  }
+  Wr.set(38, surf + 7, TILE.FERRITE, false);
+  game.tiles.flush();
+  P.x = 38 * TS; P.y = (surf + 7) * TS - P.h;
+  P.vx = P.vy = 0;
+  game.camera.snap(P);
+  frames(2);
+  const dtx = 38, dty = surf + 7;
+  const mt = mouseToTile(dtx, dty);
+  mouseDown(mt.x, mt.y);
+  frames(4);
+  // искры и пыль рождаются в момент слома — фиксируем кадр сразу после него
+  game.particles.list.length = 0;
+  game.particles.dig(TILE.STONE, dtx * TS + 16, dty * TS + 16, Math.random);
+  game.particles.dig(TILE.STONE, (dtx + 1) * TS + 12, dty * TS + 18, Math.random);
+  // два шага частиц: искры должны разлететься, иначе в кадре одна белая клякса
+  game.particles.update(0.05, 1);
+  game.particles.update(0.05, 1);
+  game.render();
+  shot('21-dig-sparks');
+  {
+    const z = CFG.camera.zoom;
+    const sx = (dtx * TS - game.camera.x) * z - 70;
+    const sy = (dty * TS - game.camera.y) * z - 70;
+    const c2 = createCanvas(300, 240);
+    const x2 = c2.getContext('2d');
+    x2.imageSmoothingEnabled = false;
+    x2.drawImage(view, Math.max(0, sx), Math.max(0, sy), 300, 240, 0, 0, 600, 480);
+    fs.writeFileSync(new URL('../screenshots/21b-sparks-crop.png', import.meta.url), c2.toBuffer('image/png'));
+  }
+  mouseUp();
+  frames(20);
+}
+
+// 22: раненый хищник — трещины на панцире, полоска здоровья
+{
+  game.crawlers.length = 0;
+  const cx = P.cx + 5 * 32;
+  const cr = new sandbox.__clsM3.Crawler(cx, P.y - 4 + P.h - CFG.crawler.h);
+  cr.home = { x: cr.cx, y: cr.cy };
+  cr.hp = 20;
+  cr.hurtFlash = 0.2;
+  game.crawlers.push(cr);
+  game.camera.snap(P);
+  frames(1);
+  game.crawlers[0].hurtFlash = 0.2;
+  game.render();
+  shot('22-crawler-hurt');
+  game.crawlers.length = 0;
+}
+
+// 23: подбор осколка — вспышка и искры
+{
+  const { Drop } = sandbox.__cls;
+  game.particles.list.length = 0;
+  game.drops.push(new Drop(P.cx + 4, P.cy, TILE.FERRITE));
+  frames(1);
+  game.particles.pickup(TILE.FERRITE, P.cx, P.cy, Math.random);
+  game.render();
+  shot('23-pickup-burst');
+  game.drops.length = 0;
+  game.particles.list.length = 0;
+}
+
+// 24: свет в глубине — фонарь, кристаллы и терминал в одном кадре
+{
+  const t = game.terminals.find(x => x.deep) || game.terminals[0];
+  const Wr = game.world;
+  for (let y = t.ty - 3; y <= t.ty + 1; y++) {
+    for (let x = t.tx - 7; x <= t.tx + 6; x++) Wr.set(x, y, TILE.EMPTY, false);
+  }
+  for (let x = t.tx - 7; x <= t.tx + 6; x++) {
+    Wr.set(x, t.ty + 2, TILE.STONE, false);
+    Wr.set(x, t.ty + 3, TILE.STONE, false);
+  }
+  Wr.set(t.tx - 4, t.ty + 2, TILE.FERRITE, false);
+  Wr.set(t.tx + 3, t.ty + 2, TILE.FERRITE, false);
+  Wr.set(t.tx - 6, t.ty + 3, TILE.FERRITE, false);
+  game.tiles.flush();
+  P.x = (t.tx - 2) * 32;
+  P.y = (t.ty + 2) * 32 - P.h;
+  P.vx = P.vy = 0;
+  game.camera.snap(P);
+  frames(20);
+  game.camera.snap(P);
+  game.render();
+  shot('24-light-sources');
+}
+
 console.log('done');
