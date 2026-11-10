@@ -103,15 +103,6 @@ const CFG = {
     ruinRubble: 0.10        // доля обломков породы внутри зала
   },
 
-  // M8.1: корабль-обломки на точке спавна (5x4 тайла)
-  ship: {
-    tx: 16, ty: 30,           // координаты из ТЗ; если ряд попадает в породу —
-    w: 5, h: 4,               // обломки ставятся на пол зала (см. Game.makeShip)
-    interactRadius: 3.5,      // тайлов, на которых работает shipNear()
-    smokeEvery: 0.14,         // пауза между клубами дыма, с
-    smoke: '#5c6675'
-  },
-
   // M8.1: турели Руин. Не бегают, но бьют по игроку, если он в зоне видимости
   turret: {
     hp: 30,
@@ -226,27 +217,8 @@ const CFG = {
     holdTime: 2,         // сколько подсветка держится всего, с
     cooldown: 5,         // пауза между сканированиями, с
     tick: 1 / 6,         // как часто обновляется список целей, с
-    colors: { ferrite: '#63b8ff', terminal: '#ffa63d', crawler: '#ff3b48' },
+    colors: { ferrite: '#63b8ff', resonite: '#b98bff', crawler: '#ff3b48' },
     ringAlpha: 0.75
-  },
-
-  // M5: древние терминалы — объекты мира, не тайлы
-  terminal: {
-    count: 3,
-    deepCount: 2,              // из них в Глубоких пещерах
-    w: 26, h: 30,
-    interactRadius: 2,         // тайлов, чтобы прочитать
-    reward: { 3: 5, 4: 1 },    // +5 FERRITE +1 BIOGEL
-    color: '#6ee7ff',
-    dark: '#243b4a',
-    texts: [
-      { id: 'core',    title: 'ТЕРМИНАЛ 01 · ПРОТОКОЛ',
-        body: '...протокол стабилизации ядра нарушен...\nнесущая частота ушла в минус, опоры держат остаточное поле...' },
-      { id: 'tides',   title: 'ТЕРМИНАЛ 02 · ПРИЛИВЫ',
-        body: '...гравитационные приливы — это агония планеты...\nкаждый цикл — судорога, каждый выдох — вверх...' },
-      { id: 'missing', title: 'ТЕРМИНАЛ 03 · ЭКСПЕДИЦИЯ',
-        body: '...экспедиция не вернулась, они ушли глубже...\nмы слышим их маяк под пятьдесят восьмым рядом породы...' }
-    ]
   },
 
   // M6: визуальный слой. Всё рисуется кодом, спрайты запекаются в offscreen
@@ -260,7 +232,6 @@ const CFG = {
     visorGlow: 10,
     lampWarm: '210,236,255',
     ferriteGlow: '86,164,255',
-    terminalGlow: '110,231,255',
     crawlerGlow: '255,72,84',
     dustGlow: '150,140,128'
   },
@@ -272,7 +243,6 @@ const CFG = {
     lampFlicker: 0.09,    // ±9% радиуса: свет живой, а не прожектор
     lampFlickerHz: 5.5,
     ferriteLight: 1.55,   // радиус света кристалла, тайлов
-    terminalLight: 2.6,   // радиус свечения терминала, тайлов
     dropLight: 1.4,       // радиус свечения биогеля, тайлов
     bloom: 0.24,          // сила аддитивного свечения
     maxLights: 12         // выше этого источники в кадре игнорируются, лишние не рисуем
@@ -348,7 +318,9 @@ const CFG = {
     { id: TILE.DIRT, name: 'DIRT', color: '#6b4a2b', shade: '#49301b', light: '#946a3c', spark: '#ffb257' },
     { id: TILE.STONE, name: 'STONE', color: '#7a7a85', shade: '#53535d', light: '#a4a4b0', spark: '#ffcf70' },
     { id: TILE.FERRITE, name: 'FERRITE', color: '#4a7fbf', shade: '#2c4f78', light: '#8fbcf0', spark: '#8fe0ff' },
-    { id: ITEM.BIOGEL, name: 'BIOGEL', color: '#3fd66b', shade: '#218a3f', light: '#9bf7b4', spark: '#c9ffd9' }
+    { id: ITEM.BIOGEL, name: 'BIOGEL', color: '#3fd66b', shade: '#218a3f', light: '#9bf7b4', spark: '#c9ffd9' },
+    // M8.3: RESONITE — отдельный ресурс наравне с рудой (добыча — в narrative.js)
+    { id: 8, name: 'RESONITE', color: '#b98bff', shade: '#6b3fb8', light: '#eaf8ff' }
   ],
 
   physics: { gravity: 2200, maxFall: 1150, maxStepPx: 10 },
@@ -961,136 +933,6 @@ const Sprites = {
         x.fillRect(cx + 0.5, cy + 0.5, 1.2, 1.2);
         x.shadowBlur = 0;
         x.shadowColor = 'transparent';
-      }
-    });
-  },
-
-  // ---------- M8.1: груда обломков корабля (5x4 тайла) ----------
-  // Тёмный металл, разорванный борт с рёбрами, двигательный блок и тлеющие
-  // угли. Печётся один раз в offscreen-canvas: рисовать это каждый кадр
-  // десятками path-операций дорого
-  ship(w, h) {
-    return SPR.get('ship:' + w + 'x' + h, w, h, (x) => {
-      const body = (pts, fill, stroke, lw) => {
-        poly(x, pts.map(p => [p[0] * w, p[1] * h]));
-        x.fillStyle = fill;
-        x.fill();
-        if (stroke) { x.strokeStyle = stroke; x.lineWidth = lw || 1; x.stroke(); }
-      };
-
-      // тень под обломками
-      x.globalAlpha = 0.45;
-      x.fillStyle = '#000';
-      x.beginPath();
-      x.ellipse(w * 0.5, h * 0.95, w * 0.45, h * 0.055, 0, 0, Math.PI * 2);
-      x.fill();
-      x.globalAlpha = 1;
-
-      // рассыпанные листы обшивки вокруг корпуса
-      const plates = [
-        [0.01, 0.84, 0.17, 0.055, -0.16],
-        [0.68, 0.90, 0.20, 0.05, 0.10],
-        [0.26, 0.91, 0.18, 0.045, 0.04],
-        [0.83, 0.79, 0.13, 0.05, -0.28],
-        [0.10, 0.66, 0.10, 0.04, 0.22]
-      ];
-      for (const [px, py, pw, ph, rot] of plates) {
-        x.save();
-        x.translate(px * w, py * h);
-        x.rotate(rot);
-        x.fillStyle = '#1b222b';
-        x.fillRect(0, 0, pw * w, ph * h);
-        x.fillStyle = '#3a4450';
-        x.fillRect(0, 0, pw * w, ph * h * 0.4);
-        x.restore();
-      }
-
-      // корпус: нос задран, корма просела — «груда», а не целый корабль
-      body([[0.07, 0.40], [0.44, 0.17], [0.71, 0.31], [0.80, 0.62],
-            [0.63, 0.87], [0.20, 0.89], [0.09, 0.68]], '#2a3441', '#4f5c6c', 1.6);
-      // верхняя грань светлее — корпус читается объёмным
-      body([[0.09, 0.42], [0.44, 0.19], [0.69, 0.32], [0.61, 0.44], [0.19, 0.53]], '#3d4958');
-      // нижняя тень
-      body([[0.20, 0.74], [0.62, 0.70], [0.60, 0.86], [0.23, 0.87]], '#19202a');
-
-      // разлом борта: чёрный провал и рёбра шпангоута
-      body([[0.45, 0.20], [0.71, 0.31], [0.65, 0.50], [0.47, 0.42]], '#080c11');
-      x.strokeStyle = '#68768a';
-      x.lineWidth = Math.max(1.4, w * 0.012);
-      for (let i = 0; i < 4; i++) {
-        const k = i / 3;
-        x.beginPath();
-        x.moveTo((0.46 + k * 0.22) * w, (0.21 + k * 0.10) * h);
-        x.lineTo((0.49 + k * 0.20) * w, (0.42 + k * 0.06) * h);
-        x.stroke();
-      }
-      // рваный край: зубцы по правому борту
-      x.fillStyle = '#39434f';
-      for (let i = 0; i < 5; i++) {
-        const yy = 0.30 + i * 0.055;
-        x.beginPath();
-        x.moveTo(0.76 * w, yy * h);
-        x.lineTo((0.86 + (i % 2) * 0.04) * w, (yy + 0.03) * h);
-        x.lineTo(0.74 * w, (yy + 0.05) * h);
-        x.closePath();
-        x.fill();
-      }
-
-      // кабина: треснувшее стекло в носовой части
-      body([[0.17, 0.43], [0.29, 0.36], [0.32, 0.46], [0.20, 0.52]], '#16292f', '#7fb4c4', 1);
-      x.strokeStyle = 'rgba(180,230,245,0.55)';
-      x.lineWidth = 0.9;
-      x.beginPath();
-      x.moveTo(0.20 * w, 0.46 * h); x.lineTo(0.28 * w, 0.48 * h);
-      x.lineTo(0.25 * w, 0.52 * h); x.lineTo(0.30 * w, 0.45 * h);
-      x.stroke();
-
-      // двигательный блок слева снизу: сопло и оборванная труба
-      body([[0.05, 0.60], [0.17, 0.57], [0.19, 0.76], [0.08, 0.80]], '#212933', '#55616f', 1.2);
-      x.fillStyle = '#0d1116';
-      x.beginPath();
-      x.moveTo(0.05 * w, 0.62 * h);
-      x.lineTo(-0.005 * w, 0.68 * h);
-      x.lineTo(0.05 * w, 0.78 * h);
-      x.closePath();
-      x.fill();
-      x.strokeStyle = '#49525e';
-      x.lineWidth = Math.max(1.8, w * 0.014);
-      x.beginPath();
-      x.moveTo(0.17 * w, 0.62 * h);
-      x.bezierCurveTo(0.26 * w, 0.55 * h, 0.30 * w, 0.72 * h, 0.36 * w, 0.66 * h);
-      x.stroke();
-
-      // заклёпки по шву корпуса
-      x.fillStyle = 'rgba(196,210,228,0.5)';
-      for (let i = 0; i < 7; i++) {
-        const k = i / 6;
-        x.beginPath();
-        x.arc((0.13 + k * 0.48) * w, (0.60 + Math.sin(k * 3) * 0.02) * h, Math.max(0.8, w * 0.008), 0, Math.PI * 2);
-        x.fill();
-      }
-
-      // тлеющие угли внутри разлома
-      x.save();
-      x.globalCompositeOperation = 'lighter';
-      for (const [ex, ey, er, ec] of [[0.56, 0.40, 0.10, '255,150,60'], [0.64, 0.46, 0.06, '255,110,40'],
-                                      [0.50, 0.55, 0.05, '255,180,90']]) {
-        const g2 = x.createRadialGradient(ex * w, ey * h, 0, ex * w, ey * h, er * w);
-        g2.addColorStop(0, 'rgba(' + ec + ',0.85)');
-        g2.addColorStop(1, 'rgba(' + ec + ',0)');
-        x.fillStyle = g2;
-        x.beginPath();
-        x.arc(ex * w, ey * h, er * w, 0, Math.PI * 2);
-        x.fill();
-      }
-      x.restore();
-
-      // мелкий мусор: гайки и щепки на полу
-      x.fillStyle = '#4a5563';
-      for (let i = 0; i < 9; i++) {
-        const a = hash2(i * 7 + 1, i * 13 + 5);
-        const b = hash2(i * 11 + 3, i * 5 + 9);
-        x.fillRect((0.04 + a * 0.9) * w, (0.88 + b * 0.08) * h, 1.6, 1.6);
       }
     });
   },
@@ -2883,15 +2725,8 @@ const Save = {
         player: { x: game.player.x, y: game.player.y, g: game.player.gravityTarget,
                   laser: game.player.hasLaser, armor: game.player.hasArmor,
                   gun: game.player.hasGravityGun, scanner: game.player.hasScanner },
-        // M8.1: корабль переживает F5 (координаты и факт осмотра)
-        ship: game.ship ? { tx: game.ship.tx, ty: game.ship.ty,
-                            w: game.ship.w, h: game.ship.h,
-                            looted: !!game.ship.looted } : null,
         drops: game.drops.map(d => ({ x: d.x, y: d.y, t: d.type })),
         crates: game.crates.map(c => ({ x: c.x, y: c.y })),
-        // M5: терминалы — координаты и что уже прочитано
-        terminals: game.terminals.map(t => ({ id: t.id, tx: t.tx, ty: t.ty,
-                                              deep: t.deep ? 1 : 0, read: t.read ? 1 : 0 })),
         cycle: { phase: game.tide.id, timeLeft: game.tide.left }
       };
       localStorage.setItem(CFG.save.key, JSON.stringify(data));
@@ -3749,11 +3584,6 @@ class Game {
     // M6: игрок сообщает о шаге, частицы рисуют пыль — без обратной связи классов
     this.player.onStepDust = (p) => this.particles.step(p.cx, p.cy, p.facing);
 
-    // M8.1: на стартовой точке — обломки корабля (5x4 тайла)
-    this.ship = this.makeShip();
-    this.shipSmokeT = 0;
-    this.shipHintT = 0;
-
     // Ящики для телекинеза
     this.crates = [];
     for (const tx of CFG.spawn.cratesTileX) {
@@ -3775,19 +3605,14 @@ class Game {
     this.noticeColor = '#e8f2ff';
     this.lastDeathLost = null;
 
-    // M5: терминалы, сканер, Глубокие пещеры
-    this.terminals = [];           // { id, x, y, tx, ty, read }
-    this.terminalsRead = 0;
+    // M5: сканер и Глубокие пещеры (терминалы теперь в narrative.js)
     this.scanT = 0;                // сколько ещё держится подсветка
     this.scanCd = 0;               // кулдаун Q
     this.scanTargets = [];         // снимок целей: { wx, wy, kind, color }
     this.scanTick = 0;
-    this.lore = null;              // открытая панель лора { title, body, id }
+    this.lore = null;              // панель лора: её наполняет narrative.js
     this.loreT = 0;
-    this.promptTerminal = null;    // терминал под рукой: «[E] Прочитать»
 
-    // терминалы раньше хищников: глубинный спавн держится от них подальше
-    this.spawnTerminals();
     this.spawnCrawlers();
     this.spawnCaveGel();
     this.spawnDeepCrawlers();
@@ -4145,91 +3970,6 @@ class Game {
       }
     }
     return null;
-  }
-
-  /* ---------- M8.1: корабль-обломки на старте ---------- */
-
-  // Корабль — объект, а не тайл: он не мешает физике (как терминалы),
-  // но у него есть габарит 5x4 тайла и точка взаимодействия
-  makeShip() {
-    const S = CFG.ship;
-    const w = this.world;
-    // В ТЗ корабль стоит на (16, 30). Пол зала — ряд surfaceRow (17), поэтому
-    // ряд 30 оказался бы внутри породы; обломки ставятся на стартовую колонку
-    // и опираются на пол зала, как и положено «груде обломков»
-    let ty = S.ty;
-    if (ty + S.h > w.surfaceRow) ty = w.surfaceRow - S.h;
-    return {
-      tx: S.tx, ty,
-      w: S.w, h: S.h,
-      x: S.tx * TS, y: ty * TS,
-      wpx: S.w * TS, hpx: S.h * TS,
-      cx: S.tx * TS + S.w * TS / 2,
-      cy: ty * TS + S.h * TS / 2,
-      looted: false
-    };
-  }
-
-  // «Обломки под рукой» — по аналогии с benchNear(): объект или null
-  shipNear() {
-    if (!this.ship) return null;
-    const p = this.player;
-    const d = Math.hypot(this.ship.cx - p.cx, this.ship.cy - p.cy) / TS;
-    return d <= CFG.ship.interactRadius ? this.ship : null;
-  }
-
-  // Реакция на E рядом с обломками. Тексты — зона сюжетного агента,
-  // поэтому здесь только технический отклик: вспышка и искры
-  inspectShip() {
-    const s = this.shipNear();
-    if (!s) return false;
-    this.particles.place(s.x + s.wpx * 0.45, s.y + s.hpx * 0.55);
-    this.shipHintT = 0.5;
-    return true;
-  }
-
-  // Дымящиеся части: корабль живёт, пока виден
-  updateShipFx(dt) {
-    const s = this.ship;
-    if (!s) return;
-    this.shipHintT = Math.max(0, this.shipHintT - dt);
-    const cam = this.camera;
-    const onScreen = s.x < cam.x + cam.w + 96 && s.x + s.wpx > cam.x - 96 &&
-                     s.y < cam.y + cam.h + 96 && s.y + s.hpx > cam.y - 96;
-    if (!onScreen) return;
-    this.shipSmokeT -= dt;
-    if (this.shipSmokeT > 0) return;
-    this.shipSmokeT = CFG.ship.smokeEvery;
-    const rnd = this.rnd;
-    const px = s.x + s.wpx * (0.22 + rnd() * 0.56);
-    const py = s.y + s.hpx * (0.3 + rnd() * 0.35);
-    this.particles.add(px, py, (rnd() - 0.5) * 14, -20 - rnd() * 18,
-                       3 + rnd() * 3, CFG.ship.smoke, 1.7, true, 'smoke');
-    if (rnd() < 0.3) {
-      this.particles.add(px, py, (rnd() - 0.5) * 40, -30 - rnd() * 20,
-                         1.4, '#ffae5c', 0.8, true, 'spark');
-    }
-  }
-
-  // Обломки: тёмный металл, рваные листы, двигательный блок и тлеющие угли.
-  // Спрайт печётся один раз (SPR), дальше — один drawImage
-  drawShip(ctx) {
-    const s = this.ship;
-    if (!s) return;
-    const cam = this.camera;
-    if (s.x > cam.x + cam.w + 32 || s.x + s.wpx < cam.x - 32 ||
-        s.y > cam.y + cam.h + 32 || s.y + s.hpx < cam.y - 32) return;
-    const spr = Sprites.ship(s.wpx, s.hpx);
-    if (!spr) return;
-    ctx.drawImage(spr, s.x, s.y, s.wpx, s.hpx);
-    // тлеющий очаг: пульсирующее пятно в корпусе
-    const pulse = 0.55 + 0.45 * Math.sin(this.time * 3.1);
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.globalAlpha = 0.30 * pulse;
-    glow(ctx, s.x + s.wpx * 0.42, s.y + s.hpx * 0.52, s.wpx * 0.30, '255,140,60', 0.5);
-    ctx.restore();
-    ctx.globalAlpha = 1;
   }
 
   /* ---------- M8.1: турели Руин ---------- */
@@ -4610,8 +4350,6 @@ class Game {
       const tx = 8 + Math.floor(this.rnd() * Math.max(1, span - 8));
       const ty = top + Math.floor(this.rnd() * (bottom - top));
       if (!this.freeCaveSpot(tx, ty)) continue;
-      // держимся подальше от терминалов: лор не должен читаться под укусами
-      if (this.terminals.some(t => Math.hypot(t.tx - tx, t.ty - ty) < 10)) continue;
       const c = new Crawler(tx * TS + (TS - CFG.crawler.w) / 2, (ty + 1) * TS - CFG.crawler.h);
       c.home = { x: c.cx, y: c.cy };
       c.deep = true;
@@ -4620,107 +4358,8 @@ class Game {
     }
   }
 
-  // M5: древние терминалы. Один на поверхности (в зале), два — в глубине.
-  // Терминал стоит на полу, как обелиск: воздух на его тайле и над ним
-  spawnTerminals() {
-    const w = this.world;
-    const T = CFG.terminal;
-    const spots = [];
-
-    // 1) поверхностный: в зале, на полу, подальше от старта игрока
-    const caveTop = CFG.layers.skyRows + CFG.layers.ceilingRows;
-    const caveBottom = caveTop + CFG.layers.caveRows;
-    let guard = 0;
-    const surfaceSpan = Math.min(w.cols - 50, CFG.spawn.hallSpan);
-    while (spots.length < 1 && guard++ < 6000) {
-      const tx = 25 + Math.floor(this.rnd() * Math.max(1, surfaceSpan - 25));
-      const ty = caveTop + 2 + Math.floor(this.rnd() * (caveBottom - caveTop - 3));
-      if (Math.abs(tx - CFG.spawn.playerTileX) < 18) continue;
-      if (!this.freeCaveSpot(tx, ty)) continue;
-      if (spots.some(s => Math.hypot(s.tx - tx, s.ty - ty) < 20)) continue;
-      spots.push({ tx, ty, deep: false });
-    }
-
-    // 2) глубинные: только под 50-м рядом. Два терминала разводим по глубине
-    // (верхняя и нижняя треть зоны), чтобы игрок не находил оба в одной пещере
-    const bands = [
-      [CFG.layers.deepTopRow + 4, CFG.layers.deepTopRow + 25],
-      [CFG.layers.deepTopRow + 30, w.rows - 10]
-    ];
-    for (const [y0, y1] of bands) {
-      if (spots.length >= T.count) break;
-      guard = 0;
-      const deepSpan = Math.min(w.cols - 16, CFG.spawn.deepSpan);
-      while (guard++ < 20000) {
-        const tx = 8 + Math.floor(this.rnd() * Math.max(1, deepSpan - 8));
-        const ty = y0 + Math.floor(this.rnd() * Math.max(1, y1 - y0));
-        if (!this.freeCaveSpot(tx, ty)) continue;
-        if (!w.solid(tx, ty + 1)) continue;
-        if (spots.some(s => Math.hypot(s.tx - tx, s.ty - ty) < 30)) continue;
-        spots.push({ tx, ty, deep: true });
-        break;
-      }
-    }
-
-    // Терминал должен быть виден: если он оказался замурован в породе,
-    // вырезаем нишу 1x2 и опору под ним. Раньше это делал спавн «на воздухе»,
-    // но на границе полостей он может промахнуться
-    for (const s of spots) {
-      if (w.solid(s.tx, s.ty)) w.set(s.tx, s.ty, TILE.EMPTY, false);
-      if (w.solid(s.tx, s.ty - 1)) w.set(s.tx, s.ty - 1, TILE.EMPTY, false);
-      if (!w.solid(s.tx, s.ty + 1)) w.set(s.tx, s.ty + 1, TILE.STONE, false);
-      // и небольшой закуток, чтобы к терминалу можно было подойти
-      for (let dx = -1; dx <= 1; dx++) {
-        for (let dy = 1; dy <= 2; dy++) {
-          if (w.solid(s.tx + dx, s.ty - dy)) w.set(s.tx + dx, s.ty - dy, TILE.EMPTY, false);
-        }
-      }
-    }
-    w.dirty.length = 0;
-
-    this.terminals = spots.map((s, i) => {
-      const text = CFG.terminal.texts[i % CFG.terminal.texts.length];
-      return {
-        id: text.id, index: i, title: text.title, body: text.body,
-        tx: s.tx, ty: s.ty, deep: s.deep,
-        x: s.tx * TS + (TS - CFG.terminal.w) / 2,
-        y: (s.ty + 1) * TS - CFG.terminal.h,
-        read: false
-      };
-    });
-    this.terminalsRead = this.terminals.filter(t => t.read).length;
-  }
-
-  // Терминал в радиусе взаимодействия — ближайший
-  terminalNear() {
-    const p = this.player;
-    const R = CFG.terminal.interactRadius;
-    let best = null, bd = 1e9;
-    for (const t of this.terminals) {
-      if (t.read) continue;
-      const d = Math.hypot(t.x + CFG.terminal.w / 2 - p.cx, t.y + CFG.terminal.h / 2 - p.cy) / TS;
-      if (d > R) continue;
-      if (d < bd) { bd = d; best = t; }
-    }
-    return best;
-  }
-
-  // E: открыть лор терминала и выдать «запас древних»
-  readTerminal(t) {
-    if (!t) return false;
-    this.lore = { id: t.id, title: t.title, body: t.body };
-    this.loreT = 0;
-    if (t.read) return false;
-    t.read = true;
-    this.terminalsRead = this.terminals.filter(x => x.read).length;
-    for (const id in CFG.terminal.reward) this.inventory.add(Number(id), CFG.terminal.reward[id]);
-    this.particles.place(t.x + CFG.terminal.w / 2, t.y + CFG.terminal.h / 2);
-    this.notice('запас древних: +' + CFG.terminal.reward[3] + ' FERRITE, +' +
-                CFG.terminal.reward[4] + ' BIOGEL', '#ffc07a');
-    this.doSave();
-    return true;
-  }
-
+  // Панель лора закрывается тем же E/Esc/Enter, что и раньше:
+  // сам текст теперь приходит из narrative.js
   closeLore() { this.lore = null; }
 
   // M5: волна сканера. Ставим таймер, цели собираем в updateScan
@@ -4735,7 +4374,7 @@ class Game {
     return true;
   }
 
-  // Что подсвечиваем: дропы FERRITE, непрочитанные терминалы, живые хищники
+  // Что подсвечиваем: дропы FERRITE, руда в породе (в т.ч. RESONITE), хищники
   collectScanTargets() {
     const R = CFG.scanner.radius;
     const p = this.player;
@@ -4756,17 +4395,14 @@ class Game {
     const t1y = Math.min(world.rows - 1, Math.floor((p.cy + R * TS) / TS));
     for (let ty = t0y; ty <= t1y; ty++) {
       for (let tx = t0x; tx <= t1x; tx++) {
-        if (world.tiles[ty * world.cols + tx] !== TILE.FERRITE) continue;
+        const type = world.get(tx, ty);
+        const reson = type === TILE.RESONITE;
+        if (type !== TILE.FERRITE && !reson) continue;
         const wx = tx * TS + TS / 2, wy = ty * TS + TS / 2;
         if (!inRange(wx, wy)) continue;
-        out.push({ wx, wy, kind: 'ferrite', color: C.ferrite, w: TS, h: TS });
+        out.push({ wx, wy, kind: reson ? 'resonite' : 'ferrite',
+                   color: reson ? C.resonite : C.ferrite, w: TS, h: TS });
       }
-    }
-    for (const t of this.terminals) {
-      if (t.read) continue;
-      const wx = t.x + CFG.terminal.w / 2, wy = t.y + CFG.terminal.h / 2;
-      if (!inRange(wx, wy)) continue;
-      out.push({ wx, wy, kind: 'terminal', color: C.terminal, w: CFG.terminal.w, h: CFG.terminal.h });
     }
     for (const c of this.crawlers) {
       if (c.dead) continue;
@@ -5247,15 +4883,8 @@ class Game {
       if (inp.consume('Escape') || inp.consume('Enter') || inp.consume('KeyE')) this.closeLore();
     } else {
       if (inp.consume('KeyQ')) this.useScanner();
-      if (inp.consume('KeyE')) {
-        const t = this.terminalNear();
-        // M8.1: рядом с обломками E тоже откликается — через shipNear()
-        if (t) this.readTerminal(t);
-        else if (this.shipNear()) this.inspectShip();
-      }
     }
     this.updateScan(dt);
-    this.promptTerminal = this.lore ? null : this.terminalNear();
 
     if (inp.consume('KeyF')) this.flipGravity();
 
@@ -5304,7 +4933,6 @@ class Game {
     this.world.updateChunks(this.camera);
     this.syncTurrets();
     this.updateTurrets(dt);
-    this.updateShipFx(dt);
 
     this.updateWreckFx(dt);
 
@@ -5326,13 +4954,11 @@ class Game {
     this.tiles = new TileLayer(this.world);
     SPR.clear();               // M6: кэш спрайтов и тайлов не должен пережить мир
     this.anchors = [];
-    // M8.1: турели, болты и корабль тоже начинают с чистого листа
+    // M8.1: турели и болты тоже начинают с чистого листа
     this.turrets = [];
     this.bolts = [];
     this.deadTurrets.clear();
     if (this.turretMap) this.turretMap.clear();
-    this.ship = this.makeShip();
-    this.shipSmokeT = 0;
     this.syncTurrets(true);
     this.drops = [];
     for (const r of CFG.resources) this.inventory.counts[r.id] = 0;
@@ -5346,7 +4972,6 @@ class Game {
     this.player.dead = false;
     this.player.invuln = CFG.health.respawnInvuln;
     this.crawlers = [];
-    this.spawnTerminals();
     this.spawnCrawlers();
     this.spawnCaveGel();
     this.spawnDeepCrawlers();
@@ -5443,21 +5068,6 @@ class Game {
     Save.unpackTiles(this.world, d.tiles, !d.tileFormat);
     this.tiles.flush();
 
-    // Корабль: координаты и «осмотрен» переживают перезагрузку
-    if (d.ship && this.ship) {
-      this.ship.tx = d.ship.tx;
-      this.ship.ty = d.ship.ty;
-      this.ship.w = d.ship.w || CFG.ship.w;
-      this.ship.h = d.ship.h || CFG.ship.h;
-      this.ship.x = this.ship.tx * TS;
-      this.ship.y = this.ship.ty * TS;
-      this.ship.wpx = this.ship.w * TS;
-      this.ship.hpx = this.ship.h * TS;
-      this.ship.cx = this.ship.x + this.ship.wpx / 2;
-      this.ship.cy = this.ship.y + this.ship.hpx / 2;
-      this.ship.looted = !!d.ship.looted;
-    }
-
     this.anchors = (d.anchors || []).map(a => ({ x: a.x, y: a.y, born: 0 }));
     for (const r of CFG.resources) this.inventory.counts[r.id] = (d.inventory && d.inventory[r.id]) || 0;
 
@@ -5473,24 +5083,6 @@ class Game {
       this.player.hasScanner = !!d.player.scanner;
     }
 
-    // M5: терминалы. Координаты берём из сейва — иначе после F5
-    // обелиски телепортировались бы в новые случайные точки
-    if (d.terminals && d.terminals.length) {
-      const known = {};
-      for (const t of this.terminals) known[t.id] = t;
-      this.terminals = d.terminals.map((s, i) => {
-        const text = CFG.terminal.texts.find(x => x.id === s.id) || CFG.terminal.texts[i % CFG.terminal.texts.length];
-        const base = known[text.id] || { id: text.id, index: i, title: text.title, body: text.body };
-        return {
-          id: text.id, index: i, title: text.title, body: text.body,
-          tx: s.tx, ty: s.ty, deep: !!s.deep,
-          x: s.tx * TS + (TS - CFG.terminal.w) / 2,
-          y: (s.ty + 1) * TS - CFG.terminal.h,
-          read: !!s.read
-        };
-      });
-      this.terminalsRead = this.terminals.filter(t => t.read).length;
-    }
     this.drops = (d.drops || []).map(s => {
       const dr = new Drop(s.x, s.y, s.t);
       dr.sleeping = true;
@@ -5662,9 +5254,7 @@ class Game {
     ctx.translate(-camX, -camY);
 
     this.drawTiles(ctx, camX, camY);
-    this.drawShip(ctx);          // M8.1: обломки корабля — за игроком
     this.drawCrates(ctx);
-    this.drawTerminals(ctx);
     this.drawTurrets(ctx);       // M8.1: турели Руин
     this.drawCrawlers(ctx);
     this.drawBolts(ctx);
@@ -5677,7 +5267,6 @@ class Game {
     this.drawLaserBeam(ctx);
     this.drawDig(ctx);
     this.drawGhost(ctx);
-    this.drawPrompt(ctx);
     this.drawCursor(ctx);
     // M5: волна сканера — поверх мира, сквозь стены
     this.drawScan(ctx);
@@ -5745,19 +5334,6 @@ class Game {
                       tint: reson ? '96,178,255' : CFG.look.ferriteGlow });
         if (lights.length > L.maxLights) break;
       }
-    }
-    // тлеющие угли корабля: тёплое пятно на старте (только пока он в кадре)
-    if (this.ship) {
-      const ss = toScreen(this.ship.cx, this.ship.cy + this.ship.hpx * 0.05);
-      if (ss.x > -240 && ss.x < this.vw + 240 && ss.y > -240 && ss.y < this.vh + 240) {
-        lights.push({ x: ss.x, y: ss.y, r: 3.4 * TS * z, soft: 0.55, tint: '255,140,60' });
-      }
-    }
-    for (const t of this.terminals) {
-      if (t.read) continue;
-      const s2 = toScreen(t.x + CFG.terminal.w / 2, t.y + CFG.terminal.h / 2);
-      const pulse = 0.82 + 0.18 * Math.sin(this.time * 2.4 + t.index);
-      lights.push({ x: s2.x, y: s2.y, r: L.terminalLight * TS * z * pulse, soft: 0.25, tint: CFG.look.terminalGlow });
     }
     for (const a of this.anchors) {
       const s2 = toScreen(a.x * TS + TS / 2, a.y * TS + TS / 2);
@@ -5844,57 +5420,7 @@ class Game {
     ctx.drawImage(this.postLayer, 0, 0, this.vw, this.vh);
   }
 
-  /* ---------- M5: терминалы, сканер, глубина ---------- */
-
-  drawTerminals(ctx) {
-    const T = CFG.terminal;
-    for (const t of this.terminals) {
-      const x = Math.round(t.x), y = Math.round(t.y);
-      const pulse = 0.5 + 0.5 * Math.sin(this.time * 2.4 + t.index * 2);
-      const lit = !t.read;
-
-      if (lit) {
-        // ореол: обелиск должно быть видно издалека, он и есть цель исследования
-        const g = ctx.createRadialGradient(x + T.w / 2, y + T.h / 2, 4, x + T.w / 2, y + T.h / 2, T.w * 1.8);
-        g.addColorStop(0, 'rgba(110,231,255,' + (0.22 + 0.12 * pulse).toFixed(3) + ')');
-        g.addColorStop(1, 'rgba(110,231,255,0)');
-        ctx.fillStyle = g;
-        ctx.fillRect(x - T.w, y - T.h, T.w * 3, T.h * 3);
-      }
-
-      // корпус: сужающийся кверху обелиск
-      ctx.beginPath();
-      ctx.moveTo(x + 4, y + T.h);
-      ctx.lineTo(x + T.w - 4, y + T.h);
-      ctx.lineTo(x + T.w - 7, y + 2);
-      ctx.lineTo(x + 7, y + 2);
-      ctx.closePath();
-      ctx.fillStyle = t.read ? '#101820' : '#101c26';
-      ctx.fill();
-      ctx.strokeStyle = t.read ? 'rgba(70,95,115,0.7)' : 'rgba(110,231,255,0.55)';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-
-      // руны: три короткие чёрточки, которые гаснут вместе с терминалом
-      const ra = t.read ? 0.16 : 0.55 + 0.45 * pulse;
-      ctx.globalAlpha = ra;
-      ctx.fillStyle = t.read ? T.dark : T.color;
-      for (let i = 0; i < 3; i++) {
-        const ry = y + 9 + i * 7;
-        ctx.fillRect(x + 9, ry, T.w - 18, 2);
-        if (!t.read) {
-          ctx.globalAlpha = ra * 0.5;
-          ctx.fillRect(x + 9, ry - 2, T.w - 18, 1);
-          ctx.globalAlpha = ra;
-        }
-      }
-      ctx.globalAlpha = 1;
-
-      // подставка
-      ctx.fillStyle = t.read ? '#1a2530' : '#1d3040';
-      ctx.fillRect(x + 2, y + T.h - 4, T.w - 4, 4);
-    }
-  }
+  /* ---------- M5: сканер и глубина ---------- */
 
   // Волна сканера: расходящийся круг + метки целей. Рисуется над тайлами,
   // поэтому «видно сквозь стены» — это не просвечивание, а маркеры поверх
@@ -5930,7 +5456,7 @@ class Game {
     ctx.arc(p.cx, p.cy, r, 0, Math.PI * 2);
     ctx.fill();
 
-    // метки: руда — точка, терминал — ромб, хищник — треугольник
+    // метки: руда — точка (FERITE синяя, RESONITE фиолетовая), хищник — треугольник
     for (const t of this.scanTargets) {
       const d = Math.hypot(t.wx - p.cx, t.wy - p.cy);
       if (d > r) continue;
@@ -5938,8 +5464,8 @@ class Game {
       ctx.strokeStyle = t.color;
       ctx.fillStyle = t.color;
       ctx.lineWidth = 1.5;
-      if (t.kind === 'ferrite') {
-        // Метка должна читаться поверх такой же синей руды в стене:
+      if (t.kind === 'ferrite' || t.kind === 'resonite') {
+        // Метка должна читаться поверх такой же руды в стене:
         // тёмная подложка + яркое кольцо, а не просто квадрат
         ctx.globalAlpha *= 0.85;
         ctx.fillStyle = 'rgba(4,10,20,0.75)';
@@ -5954,16 +5480,6 @@ class Game {
         ctx.beginPath();
         ctx.arc(t.wx, t.wy, 7.5, 0, Math.PI * 2);
         ctx.stroke();
-      } else if (t.kind === 'terminal') {
-        ctx.beginPath();
-        ctx.moveTo(t.wx, t.wy - 9);
-        ctx.lineTo(t.wx + 8, t.wy);
-        ctx.lineTo(t.wx, t.wy + 9);
-        ctx.lineTo(t.wx - 8, t.wy);
-        ctx.closePath();
-        ctx.stroke();
-        ctx.globalAlpha *= 0.35;
-        ctx.fill();
       } else {
         // хищник: треугольник с тёмной подложкой — красный силуэт не должен
         // сливаться с красными глазками самого хищника
@@ -6799,20 +6315,13 @@ class Game {
       ix += 18;
     }
 
-    // M5: счётчик прочитанных терминалов — под иконками экипировки
-    const found = this.terminalsRead || 0;
-    const total = this.terminals.length || CFG.terminal.count;
+    // Кулдаун сканера: маленькая полоска под иконками экипировки
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.font = '10px ' + CFG.render.font;
-    ctx.fillStyle = found >= total ? '#ffc07a' : 'rgba(255,192,122,0.78)';
-    ctx.fillText('Терминалы: ' + found + '/' + total, x + 2, iy + 26);
-
-    // Кулдаун сканера: маленькая полоска под счётчиком
     if (p.hasScanner) {
       const S = CFG.scanner;
       const cw = 54, chh = 3;
-      const cy2 = iy + 36;
+      const cy2 = iy + 26;
       ctx.fillStyle = 'rgba(150,180,220,0.18)';
       ctx.fillRect(x + 2, cy2, cw, chh);
       const ready = this.scanCd <= 0;
@@ -7049,54 +6558,6 @@ class Game {
     ctx.restore();
   }
 
-  // Подсказка «[E] Прочитать» над терминалом: прицел игрока не должен
-  // превращаться в поиск горячей клавиши наугад
-  drawPrompt(ctx) {
-    if (this.lore) return;
-    // M8.1: у обломков корабля своя подсказка (shipNear, а не терминал)
-    const ship = this.promptTerminal ? null : this.shipNear();
-    if (ship) {
-      const label = '[E] Обломки';
-      const cx = ship.cx;
-      const cy = ship.y - 10;
-      ctx.font = 'bold 10px ' + CFG.render.font;
-      const w = ctx.measureText(label).width + 14;
-      ctx.fillStyle = 'rgba(6,12,18,0.82)';
-      rr(ctx, cx - w / 2, cy - 9, w, 18, 5);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255,150,90,0.5)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.fillStyle = '#ffd7b0';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(label, cx, cy + 0.5);
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      return;
-    }
-    const t = this.promptTerminal;
-    if (!t) return;
-    const T = CFG.terminal;
-    const cx = t.x + T.w / 2;
-    const cy = t.y - 12;
-    const label = '[E] Прочитать';
-    ctx.font = 'bold 10px ' + CFG.render.font;
-    const w = ctx.measureText(label).width + 14;
-    ctx.fillStyle = 'rgba(6,12,18,0.82)';
-    rr(ctx, cx - w / 2, cy - 9, w, 18, 5);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(110,231,255,0.5)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.fillStyle = '#bff2ff';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(label, cx, cy + 0.5);
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-  }
-
   // Панель лора: затемнение + текст. Читается, пока не нажмёшь Esc/Enter/E
   drawLore(ctx) {
     const L = this.lore;
@@ -7137,10 +6598,6 @@ class Game {
     ctx.font = '10px ' + CFG.render.font;
     ctx.fillStyle = 'rgba(150,180,215,0.7)';
     ctx.fillText('Esc / Enter — закрыть', x + 30, y + h - 30);
-    ctx.textAlign = 'right';
-    ctx.fillStyle = 'rgba(255,192,122,0.9)';
-    ctx.fillText('запас древних: +' + CFG.terminal.reward[3] + ' FERRITE · +' +
-                 CFG.terminal.reward[4] + ' BIOGEL', x + w - 20, y + h - 30);
     ctx.globalAlpha = 1;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
@@ -7582,5 +7039,8 @@ try {
   showFallback((e && e.stack) || e);
 }
 </script>
+
+<!-- M8.3: сюжетный слой (архивы, корабль, квесты) живёт отдельным файлом -->
+<script src="narrative.js"></script>
 </body>
 </html>

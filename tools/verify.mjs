@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 
 const HTML = fs.readFileSync(new URL('../gravity-void.html', import.meta.url), 'utf8');
-const m = HTML.match(/<script>([\s\S]*)<\/script>/);
+const m = HTML.match(/<script>([\s\S]*?)<\/script>/);
 if (!m) throw new Error('script не найден');
 let SRC = m[1];
 
@@ -1348,80 +1348,28 @@ ok('M5: в зале осталось 3 хищника',
 ok('M5: глубина не пустая — там есть где стоять',
    deepCrawlers.every(c => !gM5.world.solid(Math.floor(c.cx / TS), Math.floor(c.cy / TS))));
 
-// --- 3. терминалы
-const T5 = CFG.terminal;
-ok('M5: терминалов 3', gM5.terminals.length === 3, `n=${gM5.terminals.length}`);
-ok('M5: два терминала в глубине, один на поверхности',
-   gM5.terminals.filter(t => t.deep).length === 2 && gM5.terminals.filter(t => !t.deep).length === 1,
-   gM5.terminals.map(t => (t.deep ? 'deep' : 'top') + '@' + t.tx + ',' + t.ty).join(' '));
-ok('M5: терминалы стоят на полу, а не в породе',
-   gM5.terminals.every(t => !gM5.world.solid(t.tx, t.ty) && gM5.world.solid(t.tx, t.ty + 1)),
-   gM5.terminals.map(t => `${t.tx},${t.ty}:${gM5.world.get(t.tx, t.ty)}/${gM5.world.get(t.tx, t.ty + 1)}`).join(' '));
-ok('M5: тексты терминалов — три разных куска лора',
-   new Set(gM5.terminals.map(t => t.id)).size === 3);
-const loreText = T5.texts.map(t => t.body).join(' ');
-ok('M5: есть лор про протокол ядра', /протокол стабилизации ядра нарушен/.test(loreText));
-ok('M5: есть лор про приливы как агонию планеты', /гравитационные приливы — это агония планеты/.test(loreText));
-ok('M5: есть лор про ушедшую экспедицию', /экспедиция не вернулась, они ушли глубже/.test(loreText));
-ok('M5: награда за терминал +5 FERRITE и +1 BIOGEL',
-   T5.reward[3] === 5 && T5.reward[4] === 1, JSON.stringify(T5.reward));
-
-// далеко от терминала: E ничего не открывает
+// --- 3. M8.3: старые терминалы ушли в narrative.js, панель лора осталась
+ok('M8.3: в игре больше нет старых терминалов',
+   gM5.terminals === undefined && typeof gM5.spawnTerminals === 'undefined' &&
+   typeof gM5.terminalNear === 'undefined' && typeof gM5.readTerminal === 'undefined' &&
+   typeof gM5.drawTerminals === 'undefined' && gM5.terminalsRead === undefined);
+ok('M8.3: сюжетных заготовок в конфиге нет', CFG.terminal === undefined);
+ok('M8.3: панель лора осталась точкой входа для narrative.js',
+   typeof gM5.closeLore === 'function' && /drawLore/.test(String(gM5.drawHud)));
 {
-  const t0 = gM5.terminals[1];
-  PM5.x = (t0.tx + 12) * TS; PM5.y = gM5.world.surfaceRow * TS - PM5.h;
-  gM5.camera.snap(PM5);
-  stepG(gM5, 2);
-  pressG(gM5, 'KeyE');
-  stepG(gM5, 1);
-  ok('M5: E вдали от терминала ничего не открывает', gM5.lore === null, `lore=${!!gM5.lore}`);
-  ok('M5: счётчик терминалов на нуле', gM5.terminalsRead === 0, String(gM5.terminalsRead));
-}
-
-// вплотную: E читает лор и выдаёт запас древних
-{
-  const t0 = gM5.terminals[1];
-  PM5.x = (t0.tx - 1) * TS; PM5.y = (t0.ty + 1) * TS - PM5.h;
-  PM5.vx = 0; PM5.vy = 0;
-  gM5.camera.snap(PM5);
-  stepG(gM5, 3);
-  ok('M5: терминал в радиусе взаимодействия даёт подсказку', gM5.promptTerminal === t0,
-     `prompt=${gM5.promptTerminal && gM5.promptTerminal.id}`);
-  const fer0 = gM5.inventory.counts[TILE.FERRITE];
-  const gel0 = gM5.inventory.counts[ITEM.BIOGEL];
-  pressG(gM5, 'KeyE');
-  stepG(gM5, 1);
-  ok('M5: E открывает панель лора', !!gM5.lore && gM5.lore.id === t0.id,
-     JSON.stringify(gM5.lore && gM5.lore.id));
-  ok('M5: в панели есть текст терминала', !!gM5.lore && gM5.lore.body.length > 30);
-  ok('M5: терминал гаснет после прочтения', t0.read === true);
-  ok('M5: выдан запас древних +5 FERRITE +1 BIOGEL',
-     gM5.inventory.counts[TILE.FERRITE] === fer0 + 5 && gM5.inventory.counts[ITEM.BIOGEL] === gel0 + 1,
-     `ferrite ${fer0} → ${gM5.inventory.counts[TILE.FERRITE]}, biogel ${gel0} → ${gM5.inventory.counts[ITEM.BIOGEL]}`);
-  ok('M5: счётчик терминалов стал 1/3', gM5.terminalsRead === 1 && gM5.terminals.length === 3,
-     `${gM5.terminalsRead}/${gM5.terminals.length}`);
-
-  // панель лора забирает мышь: копания не начинается
-  gM5.input.mouse.left = true;
-  const beforeDig = gM5.dig;
-  stepG(gM5, 5);
-  ok('M5: под панелью лора мир не копается', gM5.dig === null && beforeDig === null);
-  gM5.input.mouse.left = false;
-
+  // сюжетный слой кладёт текст сам — панель должна его нарисовать
+  gM5.lore = { title: 'ПРОВЕРКА СВЯЗИ', body: 'текст пришёл из narrative.js' };
+  gM5.loreT = 1;
+  let drewLore = false;
+  const origLore = gM5.drawLore;
+  gM5.drawLore = function (c) { drewLore = true; return origLore.call(gM5, c); };
+  gM5.render();
+  gM5.drawLore = origLore;
+  ok('M8.3: панель лора рисуется, когда текст задан снаружи', drewLore);
   pressG(gM5, 'Escape');
   stepG(gM5, 1);
-  ok('M5: Escape закрывает панель лора', gM5.lore === null);
-
-  // повторное E: терминал погас и больше не взаимодействуется
-  pressG(gM5, 'KeyE');
-  stepG(gM5, 1);
-  ok('M5: погасший терминал не открывается снова', gM5.lore === null && gM5.promptTerminal === null,
-     `lore=${!!gM5.lore} prompt=${!!gM5.promptTerminal}`);
-  ok('M5: награду нельзя получить дважды',
-     gM5.inventory.counts[TILE.FERRITE] === fer0 + 5 && gM5.inventory.counts[ITEM.BIOGEL] === gel0 + 1);
+  ok('M8.3: Escape закрывает панель лора', gM5.lore === null, `lore=${!!gM5.lore}`);
 }
-const readTerminalId = gM5.terminals[1].id;
-const readTerminalPos = { tx: gM5.terminals[1].tx, ty: gM5.terminals[1].ty };
 
 // --- 4. сканер: рецепт и экипировка
 ok('M5: рецепт сканера 5 FERRITE + 5 STONE + 1 BIOGEL', (() => {
@@ -1491,35 +1439,37 @@ pressG(gM5, 'KeyQ');
 stepG(gM5, 1);
 ok('M5: во время кулдауна Q не срабатывает повторно', gM5.scanCd > 0 && gM5.scanT < CFG.scanner.holdTime);
 
-// цели: терминал, хищник и феррит в радиусе
+// цели: хищник и феррит в радиусе (терминалов больше нет)
 {
-  // ставим игрока к непрочитанному терминалу, подводим хищника и феррит
-  const t1 = gM5.terminals.find(t => !t.read);
-  PM5.x = t1.x - 6 * TS;
-  PM5.y = t1.y + CFG.terminal.h - PM5.h;
+  PM5.x = 40 * TS; PM5.y = gM5.world.surfaceRow * TS - PM5.h; PM5.vx = 0; PM5.vy = 0;
   gM5.camera.snap(PM5);
   // феррит в 6 тайлах: тайл в породе рядом
-  const fx = t1.tx + 6, fy = t1.ty + 3;
+  const fx = Math.floor(PM5.cx / TS) + 6, fy = gM5.world.surfaceRow + 3;
   gM5.world.set(fx, fy, TILE.FERRITE, false);
   gM5.tiles.flush();
   // хищник в 8 тайлах
   gM5.crawlers.length = 0;
-  const cScan = new Crawler((t1.tx + 8) * TS, t1.ty * TS - CFG.crawler.h);
+  const cScan = new Crawler((Math.floor(PM5.cx / TS) + 8) * TS, PM5.y);
   cScan.home = { x: cScan.cx, y: cScan.cy };
   gM5.crawlers.push(cScan);
   // дроп FERRITE в 3 тайлах
-  const fd = new sandbox.__cls.Drop(t1.tx * TS - 3 * TS, t1.ty * TS, TILE.FERRITE);
+  const fd = new sandbox.__cls.Drop(PM5.cx - 3 * TS, PM5.cy, TILE.FERRITE);
   gM5.drops.push(fd);
+  // жила RESONITE в 5 тайлах: сканер должен видеть и её
+  const rx = Math.floor(PM5.cx / TS) - 5, ry = gM5.world.surfaceRow + 4;
+  gM5.world.set(rx, ry, TILE.RESONITE, false);
+  gM5.tiles.flush();
 
   gM5.scanCd = 0; gM5.scanT = 0;
   gM5.scanTargets = gM5.collectScanTargets();
   const kinds = {};
   for (const t of gM5.scanTargets) kinds[t.kind] = (kinds[t.kind] || 0) + 1;
-  ok('M5: волна видит терминал', kinds.terminal >= 1, JSON.stringify(kinds));
+  ok('M8.3: в целях сканера нет терминалов', !kinds.terminal, JSON.stringify(kinds));
   ok('M5: волна видит хищника', kinds.crawler >= 1, JSON.stringify(kinds));
   ok('M5: волна видит феррит (дроп и руда)', kinds.ferrite >= 2, JSON.stringify(kinds));
-  ok('M5: цвета меток — синий/оранжевый/красный',
-     CFG.scanner.colors.ferrite === '#63b8ff' && CFG.scanner.colors.terminal === '#ffa63d' &&
+  ok('M8.3: волна видит RESONITE своим цветом', kinds.resonite >= 1, JSON.stringify(kinds));
+  ok('M5: цвета меток — синий/фиолетовый/красный',
+     CFG.scanner.colors.ferrite === '#63b8ff' && CFG.scanner.colors.resonite === '#b98bff' &&
      CFG.scanner.colors.crawler === '#ff3b48');
 
   // за пределами радиуса цели не попадают
@@ -1530,14 +1480,10 @@ ok('M5: во время кулдауна Q не срабатывает повт�
      !withFar.some(t => Math.hypot(t.wx - PM5.cx, t.wy - PM5.cy) / TS > 25.5),
      `max=${Math.max(...withFar.map(t => Math.hypot(t.wx - PM5.cx, t.wy - PM5.cy) / TS)).toFixed(1)}`);
 
-  // прочитанный терминал больше не подсвечивается
-  const readOnes = withFar.filter(t => t.kind === 'terminal');
-  ok('M5: прочитанный терминал сканер не подсвечивает',
-     readOnes.every(t => t.wx !== gM5.terminals[1].x + CFG.terminal.w / 2 ||
-                         gM5.terminals[1].read === false));
-
+  gM5.drops.pop();
   gM5.drops.pop();
   gM5.world.set(fx, fy, TILE.STONE, false);
+  gM5.world.set(rx, ry, TILE.STONE, false);
   gM5.tiles.flush();
 }
 
@@ -1558,23 +1504,15 @@ gM5.scanCd = 0;
   ok('M8.1: в сейве только правки, а не вся карта', raw.tileFormat === 'mods' && raw.tiles.length < 5000,
      `записей=${raw.tiles.length}`);
   ok('M5: в сейве есть сканер', raw.player.scanner === true);
-  ok('M5: в сейве есть список терминалов с координатами',
-     raw.terminals.length === 3 && raw.terminals.every(t => typeof t.tx === 'number' && typeof t.ty === 'number'));
-  ok('M5: в сейве отмечен прочитанный терминал',
-     raw.terminals.filter(t => t.read).length === 1 &&
-     raw.terminals.find(t => t.read).id === readTerminalId);
+  ok('M8.3: в сейве больше нет ship и terminals',
+     raw.ship === undefined && raw.terminals === undefined,
+     Object.keys(raw).join(','));
 
   const gReload = new (sandbox.__cls.Game)(view);
   stepG(gReload, 5);
   ok('M5: hasScanner переживает перезагрузку', gReload.player.hasScanner === true);
-  ok('M5: счётчик терминалов переживает перезагрузку',
-     gReload.terminalsRead === 1 && gReload.terminals.length === 3,
-     `${gReload.terminalsRead}/${gReload.terminals.length}`);
-  const same = gReload.terminals.find(t => t.tx === readTerminalPos.tx && t.ty === readTerminalPos.ty);
-  ok('M5: координаты терминалов не съехали после F5', !!same && same.read === true,
-     same ? `${same.tx},${same.ty}` : 'нет совпадения');
-  ok('M5: два терминала после загрузки всё ещё в глубине',
-     gReload.terminals.filter(t => t.ty >= CFG.layers.deepTopRow).length === 2);
+  ok('M8.3: терминалы не воскресают при загрузке сейва',
+     gReload.terminals === undefined && gReload.ship === undefined);
 
   // старый сейв v2 не должен ломать загрузку
   const legacy = JSON.parse(sandbox.localStorage.getItem(CFG.save.key));
@@ -1586,7 +1524,6 @@ gM5.scanCd = 0;
   let gLegacy = null;
   try { gLegacy = new (sandbox.__cls.Game)(view); stepG(gLegacy, 3); } catch (e) { legacyOk = false; }
   ok('M5: сейв M4 (v2) читается без ошибок', legacyOk && !!gLegacy);
-  ok('M5: на сейве v2 терминалы заспавнены заново', !!gLegacy && gLegacy.terminals.length === 3);
   sandbox.localStorage.removeItem(CFG.save.key);
 }
 
@@ -1595,17 +1532,15 @@ ok('M5: Q и E есть в плашке управления',
    /'Q'/.test(String(gM5.drawControls)) && /'E'/.test(String(gM5.drawControls)) &&
    /сканер/.test(String(gM5.drawControls)) && /читать/.test(String(gM5.drawControls)));
 ok('M5: иконка сканера в HUD', /hasScanner/.test(String(gM5.drawHealthBar)));
-ok('M5: счётчик терминалов в HUD', /Терминалы:/.test(String(gM5.drawHealthBar)));
+ok('M8.3: счётчика терминалов в HUD больше нет', !/Терминалы:/.test(String(gM5.drawHealthBar)));
 ok('M5: индикатор кулдауна сканера в HUD', /scanCd/.test(String(gM5.drawHealthBar)));
 ok('M5: сканер рисует волну поверх мира', /drawScan/.test(String(gM5.render)) &&
    /scanTargets/.test(String(gM5.drawScan)));
-ok('M5: терминалы рисуются обелисками', /drawTerminals/.test(String(gM5.render)) &&
-   /обелиск|moveTo/.test(String(gM5.drawTerminals)));
-ok('M5: подсказка «[E] Прочитать» нарисована', /\[E\] Прочитать/.test(String(gM5.drawPrompt)));
+ok('M8.3: терминалов в конвейере рендера нет', !/drawTerminals|drawShip|drawPrompt/.test(String(gM5.render)));
 // M6: drawDeepFog заменён на настоящую маску света (см. блок M6 ниже)
 ok('M5: глубина затемняется экранным слоем', /drawLighting/.test(String(gM5.render)) &&
    /destination-out/.test(String(gM5.drawLighting)));
-ok('M5: без console.log в новом коде', !/console\.(log|warn|error)/.test(String(gM5.useScanner) + String(gM5.readTerminal) + String(gM5.spawnTerminals) + String(gM5.drawScan)));
+ok('M5: без console.log в новом коде', !/console\.(log|warn|error)/.test(String(gM5.useScanner) + String(gM5.drawScan)));
 
 // M8.1: полотна размером с мир больше нет — 1000x300 тайлов в 32 px
 // это 32000x9600 px (~1.2 ГБ), поэтому тайлы рисуются спрайтами
@@ -2092,55 +2027,43 @@ ok('M8.1: мир нарезан на чанки 64x64 (16x5)', CFG.world.chunk =
      /box\.s/.test(String(g.updateCraft)) || /rowH \* box\.s/.test(String(g.updateCraft)));
 }
 
-// ---------------------------------------------------------------- M8.1: корабль
+// ---------------------------------------------------------------- M8.3: корабль ушёл в narrative.js
 {
-  const S = game.ship;
-  ok('M8.1: на старте есть объект «Корабль» 5x4', !!S && S.w === 5 && S.h === 4,
-     S ? `тайл ${S.tx},${S.ty}, ${S.w}x${S.h}, ${S.wpx}x${S.hpx||S.hpx}px` : 'нет');
-  ok('M8.1: обломки лежат на полу зала', !!S && W.solid(S.tx, S.ty + S.h) && !W.solid(S.tx, S.ty),
-     S ? `под=${W.get(S.tx, S.ty + S.h)} внутри=${W.get(S.tx, S.ty)}` : '');
-  const shipSpr = sandbox.__Sprites.ship(S.wpx, S.hpx);
-  ok('M8.1: обломки пекутся в спрайт 5x4 тайла',
-     !!shipSpr && shipSpr.width === S.wpx * sandbox.__SPR.scale,
-     shipSpr ? `${shipSpr.width}x${shipSpr.height}` : 'нет спрайта');
-}
+  ok('M8.3: в игре больше нет старого корабля',
+     game.ship === undefined && CFG.ship === undefined &&
+     typeof game.makeShip === 'undefined' && typeof game.shipNear === 'undefined' &&
+     typeof game.inspectShip === 'undefined' && typeof game.updateShipFx === 'undefined' &&
+     typeof game.drawShip === 'undefined');
+  ok('M8.3: спрайт обломков больше не печётся игрой', typeof sandbox.__Sprites.ship === 'undefined');
 
-// shipNear() по аналогии с benchNear(): объект или null
-{
-  const S = game.ship;
-  const px = P.x, py = P.y;
-  P.x = S.cx - P.w / 2; P.y = S.cy - P.h / 2; P.vx = P.vy = 0;
-  ok('M8.1: shipNear() находит обломки вплотную', game.shipNear() === S);
-  P.x = (S.tx + 40) * TS; P.y = S.y;
-  ok('M8.1: shipNear() молчит вдали', game.shipNear() === null);
-  // E у обломков откликается, но сюжетных текстов не трогает
-  P.x = S.cx - P.w / 2; P.y = S.cy - P.h / 2;
-  const hints = game.shipHintT;
-  ok('M8.1: inspectShip() откликается у обломков', game.inspectShip() === true && game.shipHintT >= hints);
-  P.x = px; P.y = py; P.vx = P.vy = 0; game.camera.snap(P); frames(2);
-}
-
-// Корабль уезжает в сейв вместе с остальным состоянием
-{
-  const S0 = game.ship;
-  const keep = { tx: S0.tx, ty: S0.ty, looted: S0.looted };
-  S0.tx = 21;                    // сдвигаем, чтобы сейв нельзя было «угадать»
-  S0.looted = true;
+  // сейв не тащит за собой сюжетные объекты
   game.doSave();
   const raw = JSON.parse(sandbox.localStorage.getItem(CFG.save.key) || 'null');
-  ok('M8.1: корабль пишется в сейв', !!raw && !!raw.ship &&
-     raw.ship.w === CFG.ship.w && raw.ship.h === CFG.ship.h &&
-     raw.ship.tx === 21 && raw.ship.looted === true,
-     raw && raw.ship ? JSON.stringify(raw.ship) : 'нет ship');
+  ok('M8.3: сейв без корабля', !!raw && raw.ship === undefined, raw ? Object.keys(raw).join(',') : 'нет сейва');
+}
 
-  const g2 = new (sandbox.__cls.Game)(view);
-  ok('M8.1: корабль восстанавливается из сейва', !!g2.ship &&
-     g2.ship.tx === 21 && g2.ship.looted === true && g2.ship.w === CFG.ship.w,
-     g2.ship ? JSON.stringify({ tx: g2.ship.tx, looted: g2.ship.looted }) : 'нет ship');
+// ---------------------------------------------------------------- M8.3: RESONITE в HUD
+{
+  const r = CFG.resources.find(x => x.id === 8);
+  ok('M8.3: RESONITE 8 в списке ресурсов',
+     !!r && r.name === 'RESONITE' && r.color === '#b98bff' && r.shade === '#6b3fb8' && r.light === '#eaf8ff',
+     r ? JSON.stringify(r) : 'нет записи');
+  ok('M8.3: в инвентаре есть строка RESONITE с нулём',
+     game.inventory.counts[8] === 0, String(game.inventory.counts[8]));
+  ok('M8.3: панель ресурсов выросла на пятую строку',
+     CFG.resources.length === 5 && game.hudMetrics().h === CFG.hud.pad * 2 + CFG.hud.rowH * 5,
+     `h=${game.hudMetrics().h}`);
 
-  S0.tx = keep.tx; S0.ty = keep.ty; S0.looted = keep.looted;
-  S0.x = S0.tx * TS; S0.cx = S0.x + S0.wpx / 2;
-  game.doSave();
+  // строка реально попадает в кадр HUD
+  const c2 = view.getContext('2d');
+  const origFill = c2.fillText.bind(c2);
+  const seen = [];
+  c2.fillText = (t) => { seen.push(String(t)); };
+  game.render();
+  c2.fillText = origFill;
+  ok('M8.3: HUD рисует строку RESONITE', seen.includes('RESONITE'));
+  ok('M8.3: HUD с пятой строкой не уезжает за экран',
+     game.hudMetrics().bottom < game.vh - 24, `bottom=${game.hudMetrics().bottom.toFixed(0)} из ${game.vh}`);
 }
 
 // ---------------------------------------------------------------- M8.1: RESONITE

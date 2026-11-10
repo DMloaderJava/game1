@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import { createCanvas } from '@napi-rs/canvas';
 
 const HTML = fs.readFileSync(new URL('../gravity-void.html', import.meta.url), 'utf8');
-let SRC = HTML.match(/<script>([\s\S]*)<\/script>/)[1];
+let SRC = HTML.match(/<script>([\s\S]*?)<\/script>/)[1];
 
 const W = Number(process.env.TW || 430), H = Number(process.env.TH || 780);
 const view = createCanvas(W, H);

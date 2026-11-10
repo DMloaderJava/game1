@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { createCanvas } from '@napi-rs/canvas';
 
 const HTML = fs.readFileSync(new URL('../gravity-void.html', import.meta.url), 'utf8');
-let SRC = HTML.match(/<script>([\s\S]*)<\/script>/)[1];
+let SRC = HTML.match(/<script>([\s\S]*?)<\/script>/)[1];
 
 const W = 1280, H = 720;
 const view = createCanvas(W, H);
@@ -339,36 +339,10 @@ frames(30);
 game.resetWorld();
 frames(30);
 
-// Терминал на поверхности: обелиск, подсказка [E]
-{
-  const t = game.terminals.find(x => !x.deep) || game.terminals[0];
-  game.crawlers.length = 0;                       // кадр про лор, не про бой
-  P.x = t.tx * 32 - 34;
-  P.y = (t.ty + 1) * 32 - P.h;
-  P.vx = P.vy = 0;
-  game.camera.snap(P);
-  frames(6);
-  game.player.hasScanner = true;
-  game.camera.snap(P);
-  frames(2);
-  shot('17-terminal');
-}
-
-// Панель лора после нажатия E
-{
-  const t = game.terminalNear() || game.terminals.find(x => !x.read);
-  game.readTerminal(t);
-  game.loreT = 1;
-  frames(4);
-  shot('17b-lore');
-  game.closeLore();
-}
-
 // Сканер: волна расходится, метки ресурсов и хищника сквозь стены
 {
-  const t = game.terminals[0];
-  const cx = t.tx + 4, cy = t.ty;
-  P.x = cx * 32; P.y = (cy + 1) * 32 - P.h;
+  const cx = Math.floor(P.cx / 32) + 4, cy = game.world.surfaceRow - 3;
+  P.x = cx * 32; P.y = game.world.surfaceRow * 32 - P.h;
   P.vx = P.vy = 0;
   game.camera.snap(P);
   // насыпаем феррита в породу рядом и за стеной: сканер должен его найти
@@ -380,7 +354,7 @@ frames(30);
   game.tiles.flush();
   // хищник за стеной: сканер должен подсветить его красным
   game.crawlers.length = 0;
-  const sc = new sandbox.__clsM3.Crawler(P.cx + 9 * 32, t.ty * 32 - CFG.crawler.h);
+  const sc = new sandbox.__clsM3.Crawler(P.cx + 9 * 32, cy * 32 - CFG.crawler.h);
   sc.home = { x: sc.cx, y: sc.cy };
   game.crawlers.push(sc);
   game.scanCd = 0;
@@ -397,13 +371,19 @@ frames(30);
   shot('18-scanner');
 }
 
-// Глубокие пещеры: темнота, хищник, обелиск
+// Глубокие пещеры: темнота и хищник
 {
   game.scanT = 0;
   game.scanTargets = [];
-  const t = game.terminals.find(x => x.deep) || game.terminals[1];
   const Wr = game.world;
-  // расчищаем пятачок вокруг глубинного терминала — как будто сюда докопались
+  // точка в глубине: воздух с полом под ним (терминалов в M8.3 больше нет)
+  let t = null;
+  for (let y = CFG.layers.deepTopRow + 6; y < CFG.layers.deepTopRow + 40 && !t; y++) {
+    for (let x = 300; x < 420; x++) {
+      if (!Wr.solid(x, y) && !Wr.solid(x, y - 1) && Wr.solid(x, y + 1)) { t = { tx: x, ty: y }; break; }
+    }
+  }
+  // расчищаем пятачок — как будто сюда докопались
   for (let y = t.ty - 2; y <= t.ty + 1; y++) {
     for (let x = t.tx - 6; x <= t.tx + 7; x++) Wr.set(x, y, 0, false);
   }
@@ -425,7 +405,6 @@ frames(30);
 
 // Меню крафта: четыре рецепта, курсор на сканере
 {
-  const t = game.terminals[0];
   const bx = Math.floor(P.cx / 32);
   game.world.set(bx, P.y < 0 ? 0 : Math.floor(P.cy / 32), 5, true);
   game.craftOpen = true;
@@ -516,10 +495,16 @@ frames(30);
   game.particles.list.length = 0;
 }
 
-// 24: свет в глубине — фонарь, кристаллы и терминал в одном кадре
+// 24: свет в глубине — фонарь и кристаллы в одном кадре
 {
-  const t = game.terminals.find(x => x.deep) || game.terminals[0];
   const Wr = game.world;
+  // ищем жилу RESONITE в кристальной зоне: кадр про свет, а не про руду
+  let t = null;
+  for (let y = CFG.biomes.crystalFromRow + 4; y < CFG.layers.deepTopRow + 60 && !t; y++) {
+    for (let x = 240; x < 560; x++) {
+      if (Wr.get(x, y) === TILE.RESONITE) { t = { tx: x, ty: y }; break; }
+    }
+  }
   for (let y = t.ty - 3; y <= t.ty + 1; y++) {
     for (let x = t.tx - 7; x <= t.tx + 6; x++) Wr.set(x, y, TILE.EMPTY, false);
   }
@@ -539,22 +524,6 @@ frames(30);
   game.camera.snap(P);
   game.render();
   shot('24-light-sources');
-}
-
-// 32: M8.1 — обломки корабля на старте (спавн-объект 5x4 тайла)
-{
-  // сцены M2–M7 оставили прилив в катастрофе: для новых кадров он не нужен
-  game.tide.setPhase(0); game.tide.applyPhase('STABLE');
-  game.skyWarn = 0; game.skyCat = 0; game.hurtScreen = 0;
-  P.health = P.maxHealth; P.invuln = 0;
-  game.crawlers.length = 0;
-  const s = game.ship;
-  P.x = s.cx - 70; P.y = s.y + s.hpx - P.h; P.vx = P.vy = 0;
-  game.camera.snap(P);
-  frames(40);
-  game.camera.snap(P);
-  game.render();
-  shot('32-ship');
 }
 
 // 33: M8.1 — Руины: металлические стены, балки и турель на палубе
