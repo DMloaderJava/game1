@@ -175,7 +175,7 @@
     <div class="chips" id="chips">
       <span class="chip" id="chip-shots"><span class="led"></span><span>скриншоты: проверяю…</span></span>
       <span class="chip" id="chip-game"><span class="led"></span><span>игра: не проверена</span></span>
-      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>сюжет: 114 / 114</span></span>
+      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>сюжет: 117 / 117</span></span>
       <span class="chip"><span class="led" style="background:var(--ok)"></span><span>игра: 344 / 344</span></span>
       <span class="chip"><span class="led" style="background:var(--ok)"></span><span>зависимостей: 0</span></span>
     </div>
@@ -454,7 +454,13 @@
         <li><b>Дрожание растёт с FPS:</b> 3 смены знака скорости на 30 fps → 26 на 120 fps
             при одинаковом пределе 36.4–36.7 px. Это пружина <code>updateGrab</code>
             без скоростного демпфирования.</li>
-        <li><b>Проблема в <code>updateGrab</code> / <code>separateFromPlayer</code> внутри
+        <li><b>«Ящик сам едет вперёд» воспроизведено в чистой игре без сюжета:</b>
+            после отпускания ПКМ скорость замирает на <b>29.48 px/s</b> и держится 600 кадров
+            (10 с), ящик проползает 297 px — у <code>PhysBody</code> нет трения о землю,
+            <code>resolveX</code> гасит скорость только о стену. В захвате пик 357 px/s —
+            лимит M7 (400) не превышен, ввод в порядке.</li>
+        <li><b>Проблема в <code>updateGrab</code> / <code>releaseGrab</code> /
+            <code>PhysBody.step</code> внутри
             <code>gravity-void.html</code>, требуется Агент 1.</b> Правки сюжета не делают:
             файл игры не тронут.</li>
       </ul>
@@ -725,9 +731,9 @@
 
   <section id="verify">
     <h2><span class="num">11</span>Как проверено</h2>
-    <pre><span class="c"># сюжет: 114 проверок поверх настоящей игры (M8.2 + M8.3 + M9)</span>
+    <pre><span class="c"># сюжет: 117 проверок поверх настоящей игры (M8.2 + M8.3 + M9)</span>
 cd tools
-node verify-narrative.mjs   <span class="c"># → 114/114 проверок пройдено</span>
+node verify-narrative.mjs   <span class="c"># → 117/117 проверок пройдено</span>
 
 <span class="c"># игра без сюжета — не сломана</span>
 node verify.mjs             <span class="c"># → 344/344 проверок пройдено</span>
@@ -793,7 +799,7 @@ node verify-review-page.mjs <span class="c"># → структура стран�
     </div>
     <p>M8.2 + M8.3 + M9: сюжетный слой <code>narrative.js</code> — корабль на спавне, журнал,
        пять архивов, три фрагмента ядра, оружие за ремонт. Игра не тронута:
-       344/344 старых проверок и 114/114 новых.</p>
+       344/344 старых проверок и 117/117 новых.</p>
   </footer>
 </main>
 <script>

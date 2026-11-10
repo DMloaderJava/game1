@@ -50,7 +50,7 @@ function makeGame(withNarrative) {
   vm.runInContext(SRC + '\n;globalThis.__g = game; globalThis.Game = Game;'
     + 'globalThis.__T = TILE; globalThis.__CFG = CFG;', ctx, { filename: 'gravity-void.html' });
   if (withNarrative) vm.runInContext(NARR, ctx, { filename: 'narrative.js' });
-  return { g: sandbox.__g, CFG: sandbox.__CFG, view };
+  return { g: sandbox.__g, CFG: sandbox.__CFG, view, winL };
 }
 
 const DT = 1 / 60;
@@ -177,3 +177,48 @@ for (const fps of [30, 60, 120]) {
 const lo = sweepRows[0].a, hi = sweepRows[sweepRows.length - 1].a;
 console.log('дрожание растёт с частотой: ' + (lo && hi ? lo.flips + ' → ' + hi.flips : 'нет данных'));
 console.log('предел одинаков у всех: ' + sweepRows.map(r => r.a && r.a.end).join(', ') + 'px');
+
+// ---- «ящик сам едет вперёд»: что происходит после отпускания ПКМ
+// releaseGrab оставляет 20% скорости, а трение у тел в игре не реализовано —
+// если скорость не затухает, тело едет с постоянной скоростью до столкновения.
+function releaseTest(withNarrative) {
+  const { g, CFG, view, winL } = makeGame(withNarrative);
+  const z = CFG.camera.zoom;
+  g.update(DT);
+  const p = g.player, c = g.crates[0];
+  p.x = 800; p.y = 15 * 32; p.vx = p.vy = 0; p.health = p.maxHealth; p.dead = false;
+  g.camera.snap(p);
+  g.update(DT);
+  c.x = p.x + 96; c.y = p.y + 40;
+  c.vx = c.vy = 0; c.sleeping = false; c.gravityScale = 1;
+  g.update(DT);
+  const mv = (wx, wy) => view.fire('mousemove', {
+    clientX: (wx - g.camera.x) * z, clientY: (wy - g.camera.y) * z, preventDefault() {} });
+  mv(c.cx, c.cy);
+  view.fire('mousedown', { clientX: g.input.mouse.x, clientY: g.input.mouse.y,
+                           button: 2, preventDefault() {} });
+  g.update(DT);
+  let maxHold = 0;
+  for (let i = 0; i < 25; i++) { mv(c.cx + 260, c.cy - 40); g.update(DT); maxHold = Math.max(maxHold, Math.hypot(c.vx, c.vy)); }
+  const vRelease = Math.hypot(c.vx, c.vy);
+  for (const f of (winL.mouseup || [])) f({ button: 2 });
+  const x0 = c.cx;
+  const speeds = [];
+  for (let i = 0; i < 120; i++) { g.update(DT); speeds.push(Math.hypot(c.vx, c.vy)); }
+  return {
+    maxHold: +maxHold.toFixed(1),
+    vRelease: +vRelease.toFixed(1),
+    slide: +(c.cx - x0).toFixed(1),
+    speedLate: +speeds[speeds.length - 1].toFixed(2),
+    onGround: c.onGround
+  };
+}
+
+const RA = releaseTest(false), RB = releaseTest(true);
+console.log('\nпосле отпускания ПКМ (120 кадров без ввода):');
+console.log('  макс скорость в захвате: ' + RA.maxHold + ' px/s (лимит holdSpeed ' + 400 + ')');
+console.log('  скорость при отпускании: без сюжета ' + RA.vRelease + ', с сюжетом ' + RB.vRelease + ' px/s');
+console.log('  пролетел после отпускания: без сюжета ' + RA.slide + 'px, с сюжетом ' + RB.slide + 'px');
+console.log('  скорость в конце: без сюжета ' + RA.speedLate + ', с сюжетом ' + RB.speedLate + ' px/s');
+console.log('  ящик остановился сам: ' + (RB.speedLate < 1 ? 'да' : 'НЕТ — едет с постоянной скоростью'));
+console.log('  одинаково с сюжетом и без: ' + (RA.slide === RB.slide && RA.speedLate === RB.speedLate));
