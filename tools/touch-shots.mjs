@@ -38,7 +38,8 @@ const ctx = vm.createContext(sandbox);
 const html = SRC.replace('let game = null;', 'globalThis.__g = null; let game = null;');
 SRC = html.replace('game = new Game(document.getElementById(\'view\'));',
                    'game = new Game(document.getElementById(\'view\')); globalThis.__g = game;');
-SRC += '\n;globalThis.__CFG = CFG; globalThis.__TILE = TILE; globalThis.__MODE = MODE;';
+SRC += '\n;globalThis.__CFG = CFG; globalThis.__TILE = TILE; globalThis.__MODE = MODE;'
+     + ';globalThis.__clsM3 = { Crawler }; globalThis.__ITEM = ITEM;';
 vm.runInContext(SRC, ctx, { filename: 'gravity-void.html' });
 
 const game = sandbox.__g || sandbox.game_;
@@ -158,6 +159,62 @@ frames(6);
   console.log('крафт открыт кнопкой:', game.craftOpen, '| масштаб панели', game.craftLayout().s.toFixed(2));
   shot('31-touch-craft');
   game.craftOpen = false;
+}
+
+// M9: оружие на телефоне — индикатор в кадре и выстрел кнопкой «Действие»
+{
+  const Crawler = sandbox.__clsM3.Crawler;
+  P.hasLaserPistol = true;
+  game.setWeapon('pistol', true);
+  game.setMode(4);
+  game.craftOpen = false;
+  game.crawlers.length = 0;
+  frames(10);                       // смена оружия ставит короткий кулдаун
+  game.player.fireCd = 0;
+
+  // площадка: расчищаем воздух, чтобы луч не упирался в стену рядом с игроком
+  {
+    const ptx = Math.floor(P.cx / 32), pty = Math.floor(P.cy / 32);
+    for (let tx = ptx - 1; tx <= ptx + 6; tx++) {
+      for (let ty = pty - 2; ty <= pty + 1; ty++) game.world.set(tx, ty, 0, false);
+    }
+    game.tiles.flush();
+  }
+
+  // жук подставляется прямо перед камерой и не успевает убежать
+  const putBug = () => {
+    const b = new Crawler(P.cx + 84, P.cy - 12);
+    b.vx = b.vy = 0;
+    game.crawlers = [b];
+    return b;
+  };
+  const bug = putBug();
+
+  // прицел — свободным пальцем по жуку
+  const z = CFG.camera.zoom;
+  touch('start', [{ id: 9, x: (bug.cx - game.camera.x) * z, y: (bug.cy - game.camera.y) * z }]);
+  frames(1);
+  touch('end', [{ id: 9, x: (bug.cx - game.camera.x) * z, y: (bug.cy - game.camera.y) * z }]);
+  frames(2);
+
+  // выстрел — кнопкой «Действие» (она и есть ЛКМ)
+  const bug2 = putBug();
+  game.player.fireCd = 0;
+  touch('start', [{ id: 9, x: (bug2.cx - game.camera.x) * z, y: (bug2.cy - game.camera.y) * z }]);
+  frames(1);
+  touch('end', [{ id: 9, x: (bug2.cx - game.camera.x) * z, y: (bug2.cy - game.camera.y) * z }]);
+  const actBtn = lay.buttons.find(b => b.id === 'act');
+  game.player.fireCd = 0;
+  const hpBefore = bug2.hp;
+  touch('start', [{ id: 10, x: actBtn.x, y: actBtn.y }]);
+  frames(2);
+  const m = game.weaponPanelMetrics();
+  console.log('индикатор оружия на телефоне:', Math.round(m.x) + ',' + Math.round(m.y),
+              '| в кадре:', m.x >= 0 && m.x + m.w <= game.vw && m.y + m.h <= game.vh,
+              '| кнопка «Действие»: hp', hpBefore + '→' + bug2.hp,
+              '| луч', game.beams.length);
+  shot('39-touch-weapon');
+  touch('end', [{ id: 10, x: actBtn.x, y: actBtn.y }]);
 }
 
 console.log('done');

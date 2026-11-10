@@ -37,12 +37,13 @@ const sandbox = {
 sandbox.window.window = sandbox.window;
 sandbox.globalThis = sandbox;
 const ctx = vm.createContext(sandbox);
-SRC += '\n;globalThis.__game = game; globalThis.__CFG = CFG; globalThis.__TILE = TILE; globalThis.__cls = { Drop, Crate }; globalThis.__clsM3 = { Crawler, Drop };';
+SRC += '\n;globalThis.__game = game; globalThis.__CFG = CFG; globalThis.__TILE = TILE; globalThis.__cls = { Drop, Crate }; globalThis.__clsM3 = { Crawler, Drop }; globalThis.__ITEM = ITEM;';
 vm.runInContext(SRC, ctx, { filename: 'gravity-void.html' });
 
 const game = sandbox.__game;
 const CFG = sandbox.__CFG;
 const TILE = sandbox.__TILE;
+const ITEM = sandbox.__ITEM;
 const TS = CFG.tile;
 const P = game.player;
 
@@ -580,6 +581,137 @@ frames(30);
     game.render();
     shot('34-resonite');
   }
+}
+
+// 35: M9 — лазерный пистолет: луч, вспышка, попадание в жука
+{
+  game.tide.setPhase(0); game.tide.applyPhase('STABLE');
+  game.hurtScreen = 0; P.hurtT = 0; P.health = P.maxHealth; P.invuln = 0;
+  P.hasLaserPistol = true;
+  game.setWeapon('pistol', true);
+  game.setMode(4);
+  game.craftOpen = false; game.lore = null;
+
+  const row = game.world.surfaceRow;
+  const ptx = Math.floor(P.cx / TS);
+  for (let tx = ptx - 2; tx <= ptx + 7; tx++) {
+    for (let ty = row - 3; ty <= row - 1; ty++) game.world.set(tx, ty, TILE.EMPTY, false);
+    game.world.set(tx, row, TILE.STONE, false);
+  }
+  game.tiles.flush();
+  P.y = row * TS - P.h; P.vx = P.vy = 0;
+  game.camera.snap(P);
+
+  const { Crawler } = sandbox.__clsM3;
+  const bug = new Crawler(P.cx + 96, P.cy - 6);
+  bug.hp = bug.maxHp = 60;        // один выстрел не убивает — жук остаётся в кадре
+  bug.state = 'AGGRO';
+  bug.vx = bug.vy = 0;
+  game.crawlers = [bug];
+  frames(6);
+  bug.x = P.cx + 96; bug.vx = 0;
+
+  game.player.fireCd = 0;
+  game.fireWeapon({ x: bug.cx, y: bug.cy });
+  frames(1);
+  shot('35-laser-beam');
+}
+
+// 36: M9 — сломанная турель: искры, дым, лут на палубе
+{
+  const Wr = game.world;
+  const cs = CFG.world.chunk;
+  let spot = null;
+  for (let cy = 0; cy < Wr.chunksY && !spot; cy++) {
+    for (let cx = (CFG.biomes.ruinsFromX / cs) | 0; cx < Wr.chunksX && !spot; cx++) {
+      const ch = Wr.ensureChunk(cx, cy);
+      if (ch.turrets.length) spot = ch.turrets[0];
+    }
+  }
+  if (spot) {
+    game.deadTurrets.clear();
+    if (game.turretMap) game.turretMap.clear();
+    Wr.updateChunks({ x: spot.tx * TS - 320, y: spot.ty * TS - 180, w: 640, h: 360 });
+    game.syncTurrets(true);
+    const t = game.turrets.find(x => x.tx === spot.tx && x.ty === spot.ty);
+    P.x = (spot.tx - 4) * TS; P.y = (spot.ty + 1) * TS - P.h; P.vx = P.vy = 0;
+    P.health = P.maxHealth; P.invuln = 1;
+    game.camera.snap(P);
+    if (t) {
+      P.x = t.cx - 92;              // ближе к стволу: попадаем в кроп
+      game.camera.snap(P);
+      game.damageTurret(t, t.hp, P.cx);
+      frames(40);                   // лут падает на палубу, дым поднимается
+      game.camera.snap(P);
+      game.hurtScreen = 0; P.hurtT = 0;
+      game.render();
+      // кроп вокруг турели: сломанное тело, искры и лут видно крупно
+      const z = CFG.camera.zoom || 1;
+      const cx0 = Math.max(0, (t.cx - game.camera.x) * z - 200);
+      const cy0 = Math.max(0, (t.cy - game.camera.y) * z - 150);
+      const cw = Math.min(W - cx0, 400), ch = Math.min(H - cy0, 280);
+      const c = createCanvas(cw * 2, ch * 2);
+      const cc = c.getContext('2d');
+      cc.imageSmoothingEnabled = false;
+      cc.drawImage(view, cx0, cy0, cw, ch, 0, 0, cw * 2, ch * 2);
+      fs.writeFileSync(new URL('../screenshots/36-turret-broken.png', import.meta.url), c.toBuffer('image/png'));
+      console.log('saved 36-turret-broken', 'лут:',
+        game.drops.map(d => d.type + '@' + Math.round(d.x) + ',' + Math.round(d.y)).join(' '));
+    }
+  }
+}
+
+// 37: M9 — меню крафта с пистолетом: строка по карману
+{
+  // Menu открывается только у верстака: ставим его рядом с игроком
+  const feet = Math.floor((P.y + P.h) / TS);
+  const btx = Math.floor(P.cx / TS) - 3;
+  for (let i = 0; i < 2; i++) {
+    game.world.set(btx + i, feet - 1, TILE.WORKBENCH, true);
+    game.world.set(btx + i, feet - 2, TILE.EMPTY, false);
+    game.world.set(btx + i, feet - 3, TILE.EMPTY, false);
+  }
+  game.tiles.flush();
+  P.health = P.maxHealth; P.invuln = 1;
+  frames(2);
+
+  game.inventory.counts[TILE.FERRITE] = 10;
+  game.inventory.counts[ITEM.RESONITE] = 5;
+  game.inventory.counts[TILE.STONE] = 15;
+  const bIdx = CFG.recipes.findIndex(r => r.id === 'pistol');
+  game.player.hasLaserPistol = false;      // показываем ещё не скрафченную строку
+  key('KeyC'); frames(1); key('KeyC', false);
+  game.noticeT = 0;
+  frames(2);
+  // выделение ставим после кадров: updateCraft тянет выбор за мышью
+  game.craftSel = bIdx;
+  mouseMove(640, 400);           // курсор-призрак прячется за панелью
+  game.noticeT = 0; game.tooFarT = 0; game.denyT = 0;
+  game.craftT = 1;
+  game.render();
+  console.log('меню крафта открыто:', game.craftOpen, '| строк:', CFG.recipes.length);
+  shot('37-craft-pistol');
+  game.craftOpen = false;
+  game.player.hasLaserPistol = true;
+}
+
+// 38: M9 — индикатор оружия в правом нижнем углу (кроп)
+{
+  game.player.hasGravityGun = true;
+  game.setWeapon('grav', true);
+  P.hasLaserPistol = true;
+  frames(2);
+  const m = game.weaponPanelMetrics();
+  const zf = CFG.camera.zoom || 1;
+  const sx = Math.max(0, m.x - 20), sy = Math.max(0, m.y - 24);
+  const cw = Math.min(W - sx, m.w + 60), ch = Math.min(H - sy, m.h + 110);
+  const c = createCanvas(cw * 2, ch * 2);
+  const cc = c.getContext('2d');
+  cc.imageSmoothingEnabled = false;
+  cc.drawImage(view, sx, sy, cw, ch, 0, 0, cw * 2, ch * 2);
+  fs.writeFileSync(new URL('../screenshots/38-weapon-indicator.png', import.meta.url), c.toBuffer('image/png'));
+  console.log('saved 38-weapon-indicator');
+  game.setWeapon('pistol', true);
 }
 
 console.log('done');

@@ -1094,7 +1094,8 @@ g7.craftOpen = false;
 pressG(g7, 'KeyC');
 stepG(g7, 1);
 ok('M4: C открывает меню рядом с верстаком', g7.craftOpen === true);
-ok('M4: в меню 3 рецепта M4 (+1 сканер в M5)', CFG.recipes.length === 4, String(CFG.recipes.length));
+ok('M4: в меню 3 рецепта M4 (+1 сканер в M5, +1 пистолет в M9)', CFG.recipes.length === 5,
+   `${CFG.recipes.length}: ${CFG.recipes.map(r => r.id).join(',')}`);
 
 // --- меню не открывается без верстака
 const gNoBench = new (sandbox.__cls.Game)(view);
@@ -1173,12 +1174,15 @@ P7.health = 100;
 g7.damagePlayer(30, 'прилив');
 ok('M4: броня снижает урон прилива 30 → 21', P7.health === 79, `hp=${P7.health}`);
 
-// --- гравитационная пушка: радиус 8 → 15
+// --- грави-пушка (M9 переоценила рецепт): радиус 8 → 15 и стрельба
 g7.craftOpen = true;
-g7.inventory.counts[TILE.FERRITE] = 8;
-g7.inventory.counts[ITEM.BIOGEL] = 2;
+g7.inventory.counts[TILE.STONE] = 15;
+g7.inventory.counts[TILE.FERRITE] = 10;
+g7.inventory.counts[ITEM.RESONITE] = 2;
 const gunRecipe = CFG.recipes.find(r => r.id === 'gun');
-ok('M4: рецепт пушки 8 FERRITE + 2 BIOGEL', gunRecipe.cost[3] === 8 && gunRecipe.cost[4] === 2);
+ok('M9: рецепт грави-пушки 15 STONE + 10 FERRITE + 2 RESONITE',
+   gunRecipe.cost[2] === 15 && gunRecipe.cost[3] === 10 && gunRecipe.cost[8] === 2,
+   JSON.stringify(gunRecipe.cost));
 const baseRange = g7.teleRange;
 ok('M4: без пушки радиус 8 тайлов', baseRange === 8, String(baseRange));
 ok('M4: пушка создаётся и экипируется', g7.craft(gunRecipe) === true && P7.hasGravityGun === true);
@@ -1403,7 +1407,8 @@ ok('M5: без сканера Q не срабатывает', (() => {
   stepG(gM5, 2);
   pressG(gM5, 'KeyC');
   stepG(gM5, 1);
-  ok('M5: меню крафта открывается с 4 рецептами', gM5.craftOpen === true && CFG.recipes.length === 4);
+  ok('M5: меню крафта открывается, сканер на 4-й строке',
+     gM5.craftOpen === true && CFG.recipes[3].id === 'scanner');
   gM5.inventory.counts[TILE.FERRITE] = 5;
   gM5.inventory.counts[TILE.STONE] = 5;
   gM5.inventory.counts[ITEM.BIOGEL] = 1;
@@ -2188,6 +2193,238 @@ ok('M8.1: мир нарезан на чанки 64x64 (16x5)', CFG.world.chunk =
   game.bolts.length = 0;
   game.camera.snap(P);
   frames(2);
+}
+
+// ================================================================
+// M9: арсенал и угрозы
+// ================================================================
+sandbox.localStorage.removeItem(CFG.save.key);
+const gM9 = new (sandbox.__cls.Game)(view);
+const PM9 = gM9.player;
+stepG(gM9, 30);
+
+// --- 1. рецепты и стартовое состояние
+const pistolR = CFG.recipes.find(r => r.id === 'pistol');
+ok('M9: рецепт лазерного пистолета 10 FERRITE + 5 RESONITE',
+   !!pistolR && pistolR.cost[3] === 10 && pistolR.cost[8] === 5,
+   JSON.stringify(pistolR && pistolR.cost));
+ok('M9: пистолет и грави-пушка стоят в меню крафта',
+   CFG.recipes.some(r => r.id === 'pistol') && CFG.recipes.some(r => r.id === 'gun'),
+   CFG.recipes.map(r => r.id).join(','));
+ok('M9: на старте в руках резак',
+   PM9.weapon === 'cutter' && !PM9.hasLaserPistol && !PM9.hasGravityGun, PM9.weapon);
+ok('M9: пока оружия нет, переключать нечего', gM9.weaponList().join(',') === 'cutter');
+
+// --- 2. крафт пистолета через настоящее меню верстака
+{
+  const s9 = gM9.world.surfaceRow;
+  const bx9 = Math.floor(PM9.cx / TS) + 4;
+  for (let i = 0; i < 2; i++) {
+    gM9.world.set(bx9 + i, s9 - 1, TILE.EMPTY, false);
+    gM9.world.set(bx9 + i, s9 - 2, TILE.EMPTY, false);
+    gM9.world.set(bx9 + i, s9, TILE.STONE, false);
+  }
+  gM9.world.set(bx9, s9 - 1, TILE.WORKBENCH, true);
+  gM9.world.set(bx9 + 1, s9 - 1, TILE.WORKBENCH, true);
+  gM9.tiles.flush();
+  PM9.x = (bx9 - 1) * TS;
+  PM9.y = s9 * TS - PM9.h;
+  gM9.camera.snap(PM9);
+  stepG(gM9, 2);
+
+  gM9.inventory.counts[TILE.FERRITE] = 10;
+  gM9.inventory.counts[ITEM.RESONITE] = 5;
+  ok('M9: без меню пистолет не крафтится', gM9.craft(pistolR) === false);
+
+  pressG(gM9, 'KeyC');
+  stepG(gM9, 1);
+  ok('M9: меню крафта открылось с пистолетом', gM9.craftOpen === true && gM9.canCraft(pistolR) === true);
+  ok('M9: меню выросло до пяти строк',
+     Math.round(gM9.craftLayout().dh) === 54 + 62 * CFG.recipes.length + 16,
+     'dh=' + gM9.craftLayout().dh);
+
+  pressG(gM9, 'Digit5');
+  stepG(gM9, 1);
+  ok('M9: пистолет скрафчен и взят в руки', PM9.hasLaserPistol === true && PM9.weapon === 'pistol',
+     `pistol=${PM9.hasLaserPistol} weapon=${PM9.weapon}`);
+  ok('M9: списано 10 FERRITE + 5 RESONITE',
+     gM9.inventory.counts[TILE.FERRITE] === 0 && gM9.inventory.counts[ITEM.RESONITE] === 0,
+     `f=${gM9.inventory.counts[TILE.FERRITE]} r=${gM9.inventory.counts[ITEM.RESONITE]}`);
+  ok('M9: второй пистолет не крафтится', gM9.craft(pistolR) === false);
+  pressG(gM9, 'Escape');
+  stepG(gM9, 1);
+}
+
+// --- 3. луч: жук умирает с двух попаданий, режим 4 = стрельба
+{
+  const row = gM9.world.surfaceRow;
+  const ptx = Math.floor(PM9.cx / TS);
+  for (let tx = ptx - 1; tx <= ptx + 6; tx++) {
+    for (let ty = row - 3; ty <= row - 1; ty++) gM9.world.set(tx, ty, TILE.EMPTY, false);
+    gM9.world.set(tx, row, TILE.STONE, false);
+  }
+  gM9.tiles.flush();
+  PM9.y = row * TS - PM9.h;
+  PM9.vx = PM9.vy = 0;
+  gM9.camera.snap(PM9);
+  gM9.setMode(4);
+  ok('M9: в режиме копания с пистолетом ЛКМ = стрелять', gM9.firingMode() === 'pistol');
+
+  const bug = new Crawler(PM9.cx + 72, PM9.cy - 6);
+  bug.vx = bug.vy = 0;
+  gM9.crawlers = [bug];
+  PM9.fireCd = 0;
+  const hp1 = bug.hp;
+  const fired = gM9.fireWeapon({ x: bug.cx, y: bug.cy });
+  ok('M9: выстрел пистолета попадает в жука', fired === true && bug.hp < hp1, `${hp1}→${bug.hp}`);
+  ok('M9: луч оставляет след на кадр', gM9.beams.length === 1, 'beams=' + gM9.beams.length);
+  ok('M9: лазер не убивает жука одним попаданием', bug.dead === false);
+  PM9.fireCd = 0;
+  gM9.fireWeapon({ x: bug.cx, y: bug.cy });
+  ok('M9: двух попаданий хватает', bug.dead === true, `hp=${bug.hp}`);
+  ok('M9: у выстрела есть перезарядка', PM9.fireCd > 0, String(PM9.fireCd.toFixed(2)));
+}
+
+// --- 4. грави-пушка: сгусток летит, бьёт и отбрасывает
+{
+  PM9.hasGravityGun = true;
+  gM9.setWeapon('grav');
+  const bug2 = new Crawler(PM9.cx + 130, PM9.cy - 8);
+  bug2.vx = bug2.vy = 0;
+  gM9.crawlers = [bug2];
+  gM9.shots.length = 0;
+  PM9.fireCd = 0;
+  const hp2 = bug2.hp;
+  gM9.fireWeapon({ x: bug2.cx, y: bug2.cy });
+  ok('M9: грави-пушка выпускает сгусток', gM9.shots.length === 1, 'shots=' + gM9.shots.length);
+  for (let i = 0; i < 90 && gM9.shots.length; i++) stepG(gM9, 1);
+  ok('M9: сгусток долетел и нанёс урон', bug2.dead === true || bug2.hp < hp2,
+     `hp ${hp2}→${bug2.hp} dead=${bug2.dead}`);
+  ok('M9: попадание отбрасывает жука', Math.abs(bug2.vx) > 120 || bug2.dead === true,
+     'vx=' + Math.round(bug2.vx));
+  ok('M9: сгусток исчез при попадании', gM9.shots.length === 0);
+}
+
+// --- 5. турель: hp, слом, лут, тишина
+{
+  const w = gM9.world;
+  let spot = null;
+  for (let cy = 0; cy < w.chunksY && !spot; cy++) {
+    for (let cx = (CFG.biomes.ruinsFromX / CFG.world.chunk) | 0; cx < w.chunksX; cx++) {
+      const ch = w.ensureChunk(cx, cy);
+      if (ch.turrets.length) { spot = ch.turrets[0]; break; }
+    }
+  }
+  gM9.deadTurrets.clear();
+  if (gM9.turretMap) gM9.turretMap.clear();
+  const viewT = { x: spot.tx * TS - 320, y: spot.ty * TS - 200, w: 640, h: 400 };
+  w.updateChunks(viewT);
+  gM9.syncTurrets(true);
+  const t = gM9.turrets.find(x => x.tx === spot.tx && x.ty === spot.ty);
+  ok('M9: турель несёт 30 hp', !!t && t.hp === 30 && t.maxHp === 30, t ? `hp=${t.hp}` : 'нет');
+
+  if (t) {
+    // игрок рядом, линия обстрела расчищена
+    PM9.x = t.cx - 70;
+    PM9.y = t.cy - PM9.h / 2;
+    PM9.vx = PM9.vy = 0;
+    PM9.invuln = 1;
+    PM9.health = PM9.maxHealth;
+    gM9.camera.snap(PM9);
+    for (let tx = Math.floor(PM9.cx / TS); tx <= t.tx; tx++) {
+      for (let ty = t.ty - 3; ty <= t.ty; ty++) w.set(tx, ty, TILE.EMPTY, false);
+    }
+    gM9.tiles.flush();
+    gM9.setWeapon('pistol');
+
+    const hpT = t.hp;
+    PM9.fireCd = 0;
+    gM9.fireWeapon({ x: t.cx, y: t.cy });
+    ok('M9: выстрел снимает hp турели', t.hp < hpT, `${hpT}→${t.hp}`);
+
+    const dropsBefore = gM9.drops.length;
+    for (let i = 0; i < 6 && !t.broken; i++) { PM9.fireCd = 0; gM9.fireWeapon({ x: t.cx, y: t.cy }); }
+    ok('M9: турель разбивается', t.broken === true, `hp=${t.hp}`);
+    ok('M9: сломанная турель помечена мёртвой', gM9.deadTurrets.has(t.tx + ',' + t.ty));
+
+    const loot = gM9.drops.slice(dropsBefore);
+    const ferrite = loot.filter(d => d.type === TILE.FERRITE).length;
+    const reson = loot.filter(d => d.type === ITEM.RESONITE).length;
+    ok('M9: с турели падает 3–5 FERRITE', ferrite >= 3 && ferrite <= 5, 'ferrite=' + ferrite);
+    ok('M9: RESONITE — не больше одного и с шансом', reson === 0 || reson === 1, 'resonite=' + reson);
+
+    let shotsFromT = 0;
+    for (let i = 0; i < 120; i++) { stepG(gM9, 1); if (t.flash > 0) shotsFromT++; }
+    ok('M9: сломанная турель больше не стреляет', shotsFromT === 0, 'выстрелов ' + shotsFromT);
+
+    w.updateChunks(viewT);
+    gM9.syncTurrets(true);
+    const t2 = gM9.turrets.find(x => x.tx === t.tx && x.ty === t.ty);
+    ok('M9: сломанная турель остаётся грудой металла', !!t2 && t2.broken === true);
+
+    gM9.doSave();
+    const gM9b = new (sandbox.__cls.Game)(view);
+    ok('M9: сломанная турель не оживает после F5', gM9b.deadTurrets.has(t.tx + ',' + t.ty));
+    ok('M9: пистолет и оружие в руках переживают F5',
+       gM9b.player.hasLaserPistol === true && gM9b.player.weapon === 'pistol',
+       `pistol=${gM9b.player.hasLaserPistol} weapon=${gM9b.player.weapon}`);
+  }
+}
+
+// --- 6. мобильная кнопка «Действие» стреляет
+{
+  gM9.craftOpen = false;
+  gM9.turrets.length = 0;                 // болты соседей не мешают тесту
+  gM9.setMode(4);
+  gM9.setWeapon('pistol');
+  const bug3 = new Crawler(PM9.cx + 64, PM9.cy - 4);
+  bug3.vx = bug3.vy = 0;
+  gM9.crawlers = [bug3];
+  gM9.camera.snap(PM9);
+  PM9.fireCd = 0;
+  const z = CFG.camera.zoom;
+  gM9.input.mouse.x = (bug3.cx - gM9.camera.x) * z;
+  gM9.input.mouse.y = (bug3.cy - gM9.camera.y) * z;
+  gM9.input.mouse.left = true;            // так это делает TouchUI.aim/update
+  gM9.prevLeft = false;
+  const hpM = bug3.hp;
+  gM9.updateMouse(CFG.step);
+  gM9.input.mouse.left = false;
+  ok('M9: кнопка «Действие» на телефоне тоже стреляет', bug3.hp < hpM, `${hpM}→${bug3.hp}`);
+  ok('M9: в режиме сноса ЛКМ не стреляет', (() => {
+    gM9.setMode(5);
+    PM9.fireCd = 0;
+    return gM9.fireWeapon({ x: bug3.cx, y: bug3.cy }) === false && gM9.firingMode() === null;
+  })());
+}
+
+// --- 7. индикатор оружия
+{
+  const mw = gM9.weaponPanelMetrics();
+  const pp = gM9.phasePanelMetrics();
+  ok('M9: индикатор стоит над панелью прилива', mw.x === pp.x && mw.y + mw.h <= pp.y,
+     `y=${Math.round(mw.y)} панель=${Math.round(pp.y)}`);
+  ok('M9: индикатор не вылезает за экран', mw.x >= 0 && mw.x + mw.w <= gM9.vw && mw.y > 0,
+     `x=${Math.round(mw.x)} w=${Math.round(mw.w)} vw=${gM9.vw}`);
+  ok('M9: тычок по индикатору попадает в него',
+     gM9.weaponPanelHit(mw.x + 4, mw.y + 4) === true &&
+     gM9.weaponPanelHit(mw.x - 20, mw.y + 4) === false);
+  ok('M9: у резака, пистолета и пушки есть названия',
+     ['cutter', 'pistol', 'grav'].every(id => typeof CFG.weapons[id].name === 'string'));
+
+  const before = PM9.weapon;
+  pressG(gM9, 'KeyX');
+  stepG(gM9, 1);
+  ok('M9: X переключает оружие', PM9.weapon !== before, `${before}→${PM9.weapon}`);
+
+  const list = gM9.weaponList();
+  for (let i = 0; i < list.length; i++) gM9.cycleWeapon();
+  ok('M9: цикл переключения замкнут', PM9.weapon === list[list.length - 1] , PM9.weapon);
+  ok('M9: в списке три оружия', list.join(',') === 'cutter,pistol,grav', list.join(','));
+
+  ok('M9: кадр с индикатором рисуется без ошибок', (() => {
+    try { gM9.render(); return true; } catch (e) { return false; }
+  })());
 }
 
 // ---------------------------------------------------------------- итог
