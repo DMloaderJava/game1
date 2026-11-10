@@ -175,7 +175,7 @@
     <div class="chips" id="chips">
       <span class="chip" id="chip-shots"><span class="led"></span><span>скриншоты: проверяю…</span></span>
       <span class="chip" id="chip-game"><span class="led"></span><span>игра: не проверена</span></span>
-      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>сюжет: 91 / 91</span></span>
+      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>сюжет: 107 / 107</span></span>
       <span class="chip"><span class="led" style="background:var(--ok)"></span><span>игра: 344 / 344</span></span>
       <span class="chip"><span class="led" style="background:var(--ok)"></span><span>зависимостей: 0</span></span>
     </div>
@@ -418,6 +418,22 @@
           <li>Финальная панель: «арсенал: ГРАВИ-ПУШКА · ЛАЗЕР · РЕЗАК».</li>
         </ul>
       </div>
+    </div>
+
+    <div class="card ok" style="margin-top:16px">
+      <h3><span class="dot"></span>ПКМ и телекинез: сюжет не мешает</h3>
+      <ul class="tight sm">
+        <li>Проверено настоящими событиями канваса: <code>mousedown(button 2)</code> у корабля,
+            архива и фрагмента — захват начинается, ящик едет, отпускание отпускает.
+            С сюжетом и без него результат одинаковый.</li>
+        <li><code>preUpdate</code> читает только <code>KeyE / Escape / Enter</code> и цифры;
+            <code>MouseRight</code> он не забирает. Грави-пушка — та же механика
+            (радиус 8 → 15 тайлов, тяга сильнее), конфликта нет.</li>
+        <li><b>Починен настоящий дефект обёртки:</b> <code>dt * 0</code> не отключает
+            действия по фронту кнопки, поэтому клик в меню ремонта ещё и начинал телекинез
+            (и ставил блок в режиме постройки). Теперь в кадре с панелью кнопки гасятся,
+            захват отпускается; панель архива тоже перестала пропускать клики в мир.</li>
+      </ul>
     </div>
 
     <div class="card warn" style="margin-top:16px">
@@ -685,9 +701,9 @@
 
   <section id="verify">
     <h2><span class="num">11</span>Как проверено</h2>
-    <pre><span class="c"># сюжет: 91 проверка поверх настоящей игры (M8.2 + M8.3 + M9)</span>
+    <pre><span class="c"># сюжет: 107 проверок поверх настоящей игры (M8.2 + M8.3 + M9)</span>
 cd tools
-node verify-narrative.mjs   <span class="c"># → 91/91 проверок пройдено</span>
+node verify-narrative.mjs   <span class="c"># → 107/107 проверок пройдено</span>
 
 <span class="c"># игра без сюжета — не сломана</span>
 node verify.mjs             <span class="c"># → 344/344 проверок пройдено</span>
@@ -697,7 +713,7 @@ node narrative-shots.mjs    <span class="c"># → 11 кадров ПК (32…42)
 node narrative-touch-shots.mjs               <span class="c"># → 4 кадра телефона (43…46)</span>
 SUF=-land TW=900 TH=430 node narrative-touch-shots.mjs  <span class="c"># → +4 в ландшафте</span>
 
-node perf.mjs               <span class="c"># → p50 6.35 мс, p95 7.19, p99 9.36</span>
+node perf.mjs               <span class="c"># → p50 6.65 мс, p95 8.25, p99 10.12</span>
 node verify-review-page.mjs <span class="c"># → структура страницы и запуск игры во фрейме</span></pre>
 
     <div class="grid g2" style="margin-top:14px">
@@ -719,6 +735,11 @@ node verify-review-page.mjs <span class="c"># → структура стран�
               оружие, скрафченное игроком заранее, не мешает ремонту; <code>state()</code> пишет снимок,
               <code>load()</code> досдаёт оружие и не снимает его; старый сейв без блока
               <code>weapons</code> догоняет награду.</li>
+          <li>M9 (мышь): ПКМ у корабля начинает телекинез, ящик реально смещается, отпускание
+              отпускает; то же с грави-пушкой; в открытой панели <code>press / startGrab /
+              placeBlock</code> не вызываются ни разу, а кнопки после кадра не теряются;
+              после закрытия меню ПКМ снова работает. Тесты падают на старой обёртке
+              (<code>dt * 0</code>) — регресс ловится.</li>
         </ul>
       </div>
       <div class="card">
@@ -745,7 +766,7 @@ node verify-review-page.mjs <span class="c"># → структура стран�
     </div>
     <p>M8.2 + M8.3 + M9: сюжетный слой <code>narrative.js</code> — корабль на спавне, журнал,
        пять архивов, три фрагмента ядра, оружие за ремонт. Игра не тронута:
-       344/344 старых проверок и 91/91 новых.</p>
+       344/344 старых проверок и 107/107 новых.</p>
   </footer>
 </main>
 <script>

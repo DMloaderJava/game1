@@ -603,6 +603,185 @@ ok('M8.2: журнал — экземпляр QuestLog', narrative.log instanceo
   sandbox.localStorage.removeItem(sandbox.window.Narrative.KEY);
 }
 
+// ---------------------------------------------------------------- M9: мышь и телекинез
+// ПКМ принадлежит игре. Проверяем это на настоящих событиях канваса:
+// mousedown(button 2) -> телекинез, mouseup -> отпускание, и всё это
+// рядом с сюжетным объектом, где сюжет мог бы «съесть» клик.
+
+// Нажатие/отпускание кнопки мыши через настоящие обработчики игры
+function mouseEvent(kind, x, y, button) {
+  const ev = { clientX: x, clientY: y, button, preventDefault() {} };
+  if (kind === 'down' || kind === 'move') {
+    for (const fn of (view._l && view._l[kind === 'down' ? 'mousedown' : 'mousemove']) || []) fn(ev);
+  }
+  if (kind === 'up') for (const fn of listeners.mouseup ? [listeners.mouseup] : []) fn(ev);
+}
+
+// Сцена: игрок у люка корабля (сюжетный объект под рукой), ящик рядом.
+function grabScene(g) {
+  const z = CFG.camera.zoom;
+  const p = g.player;
+  p.x = g.narrative ? g.narrative.ship.doorX : 20 * TS;
+  p.y = ((g.narrative ? g.narrative.ship.floorRow : 17) - 1) * TS - p.h;
+  p.vx = p.vy = 0;
+  g.camera.snap(p);
+  g.update(CFG.step);
+  const crate = g.crates[0];
+  crate.x = p.x + 70;
+  crate.y = p.y + 40;
+  crate.vx = crate.vy = 0;
+  crate.sleeping = false;
+  crate.gravityScale = 1;
+  const aimAt = (wx, wy) => {
+    const mx = (wx - g.camera.x) * z;
+    const my = (wy - g.camera.y) * z;
+    mouseEvent('move', mx, my, 0);
+    return { mx, my };
+  };
+  return { p, crate, aimAt };
+}
+
+{
+  const savedKeydown = listeners.keydown;
+  // Сейв самой игры держит позицию игрока: без чистки новая игра
+  // переносит его в сохранённую точку и сцена «у люка» разваливается
+  sandbox.localStorage.removeItem(CFG.save.key);
+  const g = new sandbox.Game(view);
+  listeners.keydown = savedKeydown;
+  g.update(CFG.step);
+  const { crate, aimAt } = grabScene(g);
+  ok('M9: у корабля сюжет видит объект под рукой', !!g.narrative.nearest(),
+     g.narrative.nearest() ? g.narrative.nearest().kind : 'нет');
+
+  // ПКМ: прицел на ящик, нажатие, тянем к игроку
+  const at = aimAt(crate.cx, crate.cy);
+  const start = { x: crate.cx, y: crate.cy };
+  mouseEvent('down', at.mx, at.my, 2);
+  g.update(CFG.step);
+  ok('M9: ПКМ доходит до игры — захват начался', !!g.grab && g.grab === crate,
+     `grab=${!!g.grab}`);
+  g.update(CFG.step);
+  const p2 = g.player;
+  for (let i = 0; i < 30; i++) {
+    aimAt(p2.cx + 45, p2.cy);
+    g.update(CFG.step);
+  }
+  const moved = Math.hypot(crate.cx - start.x, crate.cy - start.y);
+  ok('M9: ящик реально тянется к игроку', moved > 8 && g.grab === crate,
+     `сдвиг ${moved.toFixed(1)} px`);
+  ok('M9: у захваченного ящика выключена гравитация', crate.gravityScale === 0);
+
+  // сюжет не сбрасывает захват и не мешает ему, пока открыт никакой экран
+  ok('M9: сюжет не трогает grab в обычном кадре', !!g.grab);
+
+  // отпускание — через обработчик window, как в браузере
+  listeners.mouseup({ button: 2 });
+  g.update(CFG.step);
+  ok('M9: отпускание ПКМ отпускает тело', !g.grab && crate.gravityScale === 1,
+     `grab=${!!g.grab}, gravityScale=${crate.gravityScale}`);
+
+  // грави-пушка: радиус и тяга другие, но ввод тот же
+  g.player.hasGravityGun = true;
+  const { crate: c2, aimAt: aim2 } = grabScene(g);
+  const at2 = aim2(c2.cx, c2.cy);
+  mouseEvent('down', at2.mx, at2.my, 2);
+  g.update(CFG.step);
+  ok('M9: с грави-пушкой ПКМ работает так же', !!g.grab,
+     `радиус ${g.teleRange} тайлов, grab=${!!g.grab}`);
+  for (let i = 0; i < 20; i++) { aim2(g.player.cx + 45, g.player.cy); g.update(CFG.step); }
+  ok('M9: пушка не сбрасывает захват и тянет сильнее',
+     !!g.grab && g.player.hasGravityGun, `grab=${!!g.grab}`);
+  listeners.mouseup({ button: 2 });
+  g.update(CFG.step);
+  g.player.hasGravityGun = false;
+}
+
+// Меню ремонта открыто: мышь принадлежит меню, мир не хватает и не строит
+{
+  const savedKeydown = listeners.keydown;
+  sandbox.localStorage.removeItem(CFG.save.key);
+  const g = new sandbox.Game(view);
+  listeners.keydown = savedKeydown;
+  g.update(CFG.step);
+  const { p, crate, aimAt } = grabScene(g);
+  g.inventory.counts[TILE.DIRT] = 20;
+  g.setMode(TILE.DIRT);
+  g.narrative.ship.interact(g);
+  g.narrative.menuT = 1;
+  const at = aimAt(crate.cx, crate.cy);
+
+  mouseEvent('down', at.mx, at.my, 2);
+  g.update(CFG.step);
+  ok('M9: в меню ремонта ПКМ не хватает ящик', !g.grab && crate.gravityScale === 1,
+     `grab=${!!g.grab}, gravityScale=${crate.gravityScale}`);
+
+  // Что игра делает в кадре с открытым меню: обёртка обязана приходить
+  // в origUpdateMouse с уже погашенными кнопками, поэтому ни press(),
+  // ни startGrab() не должны вызываться вовсе
+  const acts = [];
+  const spy = (name) => {
+    const orig = g[name];
+    g[name] = function () { acts.push(name); return orig.apply(this, arguments); };
+    return () => { g[name] = orig; };
+  };
+  const undo = [spy('press'), spy('startGrab'), spy('placeBlock'), spy('updateDig')];
+  g.input.mouse.left = true;
+  g.input.mouse.right = true;
+  g.update(CFG.step);
+  for (const u of undo) u();
+  ok('M9: в кадре с меню игра не получает нажатий', acts.length === 0, acts.join(', ') || 'ни одного действия');
+  ok('M9: кнопки после кадра не потерялись (они снова нажаты)',
+     g.input.mouse.left === true && g.input.mouse.right === true);
+  ok('M9: клик в меню не хватает и не копает', !g.grab);
+
+  // закрываем меню и проверяем, что мышь вернулась к игре.
+  // Игрок отпускает кнопки сам — иначе «зажатая с меню» ПКМ не должна
+  // внезапно начать телекинез сразу после закрытия (это тоже проверяем)
+  g.input.mouse.left = false;
+  g.input.mouse.right = false;
+  listeners.mouseup({ button: 2 });
+  g.update(CFG.step);
+  g.input.pressed.add('Escape');
+  g.update(CFG.step);
+  ok('M9: меню закрылось', g.narrative.menu === null);
+  const at2 = aimAt(crate.cx, crate.cy);
+  mouseEvent('down', at2.mx, at2.my, 2);
+  g.update(CFG.step);
+  ok('M9: после закрытия меню ПКМ снова работает', !!g.grab, `grab=${!!g.grab}`);
+  listeners.mouseup({ button: 2 });
+  g.update(CFG.step);
+  ok('M9: и снова отпускается', !g.grab);
+  g.setMode(4);   // возвращаем режим копания, чтобы не влиять на другие проверки
+}
+
+// ---------------------------------------------------------------- M9: мышь в панели архива
+{
+  const savedKeydown = listeners.keydown;
+  sandbox.localStorage.removeItem(CFG.save.key);
+  const g = new sandbox.Game(view);
+  listeners.keydown = savedKeydown;
+  g.update(CFG.step);
+  g.narrative.openArchive(g.narrative.archives[0]);
+  g.narrative.readT = 1;
+
+  const acts = [];
+  const spy = (name) => {
+    const orig = g[name];
+    g[name] = function () { acts.push(name); return orig.apply(this, arguments); };
+    return () => { g[name] = orig; };
+  };
+  const undo = [spy('press'), spy('startGrab'), spy('placeBlock')];
+  g.input.mouse.left = true;
+  g.input.mouse.right = true;
+  g.update(CFG.step);
+  for (const u of undo) u();
+  ok('M9: в панели архива мышь тоже принадлежит панели', acts.length === 0 && !g.grab,
+     acts.join(', ') || 'ни одного действия');
+  g.input.mouse.left = false;
+  g.input.mouse.right = false;
+  g.narrative.closeArchive();
+}
+
 // ---------------------------------------------------------------- итог
 const passed = results.filter(r => r.pass).length;
 console.log('\n=== РЕЗУЛЬТАТ ===');

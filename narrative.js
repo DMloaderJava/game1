@@ -1796,9 +1796,34 @@
 
     var origUpdateMouse = P.updateMouse;
     P.updateMouse = function (dt) {
-      // В меню ремонта мышь принадлежит меню: иначе клик по строке ещё и копал бы
-      if (this.narrative && (this.narrative.menu || this.narrative.ending)) return origUpdateMouse.call(this, dt * 0);
-      return origUpdateMouse.call(this, dt);
+      var n = this.narrative;
+      // Панелей у сюжета три: ремонт, архив и финальный аккорд. Пока открыта
+      // любая — мышь принадлежит ей, и мир не должен ни копать, ни строить,
+      // ни хватать ящики.
+      var panel = !!n && (n.menu === 'ship' || !!n.ending || !!n.reading);
+      if (!panel) return origUpdateMouse.call(this, dt);
+
+      var m = this.input && this.input.mouse;
+      if (!m) return origUpdateMouse.call(this, dt);
+
+      // `dt * 0` недостаточно: press() и startGrab() срабатывают по фронту
+      // кнопки и от dt не зависят. Поэтому на время кадра гасим сами кнопки,
+      // а состояние игры (prevLeft/prevRight) держим в согласии с реальным:
+      // иначе после закрытия меню первый же кадр дал бы ложное нажатие.
+      // Захват отпускаем: тело не должно висеть в воздухе с gravityScale = 0,
+      // пока игрок читает меню — телекинез вернётся сразу после закрытия.
+      if (this.grab && typeof this.releaseGrab === 'function') this.releaseGrab();
+      var L = m.left, R = m.right;
+      m.left = false; m.right = false;
+      try {
+        origUpdateMouse.call(this, dt);
+      } finally {
+        m.left = L; m.right = R;
+        // Кнопки возвращаем как были, а prev* оставляем «нажатыми»: после
+        // закрытия меню ПКМ, которую держали всё это время, не считается
+        // новым нажатием и телекинез не срабатывает сам по себе
+        this.prevLeft = L; this.prevRight = R;
+      }
     };
 
     var origReset = P.resetWorld;
