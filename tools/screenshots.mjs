@@ -541,4 +541,76 @@ frames(30);
   shot('24-light-sources');
 }
 
+// 32: M8.1 — обломки корабля на старте (спавн-объект 5x4 тайла)
+{
+  // сцены M2–M7 оставили прилив в катастрофе: для новых кадров он не нужен
+  game.tide.setPhase(0); game.tide.applyPhase('STABLE');
+  game.skyWarn = 0; game.skyCat = 0; game.hurtScreen = 0;
+  P.health = P.maxHealth; P.invuln = 0;
+  game.crawlers.length = 0;
+  const s = game.ship;
+  P.x = s.cx - 70; P.y = s.y + s.hpx - P.h; P.vx = P.vy = 0;
+  game.camera.snap(P);
+  frames(40);
+  game.camera.snap(P);
+  game.render();
+  shot('32-ship');
+}
+
+// 33: M8.1 — Руины: металлические стены, балки и турель на палубе
+{
+  const Wr = game.world;
+  const cs = CFG.world.chunk;
+  let spot = null;
+  for (let cy = 0; cy < Wr.chunksY && !spot; cy++) {
+    for (let cx = (CFG.biomes.ruinsFromX / cs) | 0; cx < Wr.chunksX && !spot; cx++) {
+      const ch = Wr.ensureChunk(cx, cy);
+      if (ch.turrets.length) spot = ch.turrets[0];
+    }
+  }
+  if (spot) {
+    Wr.updateChunks({ x: spot.tx * TS - 320, y: spot.ty * TS - 180, w: 640, h: 360 });
+    game.syncTurrets();
+    P.x = (spot.tx - 3) * TS; P.y = (spot.ty + 1) * TS - P.h; P.vx = P.vy = 0;
+    game.camera.snap(P);
+    frames(90);                 // турель успевает прицелиться и выстрелить
+    game.camera.snap(P);
+    // турель бьёт по игроку — для кадра гасим красную вспышку урона
+    game.hurtScreen = 0; P.hurtT = 0; game.camera.shake(0);
+    game.render();
+    shot('33-ruins-turret');
+  }
+}
+
+// 34: M8.1 — RESONITE в кристальных пещерах (глубина 50+)
+{
+  game.tide.setPhase(0); game.tide.applyPhase('STABLE');
+  game.skyWarn = 0; game.skyCat = 0; game.hurtScreen = 0;
+  P.health = P.maxHealth; P.invuln = 0;
+  const Wr = game.world;
+  // ищем не одну жилу, а гроздь: в кадр должно попасть 3+ кристалла
+  let spot = null, best = 0;
+  for (let y = CFG.biomes.crystalFromRow + 4; y < CFG.layers.deepTopRow + 60; y++) {
+    for (let x = 200; x < 580; x++) {
+      let n = 0;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -5; dx <= 5; dx++) {
+        if (Wr.get(x + dx, y + dy) === TILE.RESONITE) n++;
+      }
+      if (n > best && Wr.solid(x, y + 1) && !Wr.solid(x, y) && !Wr.solid(x, y - 1)) {
+        best = n; spot = { x, y };
+      }
+    }
+  }
+  if (spot) {
+    P.x = (spot.x - 5) * TS; P.y = (spot.y + 1) * TS - P.h; P.vx = P.vy = 0;
+    game.camera.snap(P);
+    frames(30);
+    game.camera.snap(P);
+    game.crawlers.length = 0;    // хищники в глубине оставили красную вспышку урона
+    game.hurtScreen = 0; P.hurtT = 0; P.health = P.maxHealth;
+    game.render();
+    shot('34-resonite');
+  }
+}
+
 console.log('done');

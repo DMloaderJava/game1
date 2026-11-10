@@ -51,7 +51,8 @@
 /* ============================================================
    Типы тайлов
    ============================================================ */
-const TILE = { EMPTY: 0, DIRT: 1, STONE: 2, FERRITE: 3, WORKBENCH: 5 };
+// M8.1: RESONITE — синий кристалл Кристальных пещер, METAL — стены Руин
+const TILE = { EMPTY: 0, DIRT: 1, STONE: 2, FERRITE: 3, WORKBENCH: 5, RESONITE: 6, METAL: 7 };
 
 // BIOGEL — не тайл, а только предмет: id выше диапазона тайлов
 const ITEM = { BIOGEL: 4 };
@@ -67,10 +68,11 @@ const CFG = {
   step: 1 / 60,
   tile: 32,
 
-  // Мир: 200x130 тайлов = 6400x4160 px
-  // M5: +30 рядов вниз — Глубокие пещеры. Сетка выросла, но рендер
-  // по-прежнему рисует только кадр (см. drawTiles), так что цена — только память
-  world: { cols: 200, rows: 130 },
+  // Мир: 1000x300 тайлов = 32000x9600 px.
+  // M8.1: мир хранится и грузится чанками по 64x64 тайла (см. class World).
+  // Канваса размером с мир больше нет: тайл — запечённый 32x32 спрайт,
+  // поэтому рост сетки не стоит ни памяти, ни FPS.
+  world: { cols: 1000, rows: 300, chunk: 64, keepChunks: 48 },
   layers: {
     skyRows: 5,          // верхние 5 рядов гарантированно EMPTY
     ceilingRows: 2,      // потолочная плита — по ней ходят при перевороте
@@ -81,6 +83,47 @@ const CFG = {
     deepFerriteChance: 0.15,   // M5: концентрация FERRITE в глубине
     deepCaveChance: 0.36,      // M5: доля пустоты — пещеры, а не монолит
     deepPockets: 16            // M5: больших полостей для ориентира
+  },
+
+  // M8.1: биомы. Мир делится на зоны:
+  //   Зона 0 (Спавн)        — обычный зал, как раньше
+  //   Зона 1 (Кристальные)  — глубина 50+, там растёт RESONITE
+  //   Зона 2 (Руины)        — x >= ruinsFromX: металлические стены и турели
+  biomes: {
+    ruinsFromX: 640,        // с этого столбца начинаются Руины
+    crystalFromRow: 50,     // глубина, где появляются кристаллы (совпадает с deepTopRow)
+    resoniteChance: 0.22,   // доля ячеек, в которых есть жила
+    resoniteCellX: 10,      // ячейка жилы по X, тайлов
+    resoniteCellY: 8,       // и по Y
+    resoniteRx: 2.2,        // радиус жилы — «гнездо» на 8–14 кристаллов
+    resoniteRy: 1.8,
+    ruinRoomW: 18,          // размер зала руин по X, тайлов
+    ruinRoomH: 16,          // и по Y
+    ruinWall: 2,            // толщина металлических стен
+    ruinRubble: 0.10        // доля обломков породы внутри зала
+  },
+
+  // M8.1: корабль-обломки на точке спавна (5x4 тайла)
+  ship: {
+    tx: 16, ty: 30,           // координаты из ТЗ; если ряд попадает в породу —
+    w: 5, h: 4,               // обломки ставятся на пол зала (см. Game.makeShip)
+    interactRadius: 3.5,      // тайлов, на которых работает shipNear()
+    smokeEvery: 0.14,         // пауза между клубами дыма, с
+    smoke: '#5c6675'
+  },
+
+  // M8.1: турели Руин. Не бегают, но бьют по игроку, если он в зоне видимости
+  turret: {
+    hp: 30,
+    range: 9,                 // тайлов
+    cooldown: 1.4,            // пауза между выстрелами
+    aimTime: 0.4,             // сколько «наводится» перед выстрелом
+    damage: 8,
+    boltSpeed: 420,
+    boltLife: 2.2,
+    maxPerChunk: 2,           // больше двух турелей на чанк не ставим
+    color: '#ff6b52',
+    boltColor: '#ffcf7a'
   },
 
   // Уступы в зале: проходимая геометрия для проверки физики.
@@ -104,7 +147,10 @@ const CFG = {
     { x: 179, y: 12, w: 8 }
   ],
 
-  spawn: { playerTileX: 16, cratesTileX: [22, 26, 31] },
+  // M8.1: точка спавна. hallSpan/deepSpan ограничивают зону, в которой
+  // ищется свободное место для хищников и терминалов: иначе спавн 300 000
+  // тайлов «вслепую» заставлял бы генерировать полмира на старте
+  spawn: { playerTileX: 16, cratesTileX: [22, 26, 31], hallSpan: 320, deepSpan: 340 },
 
   // 1B: постройка и снос
   build: {
@@ -329,7 +375,8 @@ const CFG = {
 
   dig: {
     radius: 4,                          // тайлов от центра игрока
-    times: { 1: 0.15, 2: 0.5, 3: 0.7 }, // по типам тайлов
+    // M8.1: RESONITE (6) копается долго, METAL (7) — броня Руин
+    times: { 1: 0.15, 2: 0.5, 3: 0.7, 6: 1.8, 7: 1.1 }, // по типам тайлов
     dustEvery: 0.09,                    // пыль во время копания
     tooFarHold: 0.3,                    // сколько держится надпись «далеко»
     radiusEcho: 0.9                     // вспышка радиуса после переворота гравитации
@@ -392,6 +439,7 @@ const CFG = {
 };
 
 const TS = CFG.tile;
+const TILE_TONES = 8;   // сколько уровней тона у спрайта тайла (порода, не «шахматка»)
 
 // Быстрый доступ к описанию ресурса по id тайла
 const RES = {};
@@ -399,6 +447,12 @@ for (const r of CFG.resources) RES[r.id] = r;
 // Верстак — не ресурс, но тайл: цвет нужен и буферу тайлов, и частицам
 RES[TILE.WORKBENCH] = { id: TILE.WORKBENCH, name: 'ВЕРСТАК',
   color: '#8a5a2b', shade: '#5b3a1a', light: '#c08a4a' };
+// M8.1: RESONITE и METAL — тайлы, а не складские ресурсы: RESONITE при копке
+// рассыпается на FERRITE + STONE, поэтому в инвентаре строки для него нет
+RES[TILE.RESONITE] = { id: TILE.RESONITE, name: 'RESONITE',
+  color: '#2f6fd0', shade: '#123a72', light: '#8fd8ff', spark: '#bfeaff' };
+RES[TILE.METAL] = { id: TILE.METAL, name: 'МЕТАЛЛ',
+  color: '#454e5c', shade: '#252b34', light: '#8d97a3', spark: '#c7d2de' };
 
 /* ============================================================
    M6: спрайтовый кэш.
@@ -911,6 +965,136 @@ const Sprites = {
     });
   },
 
+  // ---------- M8.1: груда обломков корабля (5x4 тайла) ----------
+  // Тёмный металл, разорванный борт с рёбрами, двигательный блок и тлеющие
+  // угли. Печётся один раз в offscreen-canvas: рисовать это каждый кадр
+  // десятками path-операций дорого
+  ship(w, h) {
+    return SPR.get('ship:' + w + 'x' + h, w, h, (x) => {
+      const body = (pts, fill, stroke, lw) => {
+        poly(x, pts.map(p => [p[0] * w, p[1] * h]));
+        x.fillStyle = fill;
+        x.fill();
+        if (stroke) { x.strokeStyle = stroke; x.lineWidth = lw || 1; x.stroke(); }
+      };
+
+      // тень под обломками
+      x.globalAlpha = 0.45;
+      x.fillStyle = '#000';
+      x.beginPath();
+      x.ellipse(w * 0.5, h * 0.95, w * 0.45, h * 0.055, 0, 0, Math.PI * 2);
+      x.fill();
+      x.globalAlpha = 1;
+
+      // рассыпанные листы обшивки вокруг корпуса
+      const plates = [
+        [0.01, 0.84, 0.17, 0.055, -0.16],
+        [0.68, 0.90, 0.20, 0.05, 0.10],
+        [0.26, 0.91, 0.18, 0.045, 0.04],
+        [0.83, 0.79, 0.13, 0.05, -0.28],
+        [0.10, 0.66, 0.10, 0.04, 0.22]
+      ];
+      for (const [px, py, pw, ph, rot] of plates) {
+        x.save();
+        x.translate(px * w, py * h);
+        x.rotate(rot);
+        x.fillStyle = '#1b222b';
+        x.fillRect(0, 0, pw * w, ph * h);
+        x.fillStyle = '#3a4450';
+        x.fillRect(0, 0, pw * w, ph * h * 0.4);
+        x.restore();
+      }
+
+      // корпус: нос задран, корма просела — «груда», а не целый корабль
+      body([[0.07, 0.40], [0.44, 0.17], [0.71, 0.31], [0.80, 0.62],
+            [0.63, 0.87], [0.20, 0.89], [0.09, 0.68]], '#2a3441', '#4f5c6c', 1.6);
+      // верхняя грань светлее — корпус читается объёмным
+      body([[0.09, 0.42], [0.44, 0.19], [0.69, 0.32], [0.61, 0.44], [0.19, 0.53]], '#3d4958');
+      // нижняя тень
+      body([[0.20, 0.74], [0.62, 0.70], [0.60, 0.86], [0.23, 0.87]], '#19202a');
+
+      // разлом борта: чёрный провал и рёбра шпангоута
+      body([[0.45, 0.20], [0.71, 0.31], [0.65, 0.50], [0.47, 0.42]], '#080c11');
+      x.strokeStyle = '#68768a';
+      x.lineWidth = Math.max(1.4, w * 0.012);
+      for (let i = 0; i < 4; i++) {
+        const k = i / 3;
+        x.beginPath();
+        x.moveTo((0.46 + k * 0.22) * w, (0.21 + k * 0.10) * h);
+        x.lineTo((0.49 + k * 0.20) * w, (0.42 + k * 0.06) * h);
+        x.stroke();
+      }
+      // рваный край: зубцы по правому борту
+      x.fillStyle = '#39434f';
+      for (let i = 0; i < 5; i++) {
+        const yy = 0.30 + i * 0.055;
+        x.beginPath();
+        x.moveTo(0.76 * w, yy * h);
+        x.lineTo((0.86 + (i % 2) * 0.04) * w, (yy + 0.03) * h);
+        x.lineTo(0.74 * w, (yy + 0.05) * h);
+        x.closePath();
+        x.fill();
+      }
+
+      // кабина: треснувшее стекло в носовой части
+      body([[0.17, 0.43], [0.29, 0.36], [0.32, 0.46], [0.20, 0.52]], '#16292f', '#7fb4c4', 1);
+      x.strokeStyle = 'rgba(180,230,245,0.55)';
+      x.lineWidth = 0.9;
+      x.beginPath();
+      x.moveTo(0.20 * w, 0.46 * h); x.lineTo(0.28 * w, 0.48 * h);
+      x.lineTo(0.25 * w, 0.52 * h); x.lineTo(0.30 * w, 0.45 * h);
+      x.stroke();
+
+      // двигательный блок слева снизу: сопло и оборванная труба
+      body([[0.05, 0.60], [0.17, 0.57], [0.19, 0.76], [0.08, 0.80]], '#212933', '#55616f', 1.2);
+      x.fillStyle = '#0d1116';
+      x.beginPath();
+      x.moveTo(0.05 * w, 0.62 * h);
+      x.lineTo(-0.005 * w, 0.68 * h);
+      x.lineTo(0.05 * w, 0.78 * h);
+      x.closePath();
+      x.fill();
+      x.strokeStyle = '#49525e';
+      x.lineWidth = Math.max(1.8, w * 0.014);
+      x.beginPath();
+      x.moveTo(0.17 * w, 0.62 * h);
+      x.bezierCurveTo(0.26 * w, 0.55 * h, 0.30 * w, 0.72 * h, 0.36 * w, 0.66 * h);
+      x.stroke();
+
+      // заклёпки по шву корпуса
+      x.fillStyle = 'rgba(196,210,228,0.5)';
+      for (let i = 0; i < 7; i++) {
+        const k = i / 6;
+        x.beginPath();
+        x.arc((0.13 + k * 0.48) * w, (0.60 + Math.sin(k * 3) * 0.02) * h, Math.max(0.8, w * 0.008), 0, Math.PI * 2);
+        x.fill();
+      }
+
+      // тлеющие угли внутри разлома
+      x.save();
+      x.globalCompositeOperation = 'lighter';
+      for (const [ex, ey, er, ec] of [[0.56, 0.40, 0.10, '255,150,60'], [0.64, 0.46, 0.06, '255,110,40'],
+                                      [0.50, 0.55, 0.05, '255,180,90']]) {
+        const g2 = x.createRadialGradient(ex * w, ey * h, 0, ex * w, ey * h, er * w);
+        g2.addColorStop(0, 'rgba(' + ec + ',0.85)');
+        g2.addColorStop(1, 'rgba(' + ec + ',0)');
+        x.fillStyle = g2;
+        x.beginPath();
+        x.arc(ex * w, ey * h, er * w, 0, Math.PI * 2);
+        x.fill();
+      }
+      x.restore();
+
+      // мелкий мусор: гайки и щепки на полу
+      x.fillStyle = '#4a5563';
+      for (let i = 0; i < 9; i++) {
+        const a = hash2(i * 7 + 1, i * 13 + 5);
+        const b = hash2(i * 11 + 3, i * 5 + 9);
+        x.fillRect((0.04 + a * 0.9) * w, (0.88 + b * 0.08) * h, 1.6, 1.6);
+      }
+    });
+  },
+
   // ---------- ящик: контейнер с рёбрами ----------
   crate() {
     return SPR.get('crate', 40, 40, (x, w, h) => {
@@ -1032,18 +1216,166 @@ function overlap(a, b, pad) {
 }
 
 /* ============================================================
-   Мир: тайловая сетка, статичная
+   Мир: чанки 64x64 тайлов, ленивая генерация, выгрузка дальних
+   ============================================================
+   M8.1: сетка выросла до 1000x300 (300 000 тайлов). Держать её целиком
+   в памяти ещё можно, но:
+     • канвас 32000x9600 px занял бы ~1.2 ГБ — поэтому тайлы рисуются
+       запечёнными спрайтами (см. TileLayer), а не мировым буфером;
+     • генерировать всю карту на старте — секунды, а игроку нужен только
+       стартовый зал.
+   Поэтому тайлы живут в чанках: чанк создаётся, когда попадает в камеру
+   (или к нему прикасается физика), и выгружается, когда уходит далеко.
+   Правки игрока (копка, постройки) не теряются: они лежат в overlay-mods
+   и накладываются на чанк при повторной загрузке.
    ============================================================ */
+const CHUNK_PAD = 1;     // сколько чанков держим за краем камеры
+
+class Chunk {
+  constructor(cx, cy, size) {
+    this.cx = cx;
+    this.cy = cy;
+    this.size = size;
+    this.tiles = new Uint8Array(size * size);
+    this.placed = new Uint8Array(size * size);
+    this.turrets = [];       // детерминированные точки турелей Руин
+    this.generated = false;
+    this.touch = 0;          // LRU-метка: когда чанк последний раз был нужен
+  }
+}
+
+// Плоское представление чанкового мира: world.tiles[i] и world.placed[i].
+// Игровой код читает тайлы через get(); прокси нужен тестам, сохранению
+// и отладке, где удобен именно плоский индекс.
+function makeTileView(world, placedView) {
+  const api = {
+    length: world.cols * world.rows,
+    some(fn) {
+      for (let i = 0; i < api.length; i++) {
+        if (fn.call(view, world.viewAt(i, placedView), i, view)) return true;
+      }
+      return false;
+    },
+    forEach(fn) {
+      for (let i = 0; i < api.length; i++) fn.call(view, world.viewAt(i, placedView), i, view);
+    },
+    indexOf(value, from) {
+      const start = Math.max(0, from | 0);
+      for (let i = start; i < api.length; i++) if (world.viewAt(i, placedView) === value) return i;
+      return -1;
+    }
+  };
+  const numeric = (prop) => {
+    if (typeof prop !== 'string' || prop.length === 0) return -1;
+    const c = prop.charCodeAt(0);
+    if (c < 48 || c > 57) return -1;
+    const n = +prop;
+    return Number.isInteger(n) && n >= 0 ? n : -1;
+  };
+  const view = new Proxy(api, {
+    get(target, prop) {
+      const n = numeric(prop);
+      if (n >= 0) return world.viewAt(n, placedView);
+      if (prop === Symbol.iterator) {
+        let i = 0;
+        return function () {
+          return {
+            next() {
+              if (i >= api.length) return { done: true, value: undefined };
+              return { done: false, value: world.viewAt(i++, placedView) };
+            },
+            [Symbol.iterator]() { return this; }
+          };
+        };
+      }
+      return target[prop];
+    },
+    set(target, prop, value) {
+      const n = numeric(prop);
+      if (n >= 0) { world.viewSet(n, value, placedView); return true; }
+      target[prop] = value;
+      return true;
+    },
+    has(target, prop) {
+      return numeric(prop) >= 0 || prop in target;
+    }
+  });
+  return view;
+}
+
 class World {
   constructor(cfg) {
     this.cols = cfg.world.cols;
     this.rows = cfg.world.rows;
-    this.tiles = new Uint8Array(this.cols * this.rows);
-    this.placed = new Uint8Array(this.cols * this.rows);   // 1 = поставлено игроком
-    this.dirty = [];        // индексы изменённых тайлов
+    this.chunkSize = cfg.world.chunk || 64;
+    this.chunksX = Math.ceil(this.cols / this.chunkSize);
+    this.chunksY = Math.ceil(this.rows / this.chunkSize);
+    this.chunks = new Map();       // key -> Chunk (только загруженные)
+    this.mods = new Map();         // key -> Map(localIndex -> packed)
+    this.dirty = [];               // индексы изменённых тайлов
     this.surfaceRow = 0;
-    this.solidPx = 0;       // для отладки: сколько тайлов не пусто
+    this.deepRow = cfg.layers.deepTopRow;
+    this.keepChunks = cfg.world.keepChunks || 48;
+    this.tick = 0;
+    this.epoch = 0;                // меняется при загрузке/выгрузке чанка
+    this.stats = { loads: 0, unloads: 0, generated: 0, peak: 0 };
+    this.solidPx = 0;
+    this.tiles = makeTileView(this, false);
+    this.placed = makeTileView(this, true);
   }
+
+  /* ---------- геометрия чанков ---------- */
+
+  chunkKey(cx, cy) { return cy * this.chunksX + cx; }
+
+  chunkOf(x, y) {
+    return { cx: (x / this.chunkSize) | 0, cy: (y / this.chunkSize) | 0 };
+  }
+
+  // Локальный индекс тайла внутри чанка
+  localIndex(x, y, cx, cy) {
+    const cs = this.chunkSize;
+    return (y - cy * cs) * cs + (x - cx * cs);
+  }
+
+  isChunkLoaded(cx, cy) {
+    if (cx < 0 || cy < 0 || cx >= this.chunksX || cy >= this.chunksY) return false;
+    return this.chunks.has(this.chunkKey(cx, cy));
+  }
+
+  loadedChunks() { return this.chunks.size; }
+
+  chunkStats() {
+    return {
+      loaded: this.chunks.size,
+      peak: this.stats.peak,
+      loads: this.stats.loads,
+      unloads: this.stats.unloads,
+      generated: this.stats.generated,
+      total: this.chunksX * this.chunksY
+    };
+  }
+
+  // Достать чанк; если его нет в памяти — сгенерировать (ленивая загрузка)
+  ensureChunk(cx, cy) {
+    const key = this.chunkKey(cx, cy);
+    let ch = this.chunks.get(key);
+    if (!ch) {
+      ch = this.buildChunk(cx, cy, key);
+      this.chunks.set(key, ch);
+      this.stats.loads++;
+      this.epoch++;
+      if (this.chunks.size > this.stats.peak) this.stats.peak = this.chunks.size;
+    }
+    ch.touch = ++this.tick;
+    return ch;
+  }
+
+  chunkForTile(x, y) {
+    return this.ensureChunk((x / this.chunkSize) | 0, (y / this.chunkSize) | 0);
+  }
+
+  /* ---------- доступ к тайлам ---------- */
 
   inBounds(x, y) {
     return x >= 0 && y >= 0 && x < this.cols && y < this.rows;
@@ -1051,8 +1383,11 @@ class World {
 
   // За пределами мира — «камень», чтобы никто не ушёл за границу
   get(x, y) {
-    if (!this.inBounds(x, y)) return TILE.STONE;
-    return this.tiles[y * this.cols + x];
+    if (x < 0 || y < 0 || x >= this.cols || y >= this.rows) return TILE.STONE;
+    const cs = this.chunkSize;
+    const cx = (x / cs) | 0, cy = (y / cs) | 0;
+    const ch = this.ensureChunk(cx, cy);
+    return ch.tiles[(y - cy * cs) * cs + (x - cx * cs)];
   }
 
   solid(x, y) {
@@ -1061,97 +1396,300 @@ class World {
 
   set(x, y, type, placed) {
     if (!this.inBounds(x, y)) return;
-    const i = y * this.cols + x;
-    if (this.tiles[i] === type && !!this.placed[i] === !!placed) return;
-    this.tiles[i] = type;
-    this.placed[i] = placed ? 1 : 0;
-    this.dirty.push(i);
+    const cs = this.chunkSize;
+    const cx = (x / cs) | 0, cy = (y / cs) | 0;
+    const ch = this.ensureChunk(cx, cy);
+    const li = (y - cy * cs) * cs + (x - cx * cs);
+    const pl = placed ? 1 : 0;
+    if (ch.tiles[li] === type && ch.placed[li] === pl) return;
+    ch.tiles[li] = type;
+    ch.placed[li] = pl;
+    // Правка уезжает в overlay: даже если чанк будет выгружен, копка не пропадёт
+    const key = this.chunkKey(cx, cy);
+    let m = this.mods.get(key);
+    if (!m) { m = new Map(); this.mods.set(key, m); }
+    m.set(li, (type & 255) | (pl << 8));
+    this.dirty.push(y * this.cols + x);
   }
 
   isPlaced(x, y) {
     if (!this.inBounds(x, y)) return false;
-    return this.placed[y * this.cols + x] === 1;
+    const cs = this.chunkSize;
+    const cx = (x / cs) | 0, cy = (y / cs) | 0;
+    const ch = this.ensureChunk(cx, cy);
+    return ch.placed[(y - cy * cs) * cs + (x - cx * cs)] === 1;
   }
 
-  generate(cfg) {
-    const L = cfg.layers;
-    const ceilingTop = L.skyRows;
-    const caveTop = ceilingTop + L.ceilingRows;
+  // Плоский доступ по глобальному индексу — для world.tiles[i]
+  viewAt(i, placedView) {
+    if (!(i >= 0) || i >= this.cols * this.rows) return undefined;
+    const y = (i / this.cols) | 0;
+    const x = i - y * this.cols;
+    return placedView ? (this.isPlaced(x, y) ? 1 : 0) : this.get(x, y);
+  }
+
+  viewSet(i, value, placedView) {
+    if (!(i >= 0) || i >= this.cols * this.rows) return;
+    const y = (i / this.cols) | 0;
+    const x = i - y * this.cols;
+    if (placedView) this.set(x, y, this.get(x, y), !!value);
+    else this.set(x, y, value, this.isPlaced(x, y));
+  }
+
+  /* ---------- генерация: чистая функция координат ---------- */
+
+  biomeAt(x, y) {
+    const B = CFG.biomes;
+    if (x >= B.ruinsFromX) return BIOME.RUINS;
+    if (y >= B.crystalFromRow) return BIOME.CRYSTAL;
+    return BIOME.SPAWN;
+  }
+
+  // Уступы зала: список из CFG плюс автоматические платформы дальше по карте.
+  // До x = 180 рельеф ровно такой, как в авторском списке: зона спавна и
+  // арена тестов не должны получить случайную платформу над головой
+  ledgeAt(x, y) {
+    for (const l of CFG.ledges) {
+      if (y === l.y && x >= l.x && x < l.x + l.w) return true;
+    }
+    if (x < 180) return false;
+    const SEG = 34;
+    const seg = (x / SEG) | 0;
+    const off = x - seg * SEG;
+    const ly = 8 + Math.floor(hash2(seg * 13 + 1, 7) * 8);
+    if (y !== ly) return false;
+    const lw = 4 + Math.floor(hash2(seg * 7 + 3, 11) * 7);
+    const lx = 2 + Math.floor(hash2(seg * 5 + 9, 3) * (SEG - lw - 3));
+    return off >= lx && off < lx + lw;
+  }
+
+  // Полости глубины: крупное зерно шума + большие залы из сетки ячеек.
+  // Всё считается из координат тайла, поэтому чанк можно собрать в любом порядке
+  deepCave(x, y) {
+    const L = CFG.layers;
+    const a = hash2(((x / 3) | 0) + 11, ((y / 2) | 0) + 7);
+    const b = hash2(((x / 6) | 0) + 301, ((y / 4) | 0) + 97);
+    if (a * 0.65 + b * 0.35 < L.deepCaveChance) return true;
+    return this.chamberAt(x, y);
+  }
+
+  // Большие залы: в части ячеек 40x26 стоит эллиптическая полость
+  chamberAt(x, y) {
+    const CW = 40, CH = 26;
+    const gx0 = Math.floor(x / CW), gy0 = Math.floor(y / CH);
+    for (let oy = -1; oy <= 1; oy++) {
+      for (let ox = -1; ox <= 1; ox++) {
+        const gx = gx0 + ox, gy = gy0 + oy;
+        if (hash2(gx * 71 + 5, gy * 53 + 9) < 0.45) continue;
+        const px = gx * CW + 6 + hash2(gx * 13 + 1, gy * 17 + 3) * (CW - 12);
+        const py = gy * CH + 5 + hash2(gx * 29 + 7, gy * 31 + 5) * (CH - 10);
+        const rx = 4 + hash2(gx * 3 + 2, gy * 7 + 11) * 6;
+        const ry = 2.5 + hash2(gx * 11 + 7, gy * 5 + 2) * 3.5;
+        const dx = (x - px) / rx, dy = (y - py) / ry;
+        if (dx * dx + dy * dy <= 1) return true;
+      }
+    }
+    return false;
+  }
+
+  // RESONITE: жилы в ячейках 8x6. Не весь блок, а эллипс в его центре —
+  // так кристалл читается как жила, а не как «синие пиксели в породе»
+  resoniteAt(x, y) {
+    const B = CFG.biomes;
+    if (y < B.crystalFromRow) return false;
+    // Жила — компактное гнездо внутри ячейки: 8–14 кристаллов, а не поле
+    const gx = (x / B.resoniteCellX) | 0, gy = (y / B.resoniteCellY) | 0;
+    if (hash2(gx * 19 + 3, gy * 23 + 11) > B.resoniteChance) return false;
+    const px = gx * B.resoniteCellX + 2 + hash2(gx * 5 + 1, gy * 7 + 2) * (B.resoniteCellX - 4);
+    const py = gy * B.resoniteCellY + 1.5 + hash2(gy * 3 + 5, gx * 11 + 7) * (B.resoniteCellY - 3);
+    const dx = (x - px) / B.resoniteRx, dy = (y - py) / B.resoniteRy;
+    return dx * dx + dy * dy <= 1;
+  }
+
+  // Зона 2: Руины — металлические залы решёткой, поверх — тот же зал
+  ruinTile(x, y) {
+    const L = CFG.layers, B = CFG.biomes;
+    const caveTop = L.skyRows + L.ceilingRows;
     const dirtTop = caveTop + L.caveRows;
     const stoneTop = dirtTop + L.dirtRows;
-    this.surfaceRow = dirtTop;
-    this.deepRow = L.deepTopRow;          // M5: граница Глубоких пещер
+    if (y < L.skyRows) return TILE.EMPTY;
+    if (y < caveTop) return TILE.METAL;                 // металлическая плита сверху
+    if (y < dirtTop) {
+      // Зал руин: не «конфетти» из плит, а читаемые несущие опоры и балки
+      const col = x - B.ruinsFromX;
+      if (col % 11 < 2) return TILE.METAL;                                  // колонны
+      if (y % 7 === 0 && hash2((x >> 2) << 3, y) < 0.45) return TILE.METAL; // балки
+      if (hash2(x * 13 + 7, y * 17 + 3) < 0.03) return TILE.METAL;          // осколки
+      return TILE.EMPTY;
+    }
+    if (y < stoneTop) {
+      // Верхний ряд — металлическая палуба под залом, ниже — порода с арматурой
+      if (y < dirtTop + 2) return hash2(x * 5 + 3, y * 7 + 1) < 0.82 ? TILE.METAL : TILE.DIRT;
+      return (y % 5 === 0 && hash2((x >> 2) << 3, y * 3 + 7) < 0.5) ? TILE.METAL : TILE.DIRT;
+    }
+    const RW = B.ruinRoomW, RH = B.ruinRoomH, wt = B.ruinWall;
+    const lx = (x - B.ruinsFromX) - Math.floor((x - B.ruinsFromX) / RW) * RW;
+    const ly = y - Math.floor(y / RH) * RH;
+    if (lx < wt || lx >= RW - wt || ly < wt || ly >= RH - wt) return TILE.METAL;
+    // внутри зала: обломки породы и руда, остальное — воздух
+    const h = hash2(x * 7 + 1, y * 11 + 5);
+    if (h < B.ruinRubble) return TILE.STONE;
+    if (h < B.ruinRubble + 0.03) return TILE.FERRITE;
+    return TILE.EMPTY;
+  }
 
-    const rnd = mulberry32(cfg.seed);
-    for (let y = 0; y < this.rows; y++) {
-      for (let x = 0; x < this.cols; x++) {
-        let t;
-        if (y < ceilingTop) t = TILE.EMPTY;               // небо
-        else if (y < caveTop) t = TILE.STONE;             // потолочная плита
-        else if (y < dirtTop) t = TILE.EMPTY;             // зал
-        else if (y < stoneTop) t = TILE.DIRT;             // земля
-        else {
-          // M5: глубина — своя порода. В глубоких пещерах FERRITE втрое больше.
-          // Пустоту берём «крупными зёрнами» (3x2 тайла + второй октавный слой),
-          // иначе получается не пещера, а шум из одиночных дырок
-          const deep = y >= L.deepTopRow;
-          const chance = deep ? L.deepFerriteChance : L.ferriteChance;
-          let cave = false;
-          if (deep) {
-            const gx = Math.floor(x / 3), gy = Math.floor(y / 2);
-            const a = hash2(gx + 11, gy + 7);
-            const b = hash2(Math.floor(x / 6) + 301, Math.floor(y / 4) + 97);
-            cave = a * 0.65 + b * 0.35 < L.deepCaveChance;
-          }
-          if (cave) t = TILE.EMPTY;
-          else t = rnd() < chance ? TILE.FERRITE : TILE.STONE;
+  // Базовый тайл без правок игрока: только от (x, y) и конфига
+  baseTile(x, y) {
+    const L = CFG.layers;
+    if (x >= CFG.biomes.ruinsFromX) return this.ruinTile(x, y);
+    const caveTop = L.skyRows + L.ceilingRows;
+    const dirtTop = caveTop + L.caveRows;
+    const stoneTop = dirtTop + L.dirtRows;
+    if (y < L.skyRows) return TILE.EMPTY;
+    if (y < caveTop) return TILE.STONE;
+    if (y < dirtTop) return this.ledgeAt(x, y) ? TILE.STONE : TILE.EMPTY;
+    if (y < stoneTop) return TILE.DIRT;
+    if (y < L.deepTopRow) {
+      return hash2(x * 3 + 17, y * 5 + 29) < L.ferriteChance ? TILE.FERRITE : TILE.STONE;
+    }
+    if (this.deepCave(x, y)) return TILE.EMPTY;
+    if (this.resoniteAt(x, y)) return TILE.RESONITE;
+    return hash2(x * 3 + 17, y * 5 + 29) < L.deepFerriteChance ? TILE.FERRITE : TILE.STONE;
+  }
+
+  // Точки турелей чанка: воздух, под ним металлический пол Руин
+  findTurrets(ch) {
+    if (ch.cx * this.chunkSize + this.chunkSize <= CFG.biomes.ruinsFromX) return;
+    const cs = this.chunkSize;
+    const minY = CFG.layers.skyRows + CFG.layers.ceilingRows + 4;
+    const cand = [];
+    for (let ly = 1; ly < cs - 1; ly++) {
+      const y = ch.cy * cs + ly;
+      if (y < minY || y >= this.rows) continue;
+      for (let lx = 0; lx < cs; lx++) {
+        const x = ch.cx * cs + lx;
+        if (x < CFG.biomes.ruinsFromX || x >= this.cols) continue;
+        if (ch.tiles[ly * cs + lx] !== TILE.EMPTY) continue;
+        if (ch.tiles[(ly - 1) * cs + lx] !== TILE.EMPTY) continue;
+        if (ch.tiles[(ly + 1) * cs + lx] !== TILE.METAL) continue;
+        const h = hash2(x * 3 + 11, y * 5 + 7);
+        if (h < 0.90) continue;
+        cand.push({ tx: x, ty: y, h });
+      }
+    }
+    cand.sort((a, b) => b.h - a.h);
+    ch.turrets = cand.slice(0, CFG.turret.maxPerChunk).map(c => ({ tx: c.tx, ty: c.ty }));
+  }
+
+  buildChunk(cx, cy, key) {
+    const cs = this.chunkSize;
+    const ch = new Chunk(cx, cy, cs);
+    for (let ly = 0; ly < cs; ly++) {
+      const y = cy * cs + ly;
+      for (let lx = 0; lx < cs; lx++) {
+        const x = cx * cs + lx;
+        ch.tiles[ly * cs + lx] = (x < this.cols && y < this.rows)
+          ? this.baseTile(x, y) : TILE.STONE;
+      }
+    }
+    this.findTurrets(ch);
+    // Правки игрока поверх свежей генерации
+    const m = this.mods.get(key);
+    if (m) {
+      for (const [li, packed] of m) {
+        if (li < ch.tiles.length) {
+          ch.tiles[li] = packed & 255;
+          ch.placed[li] = (packed >> 8) & 1;
         }
-        this.tiles[y * this.cols + x] = t;
       }
     }
+    ch.generated = true;
+    this.stats.generated++;
+    return ch;
+  }
 
-    // M5: большие полости в глубине. Одной дырки мало — нужен зал, где
-    // помещаются и терминал, и хищники, и игрок с ящиком
-    const drnd = mulberry32(cfg.seed ^ 0x5f3c21a7);
-    for (let p = 0; p < L.deepPockets; p++) {
-      const cx = 6 + Math.floor(drnd() * (this.cols - 12));
-      const cy = L.deepTopRow + 3 + Math.floor(drnd() * (this.rows - L.deepTopRow - 8));
-      const rx = 3 + Math.floor(drnd() * 5);
-      const ry = 2 + Math.floor(drnd() * 3);
-      for (let y = cy - ry; y <= cy + ry; y++) {
-        for (let x = cx - rx; x <= cx + rx; x++) {
-          if (x < 0 || y < 0 || x >= this.cols || y >= this.rows) continue;
-          const d = ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2;
-          if (d <= 1) this.tiles[y * this.cols + x] = TILE.EMPTY;
-        }
-      }
-      // Вкрапления феррита у стен полости: пещера «богатая», но его надо копать
-      for (let k = 0; k < 26; k++) {
-        const x = cx + Math.round((drnd() * 2 - 1) * (rx + 1));
-        const y = cy + Math.round((drnd() * 2 - 1) * (ry + 1));
-        if (x < 0 || y < 0 || x >= this.cols || y >= this.rows) continue;
-        if (this.tiles[y * this.cols + x] === TILE.EMPTY) continue;
-        this.tiles[y * this.cols + x] = TILE.FERRITE;
-      }
-    }
+  /* ---------- загрузка/выгрузка по камере ---------- */
 
-    // Уступы поверх зала
-    for (const l of cfg.ledges) {
-      for (let x = l.x; x < l.x + l.w; x++) {
-        if (x < 0 || x >= this.cols || l.y < 0 || l.y >= this.rows) continue;
-        this.tiles[l.y * this.cols + x] = TILE.STONE;
+  // Грузит чанки камеры + 1 ряд за её краем, выгружает всё, что ушло далеко.
+  // В LRU остаётся keepChunks чанков: тела и турели за кадром не должны
+  // перегенерироваться каждый кадр
+  updateChunks(camera) {
+    const span = this.chunkSize * TS;
+    const cx0 = Math.max(0, Math.floor(camera.x / span) - CHUNK_PAD);
+    const cx1 = Math.min(this.chunksX - 1, Math.floor((camera.x + camera.w) / span) + CHUNK_PAD);
+    const cy0 = Math.max(0, Math.floor(camera.y / span) - CHUNK_PAD);
+    const cy1 = Math.min(this.chunksY - 1, Math.floor((camera.y + camera.h) / span) + CHUNK_PAD);
+
+    const needed = new Set();
+    for (let cy = cy0; cy <= cy1; cy++) {
+      for (let cx = cx0; cx <= cx1; cx++) {
+        needed.add(this.chunkKey(cx, cy));
+        this.ensureChunk(cx, cy);
       }
     }
+    if (this.chunks.size <= this.keepChunks) return needed;
 
-    this.placed.fill(0);
-    this.dirty.length = 0;
-    return this;
+    // Выгружаем самые «старые» чанки, которых нет в кадре
+    const victims = [];
+    for (const [key, ch] of this.chunks) {
+      if (!needed.has(key)) victims.push([key, ch.touch]);
+    }
+    victims.sort((a, b) => a[1] - b[1]);
+    let excess = this.chunks.size - this.keepChunks;
+    for (let i = 0; i < victims.length && excess > 0; i++) {
+      this.chunks.delete(victims[i][0]);
+      this.stats.unloads++;
+      this.epoch++;
+      excess--;
+    }
+    return needed;
+  }
+
+  /* ---------- агрегаты ---------- */
+
+  // Обход всех построенных/изменённых тайлов: дешевле, чем скан 300 000 тайлов
+  forEachPlaced(fn) {
+    const cs = this.chunkSize;
+    for (const [key, m] of this.mods) {
+      const cx = key % this.chunksX, cy = (key / this.chunksX) | 0;
+      for (const [li, packed] of m) {
+        const type = packed & 255;
+        const fl = (packed >> 8) & 1;
+        if (!fl || type === TILE.EMPTY) continue;
+        const tx = cx * cs + (li % cs);
+        const ty = cy * cs + ((li / cs) | 0);
+        fn(tx, ty, type);
+      }
+    }
+  }
+
+  modsCount() {
+    let n = 0;
+    for (const m of this.mods.values()) n += m.size;
+    return n;
   }
 
   countSolid() {
     let n = 0;
-    for (let i = 0; i < this.tiles.length; i++) if (this.tiles[i] !== TILE.EMPTY) n++;
+    for (const ch of this.chunks.values()) {
+      for (let i = 0; i < ch.tiles.length; i++) if (ch.tiles[i] !== TILE.EMPTY) n++;
+    }
     return n;
+  }
+
+  generate(cfg) {
+    if (cfg) this.cfg = cfg;
+    const L = (cfg || this.cfg).layers;
+    this.surfaceRow = L.skyRows + L.ceilingRows + L.caveRows;
+    this.deepRow = L.deepTopRow;
+    this.chunks.clear();
+    this.mods.clear();
+    this.dirty.length = 0;
+    this.tick = 0;
+    this.stats = { loads: 0, unloads: 0, generated: 0, peak: 0 };
+    // Стартовый чанк прогреваем сразу: на нём стоит игрок и корабль
+    this.ensureChunk(0, 0);
+    return this;
   }
 }
 
@@ -1161,77 +1699,161 @@ class World {
 class TileLayer {
   constructor(world) {
     this.world = world;
-    this.canvas = document.createElement('canvas');
-    this.canvas.width = world.cols * TS;
-    this.canvas.height = world.rows * TS;
-    this.ctx = this.canvas.getContext('2d');
+    // M8.1: мирового канваса больше нет. Мир 1000x300 тайлов — это
+    // буфер 32 000x9 600 px (~1.2 ГБ видеопамяти при 4 байтах на пиксель).
+    // Поэтому тайл рисуется запечённым 32x32 спрайтом: вариантов конечное
+    // число, память — единицы мегабайт, а размер мира на рендер не влияет.
+    this.canvas = null;
+    this.detailed = new Uint8Array(0);   // совместимость с отладкой и тестами
+    this.ctx = null;                     // контекст, в который печётся тайл
+    this.tileCount = 0;                  // сколько тайлов попало в последний кадр
+    this._spr = [];                      // кэш спрайтов тайлов: тип → тон → маска
+    this._bench = [];                    // 4 варианта верстака (соседи слева/справа)
+  }
 
-    // Два прохода: силуэт рисуется сразу (запуск не «висит»),
-    // текстура — лениво, только для тайлов, попавших в кадр
-    this.detailed = new Uint8Array(world.cols * world.rows);
-    for (let y = 0; y < world.rows; y++) {
-      for (let x = 0; x < world.cols; x++) this.drawBase(x, y);
+  // Совместимость: dirty-очередь тайлам больше не нужна (тайл рисуется
+  // из спрайта), но мир её по-прежнему копит — на ней держатся тесты
+  flush() { this.world.dirty.length = 0; }
+
+  // Совместимость: детализация запечена в спрайт, отдельного прохода нет
+  detailVisible() {}
+  drawTile() {}
+
+  /* ---------- запекание и отрисовка тайлов ---------- */
+
+  // Спрайт тайла: тип + тон (вариативность текстуры) + маска соседей.
+  // Маска: 1 — сверху твердь, 2 — снизу, 4 — слева, 8 — справа.
+  // Кромки и сколы зависят от маски, поэтому пекутся вместе с текстурой
+  tileSprite(type, tone, mask) {
+    // Кэш-массивы вместо строкового ключа: в кадре сотни тайлов, и
+    // конкатенация «tile:тип:тон:маска» на каждый — лишний мусор для GC
+    let byTone = this._spr[type] || (this._spr[type] = []);
+    let byMask = byTone[tone] || (byTone[tone] = []);
+    let spr = byMask[mask];
+    if (spr) return spr;
+    spr = SPR.get('tile:' + type + ':' + tone + ':' + mask, TS, TS, (c) => {
+      const prev = this.ctx;
+      this.ctx = c;
+      this.paintTileAppearance(type, tone, mask);
+      this.ctx = prev;
+    });
+    byMask[mask] = spr;
+    return spr;
+  }
+
+  benchSprite(openL, openR) {
+    const slot = (openL ? 1 : 0) * 2 + (openR ? 1 : 0);
+    let spr = this._bench[slot];
+    if (spr) return spr;
+    spr = SPR.get('bench:' + (openL ? 1 : 0) + (openR ? 1 : 0), TS, TS, (c) => {
+      const prev = this.ctx;
+      this.ctx = c;
+      this.paintBench(0, 0, openL, openR, true);
+      this.ctx = prev;
+    });
+    this._bench[slot] = spr;
+    return spr;
+  }
+
+  // Внешний вид тайла целиком: подложка, тон, текстура, кристаллы, кромки.
+  // Рисуется один раз на вариант, поэтому shadowBlur и градиенты допустимы
+  paintTileAppearance(type, tone, mask) {
+    const c = this.ctx;
+    const rock = RES[type] || RES[TILE.STONE];
+    // псевдокоординаты: рисунок стабилен для варианта, но не повторяется
+    const tx = type * 101 + tone * 17 + mask;
+    const ty = type * 53 + tone * 29 + mask * 7;
+
+    c.clearRect(0, 0, TS, TS);
+    c.drawImage(this.rockBase(type, tone), 0, 0, TS, TS);
+
+    // присадка тона: пятно «породы», как в старом per-tile paintTile
+    const t = tone / (TILE_TONES - 1);
+    c.globalAlpha = 0.06 + t * 0.11;
+    c.fillStyle = t > 0.5 ? '#000000' : rock.light;
+    c.fillRect(0, 0, TS, TS);
+    c.globalAlpha = 1;
+
+    // шов с твёрдым соседом — тонкая тёмная трещина без разрыва.
+    // Слабее, чем раньше: спрайт ложится пиксель в пиксель, и шов
+    // яркостью 0.16 собирался в читаемую решётку по всему экрану
+    if (mask & 4) { c.fillStyle = 'rgba(0,0,0,0.09)'; c.fillRect(0, 2, 1, TS - 4); }
+    if (mask & 1) { c.fillStyle = 'rgba(0,0,0,0.07)'; c.fillRect(2, 0, TS - 4, 1); }
+
+    // текстура породы
+    if (type === TILE.DIRT) this.textureDirt(0, 0, tx, ty);
+    else if (type === TILE.METAL) this.textureMetal(0, 0, tx, ty);
+    else this.textureStone(0, 0, tx, ty, type === TILE.FERRITE);
+    if (type === TILE.FERRITE) this.drawFerrite(0, 0, tx, ty);
+    else if (type === TILE.RESONITE) this.drawResonite(0, 0, tx, ty);
+
+    // кромки: верх — блик, низ и бока — тень и сколы
+    if (!(mask & 1)) {
+      c.fillStyle = 'rgba(255,255,255,0.16)';
+      c.fillRect(0, 0, TS, 2);
+      c.fillStyle = rock.light;
+      c.fillRect(0, 0, TS, 1);
+      this.chips(c, 0, 0, tx, ty, 'top');
+    }
+    if (!(mask & 2)) {
+      c.fillStyle = 'rgba(0,0,0,0.34)';
+      c.fillRect(0, TS - 3, TS, 3);
+      this.chips(c, 0, 0, tx, ty, 'bottom');
+    }
+    if (!(mask & 4)) {
+      c.fillStyle = 'rgba(0,0,0,0.22)';
+      c.fillRect(0, 0, 2, TS);
+      this.chips(c, 0, 0, tx, ty, 'left');
+    }
+    if (!(mask & 8)) {
+      c.fillStyle = 'rgba(0,0,0,0.22)';
+      c.fillRect(TS - 2, 0, 2, TS);
+      this.chips(c, 0, 0, tx, ty, 'right');
     }
   }
 
-  // Изменённые тайлы перерисовываются целиком сразу
-  flush() {
-    const dirty = this.world.dirty;
-    if (!dirty.length) return;
-    const cols = this.world.cols;
-    for (let i = 0; i < dirty.length; i++) {
-      const idx = dirty[i];
-      const tx = idx % cols, ty = Math.floor(idx / cols);
-      this.drawTile(tx, ty);
-      this.detailed[idx] = 0;
-    }
-    dirty.length = 0;
-  }
-
-  // Полная перерисовка одного тайла (после копания/строительства)
-  drawTile(tx, ty) {
-    this.drawBase(tx, ty);
-    if (this.world.solid(tx, ty)) {
-      this.drawDetail(tx, ty);
-      this.detailed[ty * this.world.cols + tx] = 1;
-    }
-  }
-
-  // Детализация тайлов, которые видно. Бюджет по времени — кадр не проваливается
-  detailVisible(world, camera, player) {
-    const cols = world.cols;
-    const tx0 = Math.max(0, Math.floor(camera.x / TS));
-    const tx1 = Math.min(cols - 1, Math.ceil((camera.x + camera.w) / TS));
-    const ty0 = Math.max(0, Math.floor(camera.y / TS));
-    const ty1 = Math.min(world.rows - 1, Math.ceil((camera.y + camera.h) / TS));
-    const pcx = player.cx / TS, pcy = player.cy / TS;
-
-    // Ближние к игроку тайлы — первыми
-    const list = [];
-    for (let y = ty0; y <= ty1; y++) {
-      for (let x = tx0; x <= tx1; x++) {
-        const i = y * cols + x;
-        if (this.detailed[i] || world.tiles[i] === TILE.EMPTY) continue;
-        list.push(i);
+  // Видимые тайлы кадра. Никаких буферов: 240–600 drawImage маленьких
+  // спрайтов вместо одного блита гигантского полотна
+  drawWorld(ctx, camera) {
+    const w = this.world;
+    const tx0 = Math.max(0, Math.floor(camera.x / TS) - 1);
+    const tx1 = Math.min(w.cols - 1, Math.ceil((camera.x + camera.w) / TS) + 1);
+    const ty0 = Math.max(0, Math.floor(camera.y / TS) - 1);
+    const ty1 = Math.min(w.rows - 1, Math.ceil((camera.y + camera.h) / TS) + 1);
+    const voidSpr = this.voidBase();
+    const voidRow = w.surfaceRow + 1;
+    let n = 0;
+    for (let ty = ty0; ty <= ty1; ty++) {
+      const py = ty * TS;
+      for (let tx = tx0; tx <= tx1; tx++) {
+        const type = w.get(tx, ty);
+        const px = tx * TS;
+        if (type === TILE.EMPTY) {
+          // под землёй пустота — дальняя стена пещеры, а не дырка в небо
+          if (ty > voidRow) ctx.drawImage(voidSpr, px, py, TS, TS);
+          continue;
+        }
+        if (type === TILE.WORKBENCH) {
+          const openL = w.get(tx - 1, ty) !== TILE.WORKBENCH;
+          const openR = w.get(tx + 1, ty) !== TILE.WORKBENCH;
+          ctx.drawImage(this.benchSprite(openL, openR), px, py, TS, TS);
+          n++;
+          continue;
+        }
+        let mask = 0;
+        if (w.solid(tx, ty - 1)) mask |= 1;
+        if (w.solid(tx, ty + 1)) mask |= 2;
+        if (w.solid(tx - 1, ty)) mask |= 4;
+        if (w.solid(tx + 1, ty)) mask |= 8;
+        // тон: крупное пятно на 4x4 тайла + слабая поправка по тайлу.
+        // Дискретных уровней TILE_TONES — столько же вариантов спрайта
+        const tn = hash2((tx >> 2) << 3, (ty >> 2) << 3) * 0.78 + hash2(tx * 19 + 7, ty * 23 + 1) * 0.22;
+        const tone = (tn * TILE_TONES) | 0;
+        ctx.drawImage(this.tileSprite(type, tone, mask), px, py, TS, TS);
+        n++;
       }
     }
-    if (!list.length) return;
-    list.sort((a, b) => {
-      const ax = (a % cols) - pcx, ay = Math.floor(a / cols) - pcy;
-      const bx = (b % cols) - pcx, by = Math.floor(b / cols) - pcy;
-      return (ax * ax + ay * ay) - (bx * bx + by * by);
-    });
-
-    // Бюджет по времени плюс жёсткий лимит тайлов за кадр:
-    // таймер может «врать» на прогреве JIT и давать всплески на первой отрисовке
-    const t0 = performance.now();
-    const maxTiles = CFG.render.detailMaxPerFrame;
-    for (let k = 0; k < list.length && k < maxTiles; k++) {
-      const i = list[k];
-      this.drawDetail(i % cols, Math.floor(i / cols));
-      this.detailed[i] = 1;
-      if ((k & 3) === 3 && performance.now() - t0 > CFG.render.detailBudgetMs) break;
-    }
+    this.tileCount = n;
   }
 
   // M6: подложка тайла — вертикальный градиент, запечённый один раз на тип.
@@ -1242,7 +1864,7 @@ class TileLayer {
     const v = variant % 3;
     const key = 'tile:' + type + ':' + v;
     return SPR.get(key, TS, TS, (x, w, h) => {
-      const rock = RES[type === TILE.FERRITE ? TILE.STONE : type];
+      const rock = RES[type === TILE.FERRITE || type === TILE.RESONITE ? TILE.STONE : type];
       // Плоский фон с лёгким сдвигом тона. Вертикальный градиент в каждом тайле
       // при тайлинге складывается в полосатую «рельсу» — от него отказались
       x.fillStyle = mixHex(rock.color, v === 0 ? rock.light : rock.shade, 0.06 + v * 0.05);
@@ -1289,13 +1911,16 @@ class TileLayer {
   // Верстак: изометрия — столешница-параллелограмм, толстая крышка, ножки.
   // Рисуется потайлово, но читается как один объект 2×1
   drawBenchTile(tx, ty, detail) {
-    const c = this.ctx;
-    const px = tx * TS, py = ty * TS;
-    c.clearRect(px, py, TS, TS);
     // Верстак ставится двумя тайлами подряд, поэтому внутренние края не подрезаем:
     // иначе посреди стола появляется щель и «два столика» вместо одного верстака
-    const openL = this.world.get(tx - 1, ty) !== TILE.WORKBENCH;
-    const openR = this.world.get(tx + 1, ty) !== TILE.WORKBENCH;
+    this.paintBench(tx * TS, ty * TS,
+                    this.world.get(tx - 1, ty) !== TILE.WORKBENCH,
+                    this.world.get(tx + 1, ty) !== TILE.WORKBENCH, detail);
+  }
+
+  paintBench(px, py, openL, openR, detail) {
+    const c = this.ctx;
+    c.clearRect(px, py, TS, TS);
     const x0 = px + (openL ? 3 : 0);
     const x1 = px + TS - (openR ? 3 : 0);
     const top = py + 8;
@@ -1412,87 +2037,9 @@ class TileLayer {
     }
   }
 
-  // Силуэт тайла: подложка + кромки на открытых гранях
-  drawBase(tx, ty) {
-    this.paintTile(tx, ty, false);
-  }
-
-  paintTile(tx, ty, detail) {
-    const c = this.ctx;
-    const world = this.world;
-    const type = world.tiles[ty * world.cols + tx];
-    const px = tx * TS;
-    const py = ty * TS;
-
-    c.clearRect(px, py, TS, TS);
-    if (type === TILE.EMPTY) {
-      // Под землёй пустота — это не небо, а дальняя стена пещеры. Без подложки
-      // воздух в глубине выглядит провалом в чёрное, а не тоннелем
-      if (ty > this.world.surfaceRow + 1) {
-        c.drawImage(this.voidBase(), px, py, TS, TS);
-      }
-      return;
-    }
-    if (type === TILE.WORKBENCH) { this.drawBenchTile(tx, ty, detail); return; }
-
-    const rock = RES[type === TILE.FERRITE ? TILE.STONE : type];
-    // M6: базовая подложка — запечённый градиент, а не плоский цвет
-    const variant = Math.floor(hash2(tx * 7 + 3, ty * 11 + 5) * 3);
-    c.drawImage(this.rockBase(type, variant), px, py, TS, TS);
-    // Присадка тона: крупное пятно на 4×4 тайла плюс слабая поправка по тайлу.
-    // Мелкая случайность на каждый тайл даёт «шахматку», крупное пятно — породу
-    const coarse = hash2(tx >> 2 << 3, ty >> 2 << 3);
-    const tone = coarse * 0.7 + hash2(tx * 19 + 7, ty * 23 + 1) * 0.3;
-    c.globalAlpha = 0.07 + tone * 0.12;
-    c.fillStyle = tone > 0.5 ? '#000000' : rock.light;
-    c.fillRect(px, py, TS, TS);
-    c.globalAlpha = 1;
-
-    // шов между двумя твёрдыми тайлами: тонкая тёмная трещина без разрыва
-    if (world.solid(tx - 1, ty)) {
-      c.fillStyle = 'rgba(0,0,0,0.16)';
-      c.fillRect(px, py + 2, 1, TS - 4);
-    }
-    if (world.solid(tx, ty - 1)) {
-      c.fillStyle = 'rgba(0,0,0,0.13)';
-      c.fillRect(px + 2, py, TS - 4, 1);
-    }
-
-    const up = world.solid(tx, ty - 1);
-
-    if (detail) {
-      if (type === TILE.DIRT) this.textureDirt(px, py, tx, ty);
-      else this.textureStone(px, py, tx, ty, type === TILE.FERRITE);
-      if (type === TILE.FERRITE) this.drawFerrite(px, py, tx, ty);
-    }
-
-    // M6: кромки. Верх — блик, низ и бока — тень и «сколы»
-    if (!up) {
-      c.fillStyle = 'rgba(255,255,255,0.16)';
-      c.fillRect(px, py, TS, 2);
-      c.fillStyle = rock.light;
-      c.fillRect(px, py, TS, 1);
-      if (detail) this.chips(c, px, py, tx, ty, 'top');
-    }
-    const down = world.solid(tx, ty + 1);
-    if (!down) {
-      c.fillStyle = 'rgba(0,0,0,0.34)';
-      c.fillRect(px, py + TS - 3, TS, 3);
-      if (detail) this.chips(c, px, py, tx, ty, 'bottom');
-    }
-    const l = world.solid(tx - 1, ty);
-    if (!l) {
-      c.fillStyle = 'rgba(0,0,0,0.22)';
-      c.fillRect(px, py, 2, TS);
-      if (detail) this.chips(c, px, py, tx, ty, 'left');
-    }
-    const r = world.solid(tx + 1, ty);
-    if (!r) {
-      c.fillStyle = 'rgba(0,0,0,0.22)';
-      c.fillRect(px + TS - 2, py, 2, TS);
-      if (detail) this.chips(c, px, py, tx, ty, 'right');
-    }
-  }
+  // Совместимость: старый вызов детализации теперь ничего не делает
+  // (детализация запечена в спрайт тайла)
+  drawBase() {}
 
   // Сколы по краю, граничащему с пустотой: тайл перестаёт быть квадратом
   chips(c, px, py, tx, ty, side) {
@@ -1614,9 +2161,94 @@ class TileLayer {
     }
   }
 
-  // Совместимость: старый вызов детализации
-  drawDetail(tx, ty) {
-    this.paintTile(tx, ty, true);
+  // Совместимость: старый вызов детализации (теперь части спрайта)
+  drawDetail() {}
+
+  // METAL: бронеплита Руин — тёмный металл с заклёпками и косой штриховкой.
+  // По силуэту читается как верстак (тот же материал), но заметно темнее
+  textureMetal(px, py, tx, ty) {
+    const c = this.ctx;
+    const m = RES[TILE.METAL];
+    // горизонтальные панели: два листа с тёмным стыком
+    c.globalAlpha = 0.5;
+    c.fillStyle = m.shade;
+    c.fillRect(px + 1, py + TS / 2, TS - 2, 1.5);
+    c.globalAlpha = 1;
+
+    // косая штриховка — металл не путается с камнем
+    c.globalAlpha = 0.12;
+    c.strokeStyle = m.light;
+    c.lineWidth = 1;
+    for (let i = -TS; i < TS; i += 6) {
+      c.beginPath();
+      c.moveTo(px + i, py + TS);
+      c.lineTo(px + i + TS, py);
+      c.stroke();
+    }
+    c.globalAlpha = 1;
+
+    // заклёпки по углам панели
+    const rivet = (rx, ry) => {
+      c.fillStyle = 'rgba(6,8,12,0.55)';
+      c.beginPath(); c.arc(px + rx, py + ry, 1.9, 0, Math.PI * 2); c.fill();
+      c.fillStyle = 'rgba(190,205,225,0.55)';
+      c.beginPath(); c.arc(px + rx - 0.5, py + ry - 0.6, 1.1, 0, Math.PI * 2); c.fill();
+    };
+    rivet(4, 4); rivet(TS - 4, 4); rivet(4, TS - 4); rivet(TS - 4, TS - 4);
+    if (hash2(tx * 3, ty * 5) > 0.55) rivet(TS / 2, TS - 4);
+
+    // вмятины и потёртости
+    c.globalAlpha = 0.18;
+    c.fillStyle = '#0b0f15';
+    c.beginPath();
+    c.ellipse(px + 8 + hash2(tx, ty) * 14, py + 6 + hash2(ty, tx) * 16,
+              3 + hash2(tx * 7, ty) * 3, 2, 0, 0, Math.PI * 2);
+    c.fill();
+    c.globalAlpha = 1;
+  }
+
+  // RESONITE: синие кристаллы. Крупнее ферритовых и с двойным свечением —
+  // ресурс редкий, его должно быть видно издалека
+  drawResonite(px, py, tx, ty) {
+    const c = this.ctx;
+    const m = RES[TILE.RESONITE];
+    const cx = px + TS / 2, cy = py + TS / 2;
+
+    c.save();
+    c.globalCompositeOperation = 'lighter';
+    c.globalAlpha = 0.5;
+    glow(c, cx, cy, TS * 0.62, '70,150,255', 0.45);
+    c.restore();
+
+    const n = 5;
+    for (let i = 0; i < n; i++) {
+      const hx = hash2(tx * 13 + i * 5, ty * 19 - i * 3);
+      const hy = hash2(tx * 23 - i * 3, ty * 29 + i * 5);
+      const hz = hash2(tx * 41 + i, ty * 17 + i);
+      const bx = px + 5 + hy * (TS - 12);
+      const by = py + 6 + hx * (TS - 12);
+      const rw = 2.2 + hz * 2.2;
+      const rh = 6 + hx * 5;
+
+      c.shadowColor = 'rgba(120,200,255,0.9)';
+      c.shadowBlur = CFG.look.crystalBlur * (0.8 + hz * 0.7);
+      const grad = c.createLinearGradient(bx - rw, by - rh, bx + rw, by + rh);
+      grad.addColorStop(0, '#eaf8ff');
+      grad.addColorStop(0.3, m.light);
+      grad.addColorStop(0.75, m.color);
+      grad.addColorStop(1, m.shade);
+      c.fillStyle = grad;
+      poly(c, [[bx, by - rh], [bx + rw, by - rh * 0.2], [bx, by + rh], [bx - rw, by - rh * 0.2]]);
+      c.fill();
+      c.shadowBlur = 0;
+
+      c.globalAlpha = 0.8;
+      c.fillStyle = '#f2fbff';
+      poly(c, [[bx, by - rh], [bx, by + rh * 0.45], [bx - rw * 0.75, by - rh * 0.2]]);
+      c.fill();
+      c.globalAlpha = 1;
+    }
+    c.shadowColor = 'transparent';
   }
 
   // FERRITE: ромбы-многогранники со свечением. shadowBlur здесь допустим:
@@ -2202,42 +2834,59 @@ class Crawler extends PhysBody {
    Сохранение: тайлы + постройки + якоря + инвентарь + фаза
    ============================================================ */
 const Save = {
-  // Компактно: тайлы и маску построек упаковываем в RLE-пары
+  // M8.1: мир чанковый, но сейв не обязан тащить всю карту: генерация
+  // детерминирована по seed, поэтому пишем только правки игрока (overlay).
+  // Вместо 300 000 тайлов в localStorage уезжают десятки-сотни записей
   packTiles(world) {
     const out = [];
-    let run = 1, prev = world.tiles[0], prevPlaced = world.placed[0];
-    for (let i = 1; i < world.tiles.length; i++) {
-      const t = world.tiles[i], pl = world.placed[i];
-      if (t === prev && pl === prevPlaced) { run++; continue; }
-      out.push([run, prev, prevPlaced]);
-      prev = t; prevPlaced = pl; run = 1;
+    const cs = world.chunkSize;
+    for (const [key, m] of world.mods) {
+      const cx = key % world.chunksX;
+      const cy = (key / world.chunksX) | 0;
+      for (const [li, packed] of m) {
+        out.push([cx * cs + (li % cs), cy * cs + ((li / cs) | 0), packed & 255, (packed >> 8) & 1]);
+      }
     }
-    out.push([run, prev, prevPlaced]);
     return out;
   },
 
-  unpackTiles(world, rle) {
-    let i = 0;
-    for (const [run, t, pl] of rle) {
-      for (let k = 0; k < run && i < world.tiles.length; k++, i++) {
-        world.tiles[i] = t;
-        world.placed[i] = pl;
-      }
-    }
+  // Новый формат — [x, y, type, placed]. Старые сейвы (v2/v3) — RLE
+  // [run, type, placed] по всей сетке: их применяем только по отличиям
+  unpackTiles(world, tiles, legacy) {
     world.dirty.length = 0;
-    for (let k = 0; k < world.tiles.length; k++) world.dirty.push(k);
+    if (!tiles || !tiles.length) return;
+    if (legacy) {
+      let i = 0;
+      const total = world.cols * world.rows;
+      for (const [run, t, pl] of tiles) {
+        for (let k = 0; k < run && i < total; k++, i++) {
+          const y = (i / world.cols) | 0;
+          const x = i - y * world.cols;
+          if (world.get(x, y) === t && world.isPlaced(x, y) === !!pl) continue;
+          world.set(x, y, t, !!pl);
+        }
+      }
+      return;
+    }
+    for (const [x, y, t, pl] of tiles) world.set(x, y, t, !!pl);
   },
 
   write(game) {
     try {
       const data = {
-        v: 3,
+        v: 4,
+        seed: CFG.seed,
+        tileFormat: 'mods',
         tiles: this.packTiles(game.world),
         anchors: game.anchors.map(a => ({ x: a.x, y: a.y })),
         inventory: game.inventory.counts,
         player: { x: game.player.x, y: game.player.y, g: game.player.gravityTarget,
                   laser: game.player.hasLaser, armor: game.player.hasArmor,
                   gun: game.player.hasGravityGun, scanner: game.player.hasScanner },
+        // M8.1: корабль переживает F5 (координаты и факт осмотра)
+        ship: game.ship ? { tx: game.ship.tx, ty: game.ship.ty,
+                            w: game.ship.w, h: game.ship.h,
+                            looted: !!game.ship.looted } : null,
         drops: game.drops.map(d => ({ x: d.x, y: d.y, t: d.type })),
         crates: game.crates.map(c => ({ x: c.x, y: c.y })),
         // M5: терминалы — координаты и что уже прочитано
@@ -2258,7 +2907,7 @@ const Save = {
       if (!raw) return null;
       const d = JSON.parse(raw);
       // M5: v2 читаем как раньше — потеряются только терминалы, а не прогресс
-      return d && (d.v === 2 || d.v === 3) ? d : null;
+      return d && (d.v === 2 || d.v === 3 || d.v === 4) ? d : null;
     } catch (e) {
       return null;
     }
@@ -2634,6 +3283,13 @@ class Particles {
         ctx.globalAlpha = a * 0.8;
         ctx.beginPath();
         ctx.arc(p.x, p.y, Math.max(0.9, p.size * 0.5), 0, Math.PI * 2);
+        ctx.fill();
+      } else if (p.kind === 'smoke') {
+        // дым корабля: мягкий круг, растёт и тает
+        ctx.globalAlpha = a * 0.28;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * (1.2 + (1 - a) * 2.4), 0, Math.PI * 2);
         ctx.fill();
       } else if (p.kind === 'flash') {
         ctx.globalAlpha = a * 0.8;
@@ -3036,6 +3692,25 @@ class TouchUI {
 /* ============================================================
    Игра
    ============================================================ */
+/* ============================================================
+   M8.1: турель Руин. Не бегает, но стреляет, если игрок в зоне видимости
+   ============================================================ */
+class Turret {
+  constructor(tx, ty) {
+    this.tx = tx;
+    this.ty = ty;
+    this.cx = tx * TS + TS / 2;
+    this.cy = (ty + 1) * TS - 10;        // ствол на высоте груди игрока
+    this.hp = CFG.turret.hp;
+    // разброс фаз: турели не стреляют синхронным залпом
+    this.cd = CFG.turret.cooldown * (0.4 + hash2(tx, ty) * 0.6);
+    this.aim = 0;
+    this.angle = Math.PI / 2;
+    this.flash = 0;
+    this.broken = false;
+  }
+}
+
 class Game {
   constructor(canvas) {
     this.canvas = canvas;
@@ -3045,6 +3720,10 @@ class Game {
 
     this.world = new World(CFG).generate(CFG);
     this.tiles = new TileLayer(this.world);
+    // M8.1: турели Руин живут в загруженных чанках, болты — снаряды турелей
+    this.turrets = [];
+    this.bolts = [];
+    this.deadTurrets = new Set();
     this.camera = new Camera(this.world.cols * TS, this.world.rows * TS);
     this.input = new Input(canvas);
     // M7: тач-интерфейс включается только на сенсорных устройствах
@@ -3069,6 +3748,11 @@ class Game {
     this.player = new Player(px, py);
     // M6: игрок сообщает о шаге, частицы рисуют пыль — без обратной связи классов
     this.player.onStepDust = (p) => this.particles.step(p.cx, p.cy, p.facing);
+
+    // M8.1: на стартовой точке — обломки корабля (5x4 тайла)
+    this.ship = this.makeShip();
+    this.shipSmokeT = 0;
+    this.shipHintT = 0;
 
     // Ящики для телекинеза
     this.crates = [];
@@ -3463,6 +4147,267 @@ class Game {
     return null;
   }
 
+  /* ---------- M8.1: корабль-обломки на старте ---------- */
+
+  // Корабль — объект, а не тайл: он не мешает физике (как терминалы),
+  // но у него есть габарит 5x4 тайла и точка взаимодействия
+  makeShip() {
+    const S = CFG.ship;
+    const w = this.world;
+    // В ТЗ корабль стоит на (16, 30). Пол зала — ряд surfaceRow (17), поэтому
+    // ряд 30 оказался бы внутри породы; обломки ставятся на стартовую колонку
+    // и опираются на пол зала, как и положено «груде обломков»
+    let ty = S.ty;
+    if (ty + S.h > w.surfaceRow) ty = w.surfaceRow - S.h;
+    return {
+      tx: S.tx, ty,
+      w: S.w, h: S.h,
+      x: S.tx * TS, y: ty * TS,
+      wpx: S.w * TS, hpx: S.h * TS,
+      cx: S.tx * TS + S.w * TS / 2,
+      cy: ty * TS + S.h * TS / 2,
+      looted: false
+    };
+  }
+
+  // «Обломки под рукой» — по аналогии с benchNear(): объект или null
+  shipNear() {
+    if (!this.ship) return null;
+    const p = this.player;
+    const d = Math.hypot(this.ship.cx - p.cx, this.ship.cy - p.cy) / TS;
+    return d <= CFG.ship.interactRadius ? this.ship : null;
+  }
+
+  // Реакция на E рядом с обломками. Тексты — зона сюжетного агента,
+  // поэтому здесь только технический отклик: вспышка и искры
+  inspectShip() {
+    const s = this.shipNear();
+    if (!s) return false;
+    this.particles.place(s.x + s.wpx * 0.45, s.y + s.hpx * 0.55);
+    this.shipHintT = 0.5;
+    return true;
+  }
+
+  // Дымящиеся части: корабль живёт, пока виден
+  updateShipFx(dt) {
+    const s = this.ship;
+    if (!s) return;
+    this.shipHintT = Math.max(0, this.shipHintT - dt);
+    const cam = this.camera;
+    const onScreen = s.x < cam.x + cam.w + 96 && s.x + s.wpx > cam.x - 96 &&
+                     s.y < cam.y + cam.h + 96 && s.y + s.hpx > cam.y - 96;
+    if (!onScreen) return;
+    this.shipSmokeT -= dt;
+    if (this.shipSmokeT > 0) return;
+    this.shipSmokeT = CFG.ship.smokeEvery;
+    const rnd = this.rnd;
+    const px = s.x + s.wpx * (0.22 + rnd() * 0.56);
+    const py = s.y + s.hpx * (0.3 + rnd() * 0.35);
+    this.particles.add(px, py, (rnd() - 0.5) * 14, -20 - rnd() * 18,
+                       3 + rnd() * 3, CFG.ship.smoke, 1.7, true, 'smoke');
+    if (rnd() < 0.3) {
+      this.particles.add(px, py, (rnd() - 0.5) * 40, -30 - rnd() * 20,
+                         1.4, '#ffae5c', 0.8, true, 'spark');
+    }
+  }
+
+  // Обломки: тёмный металл, рваные листы, двигательный блок и тлеющие угли.
+  // Спрайт печётся один раз (SPR), дальше — один drawImage
+  drawShip(ctx) {
+    const s = this.ship;
+    if (!s) return;
+    const cam = this.camera;
+    if (s.x > cam.x + cam.w + 32 || s.x + s.wpx < cam.x - 32 ||
+        s.y > cam.y + cam.h + 32 || s.y + s.hpx < cam.y - 32) return;
+    const spr = Sprites.ship(s.wpx, s.hpx);
+    if (!spr) return;
+    ctx.drawImage(spr, s.x, s.y, s.wpx, s.hpx);
+    // тлеющий очаг: пульсирующее пятно в корпусе
+    const pulse = 0.55 + 0.45 * Math.sin(this.time * 3.1);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.30 * pulse;
+    glow(ctx, s.x + s.wpx * 0.42, s.y + s.hpx * 0.52, s.wpx * 0.30, '255,140,60', 0.5);
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  /* ---------- M8.1: турели Руин ---------- */
+
+  // Турели живут в чанках: подъехала камера — турель появилась,
+  // уехала и чанк выгрузился — турель ушла вместе с ним
+  syncTurrets(force) {
+    // Состав чанков меняется редко: без этой проверки каждый кадр
+    // пересобирались бы Set и массив турелей
+    if (!force && this._turretEpoch === this.world.epoch) return;
+    this._turretEpoch = this.world.epoch;
+    const map = this.turretMap || (this.turretMap = new Map());
+    const alive = new Set();
+    for (const ch of this.world.chunks.values()) {
+      if (!ch.turrets.length) continue;
+      for (const spot of ch.turrets) {
+        const key = spot.tx + ',' + spot.ty;
+        alive.add(key);
+        if (map.has(key) || this.deadTurrets.has(key)) continue;
+        map.set(key, new Turret(spot.tx, spot.ty));
+      }
+    }
+    for (const key of [...map.keys()]) if (!alive.has(key)) map.delete(key);
+    this.turrets = [...map.values()];
+  }
+
+  // Луч по тайлам: турель не стреляет сквозь стены
+  hasLineOfSight(x0, y0, x1, y1) {
+    const dx = x1 - x0, dy = y1 - y0;
+    const dist = Math.hypot(dx, dy);
+    const steps = Math.max(1, Math.ceil(dist / (TS * 0.5)));
+    for (let i = 1; i < steps; i++) {
+      const k = i / steps;
+      const tx = Math.floor((x0 + dx * k) / TS);
+      const ty = Math.floor((y0 + dy * k) / TS);
+      if (this.world.solid(tx, ty)) return false;
+    }
+    return true;
+  }
+
+  fireBolt(t, p) {
+    const a = Math.atan2(p.cy - t.cy, p.cx - t.cx);
+    const mx = t.cx + Math.cos(a) * 12;
+    const my = t.cy + Math.sin(a) * 12;
+    const sp = CFG.turret.boltSpeed;
+    this.bolts.push({ x: mx, y: my, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+                      life: CFG.turret.boltLife });
+    t.flash = 0.12;
+    this.particles.add(mx, my, Math.cos(a) * 40, Math.sin(a) * 40, 2,
+                       CFG.turret.boltColor, 0.2, true, 'spark');
+  }
+
+  updateTurrets(dt) {
+    const p = this.player;
+    const T = CFG.turret;
+    for (const t of this.turrets) {
+      if (t.broken) continue;
+      t.flash = Math.max(0, t.flash - dt);
+      const dx = p.cx - t.cx, dy = p.cy - t.cy;
+      const d = Math.hypot(dx, dy) / TS;
+      const sees = d <= T.range && !p.dead && this.hasLineOfSight(t.cx, t.cy, p.cx, p.cy);
+      if (sees) {
+        t.angle = Math.atan2(dy, dx);
+        t.aim += dt;
+        t.cd -= dt;
+        if (t.cd <= 0 && t.aim >= T.aimTime) {
+          t.cd = T.cooldown;
+          this.fireBolt(t, p);
+        }
+      } else {
+        t.aim = Math.max(0, t.aim - dt * 2);
+      }
+    }
+    this.updateBolts(dt);
+  }
+
+  updateBolts(dt) {
+    const p = this.player;
+    for (let i = this.bolts.length - 1; i >= 0; i--) {
+      const b = this.bolts[i];
+      b.life -= dt;
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      if (b.life <= 0) { this.bolts.splice(i, 1); continue; }
+      if (this.world.solid(Math.floor(b.x / TS), Math.floor(b.y / TS))) {
+        this.bolts.splice(i, 1);
+        this.particles.add(b.x, b.y, 0, -20, 2.5, CFG.turret.boltColor, 0.3, true, 'spark');
+        continue;
+      }
+      if (!p.dead && b.x > p.x && b.x < p.x + p.w && b.y > p.y && b.y < p.y + p.h) {
+        this.damagePlayer(CFG.turret.damage, 'турель');
+        this.bolts.splice(i, 1);
+      }
+    }
+  }
+
+  drawTurrets(ctx) {
+    const T = CFG.turret;
+    for (const t of this.turrets) {
+      if (t.broken) continue;
+      const charge = clamp(t.aim / T.aimTime, 0, 1);
+      // тень-основание
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = '#000';
+      ctx.beginPath();
+      ctx.ellipse(t.cx, t.cy + 10, 13, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // станина: тёмная плита с болтами по краям
+      ctx.fillStyle = '#1a1f27';
+      rr(ctx, t.cx - 12, t.cy + 6, 24, 7, 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(120,134,152,0.45)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = '#39424f';
+      ctx.fillRect(t.cx - 9, t.cy + 8, 2, 2);
+      ctx.fillRect(t.cx + 7, t.cy + 8, 2, 2);
+
+      // корпус и ствол: угловатая коробка, без «пузыря»
+      ctx.save();
+      ctx.translate(t.cx, t.cy - 3);
+      ctx.rotate(t.angle);
+      ctx.fillStyle = '#39424f';
+      rr(ctx, -9, -7, 18, 14, 2);
+      ctx.fill();
+      ctx.strokeStyle = '#6f7d8f';
+      ctx.stroke();
+      // вентиляционная решётка на корме
+      ctx.fillStyle = 'rgba(12,16,21,0.75)';
+      ctx.fillRect(-8, -5, 6, 1);
+      ctx.fillRect(-8, -3, 6, 1);
+      ctx.fillRect(-8, -1, 6, 1);
+      // ствол: две ступени и дульный тормоз
+      ctx.fillStyle = '#59677a';
+      ctx.fillRect(5, -4, 7, 8);
+      ctx.fillStyle = '#46515f';
+      ctx.fillRect(12, -2.5, 7, 5);
+      ctx.fillStyle = '#0d1116';
+      ctx.fillRect(18, -1.5, 2, 3);
+      ctx.restore();
+
+      // «глаз»: чем ближе выстрел, тем ярче
+      const eye = 0.25 + charge * 0.75 + (t.flash > 0 ? 0.6 : 0);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = clamp(eye, 0, 1);
+      glow(ctx, t.cx, t.cy - 2, 12, '255,90,70', 0.55);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = t.flash > 0 ? '#fff2d0' : T.color;
+      ctx.beginPath();
+      ctx.arc(t.cx, t.cy - 2, 3.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  drawBolts(ctx) {
+    if (!this.bolts.length) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const b of this.bolts) {
+      const tx = b.x - b.vx * 0.02, ty = b.y - b.vy * 0.02;
+      ctx.strokeStyle = CFG.turret.boltColor;
+      ctx.lineWidth = 2.2;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(b.x, b.y);
+      ctx.lineTo(tx, ty);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,240,210,0.9)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   canAffordBench() {
     for (const id in CFG.bench.cost) if (!this.inventory.has(Number(id), CFG.bench.cost[id])) return false;
     return true;
@@ -3621,8 +4566,9 @@ class Game {
     const caveBottom = caveTop + CFG.layers.caveRows;
     let placed = 0;
     let guard = 0;
+    const span = Math.min(w.cols - 40, CFG.spawn.hallSpan);
     while (placed < CFG.crawler.count && guard++ < 4000) {
-      const tx = 20 + Math.floor(this.rnd() * (w.cols - 40));
+      const tx = 20 + Math.floor(this.rnd() * Math.max(1, span - 20));
       const ty = caveTop + 2 + Math.floor(this.rnd() * (caveBottom - caveTop - 3));
       if (!this.freeCaveSpot(tx, ty)) continue;
       // не рядом с точкой спавна игрока (не меньше 8 тайлов)
@@ -3640,8 +4586,9 @@ class Game {
     const caveBottom = caveTop + CFG.layers.caveRows;
     let placed = 0;
     let guard = 0;
+    const span = Math.min(w.cols - 16, CFG.spawn.hallSpan);
     while (placed < CFG.crawler.gelOnMap && guard++ < 4000) {
-      const tx = 8 + Math.floor(this.rnd() * (w.cols - 16));
+      const tx = 8 + Math.floor(this.rnd() * Math.max(1, span - 8));
       const ty = caveTop + 2 + Math.floor(this.rnd() * (caveBottom - caveTop - 3));
       if (!this.freeCaveSpot(tx, ty)) continue;
       const d = new Drop(tx * TS + (TS - CFG.drop.size) / 2, (ty + 1) * TS - CFG.drop.size, ITEM.BIOGEL);
@@ -3658,8 +4605,9 @@ class Game {
     const top = CFG.layers.deepTopRow + 2;
     const bottom = w.rows - 4;
     let placed = 0, guard = 0;
+    const span = Math.min(w.cols - 16, CFG.spawn.deepSpan);
     while (placed < CFG.deep.crawlerCount && guard++ < 6000) {
-      const tx = 8 + Math.floor(this.rnd() * (w.cols - 16));
+      const tx = 8 + Math.floor(this.rnd() * Math.max(1, span - 8));
       const ty = top + Math.floor(this.rnd() * (bottom - top));
       if (!this.freeCaveSpot(tx, ty)) continue;
       // держимся подальше от терминалов: лор не должен читаться под укусами
@@ -3683,8 +4631,9 @@ class Game {
     const caveTop = CFG.layers.skyRows + CFG.layers.ceilingRows;
     const caveBottom = caveTop + CFG.layers.caveRows;
     let guard = 0;
+    const surfaceSpan = Math.min(w.cols - 50, CFG.spawn.hallSpan);
     while (spots.length < 1 && guard++ < 6000) {
-      const tx = 25 + Math.floor(this.rnd() * (w.cols - 50));
+      const tx = 25 + Math.floor(this.rnd() * Math.max(1, surfaceSpan - 25));
       const ty = caveTop + 2 + Math.floor(this.rnd() * (caveBottom - caveTop - 3));
       if (Math.abs(tx - CFG.spawn.playerTileX) < 18) continue;
       if (!this.freeCaveSpot(tx, ty)) continue;
@@ -3701,8 +4650,9 @@ class Game {
     for (const [y0, y1] of bands) {
       if (spots.length >= T.count) break;
       guard = 0;
+      const deepSpan = Math.min(w.cols - 16, CFG.spawn.deepSpan);
       while (guard++ < 20000) {
-        const tx = 8 + Math.floor(this.rnd() * (w.cols - 16));
+        const tx = 8 + Math.floor(this.rnd() * Math.max(1, deepSpan - 8));
         const ty = y0 + Math.floor(this.rnd() * Math.max(1, y1 - y0));
         if (!this.freeCaveSpot(tx, ty)) continue;
         if (!w.solid(tx, ty + 1)) continue;
@@ -4217,12 +5167,26 @@ class Game {
     const cx = tx * TS + TS / 2;
     const cy = ty * TS + TS / 2;
 
-    // Физический дроп
-    const d = new Drop(cx - CFG.drop.size / 2, cy - CFG.drop.size / 2, type);
+    // M8.1: RESONITE (синий кристалл) рассыпается на 2 FERRITE + 1 STONE,
+    // металлическая плита Руин — на FERRITE. Остальное — «сам в себя»
+    const loot = type === TILE.RESONITE
+      ? [{ t: TILE.FERRITE, n: 2 }, { t: TILE.STONE, n: 1 }]
+      : type === TILE.METAL ? [{ t: TILE.FERRITE, n: 1 }]
+      : [{ t: type, n: 1 }];
+    const total = loot.reduce((a, l) => a + l.n, 0);
+    let k = 0;
     const toPlayer = Math.sign(this.player.cx - cx) || 1;
-    d.vx = toPlayer * CFG.drop.spawnVx * 0.5 + (this.rnd() - 0.5) * CFG.drop.spawnVx;
-    d.vy = -this.gravitySign * (CFG.drop.popOut + this.rnd() * CFG.drop.spawnVy);
-    this.drops.push(d);
+    for (const l of loot) {
+      for (let i = 0; i < l.n; i++) {
+        // дропы раскладываем веером, чтобы они не слипались в один
+        const off = total > 1 ? (k - (total - 1) / 2) * (CFG.drop.size + 4) : 0;
+        const d = new Drop(cx - CFG.drop.size / 2 + off, cy - CFG.drop.size / 2, l.t);
+        d.vx = toPlayer * CFG.drop.spawnVx * 0.5 + (this.rnd() - 0.5) * CFG.drop.spawnVx;
+        d.vy = -this.gravitySign * (CFG.drop.popOut + this.rnd() * CFG.drop.spawnVy);
+        this.drops.push(d);
+        k++;
+      }
+    }
 
     this.particles.dig(type, cx, cy, this.rnd);
     this.wakeNear(tx, ty);
@@ -4285,7 +5249,9 @@ class Game {
       if (inp.consume('KeyQ')) this.useScanner();
       if (inp.consume('KeyE')) {
         const t = this.terminalNear();
+        // M8.1: рядом с обломками E тоже откликается — через shipNear()
         if (t) this.readTerminal(t);
+        else if (this.shipNear()) this.inspectShip();
       }
     }
     this.updateScan(dt);
@@ -4333,6 +5299,13 @@ class Game {
     this.inventory.update(dt);
     this.camera.update(this.player, dt);
 
+    // M8.1: камера определила, какие чанки нужны — грузим их и выгружаем дальние.
+    // Турели живут в загруженных чанках, поэтому синхронизация идёт следом
+    this.world.updateChunks(this.camera);
+    this.syncTurrets();
+    this.updateTurrets(dt);
+    this.updateShipFx(dt);
+
     this.updateWreckFx(dt);
 
     // Автосохранение раз в N секунд + сброс мира по Backspace
@@ -4353,6 +5326,14 @@ class Game {
     this.tiles = new TileLayer(this.world);
     SPR.clear();               // M6: кэш спрайтов и тайлов не должен пережить мир
     this.anchors = [];
+    // M8.1: турели, болты и корабль тоже начинают с чистого листа
+    this.turrets = [];
+    this.bolts = [];
+    this.deadTurrets.clear();
+    if (this.turretMap) this.turretMap.clear();
+    this.ship = this.makeShip();
+    this.shipSmokeT = 0;
+    this.syncTurrets(true);
     this.drops = [];
     for (const r of CFG.resources) this.inventory.counts[r.id] = 0;
     const px = CFG.spawn.playerTileX * TS + (TS - CFG.player.w) / 2;
@@ -4458,8 +5439,24 @@ class Game {
     const d = Save.read();
     if (!d) return false;
 
-    Save.unpackTiles(this.world, d.tiles);
+    // M8.1: формат тайлов зависит от сейва — новый overlay или старый RLE
+    Save.unpackTiles(this.world, d.tiles, !d.tileFormat);
     this.tiles.flush();
+
+    // Корабль: координаты и «осмотрен» переживают перезагрузку
+    if (d.ship && this.ship) {
+      this.ship.tx = d.ship.tx;
+      this.ship.ty = d.ship.ty;
+      this.ship.w = d.ship.w || CFG.ship.w;
+      this.ship.h = d.ship.h || CFG.ship.h;
+      this.ship.x = this.ship.tx * TS;
+      this.ship.y = this.ship.ty * TS;
+      this.ship.wpx = this.ship.w * TS;
+      this.ship.hpx = this.ship.h * TS;
+      this.ship.cx = this.ship.x + this.ship.wpx / 2;
+      this.ship.cy = this.ship.y + this.ship.hpx / 2;
+      this.ship.looted = !!d.ship.looted;
+    }
 
     this.anchors = (d.anchors || []).map(a => ({ x: a.x, y: a.y, born: 0 }));
     for (const r of CFG.resources) this.inventory.counts[r.id] = (d.inventory && d.inventory[r.id]) || 0;
@@ -4551,13 +5548,11 @@ class Game {
   // Одна волна разрушения: по одному незащищённому построенному тайлу за волну
   wreckWave() {
     const candidates = [];
-    const w = this.world;
-    for (let i = 0; i < w.tiles.length; i++) {
-      if (!w.placed[i] || w.tiles[i] === TILE.EMPTY) continue;
-      const tx = i % w.cols, ty = Math.floor(i / w.cols);
-      if (this.isProtected(tx, ty)) continue;
-      candidates.push({ tx, ty, i });
-    }
+    // M8.1: перебираем не 300 000 тайлов, а только правки игрока (overlay)
+    this.world.forEachPlaced((tx, ty) => {
+      if (this.isProtected(tx, ty)) return;
+      candidates.push({ tx, ty });
+    });
     if (!candidates.length) return 0;
 
     // Вне кадра тоже ломаем: прилив не должен зависеть от камеры
@@ -4667,9 +5662,12 @@ class Game {
     ctx.translate(-camX, -camY);
 
     this.drawTiles(ctx, camX, camY);
+    this.drawShip(ctx);          // M8.1: обломки корабля — за игроком
     this.drawCrates(ctx);
     this.drawTerminals(ctx);
+    this.drawTurrets(ctx);       // M8.1: турели Руин
     this.drawCrawlers(ctx);
+    this.drawBolts(ctx);
     this.drawDrops(ctx);
     this.drawPlayer(ctx);
     this.particles.draw(ctx, this.camera);
@@ -4736,10 +5734,23 @@ class Game {
     const ty1 = Math.min(w0.rows - 1, Math.ceil((this.camera.y + this.camera.h) / TS) + 1);
     for (let ty = ty0; ty <= ty1 && lights.length <= L.maxLights; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) {
-        if (w0.tiles[ty * w0.cols + tx] !== TILE.FERRITE) continue;
+        const type = w0.get(tx, ty);
+        // M8.1: RESONITE светит сильнее и выше феррита — это редкий ресурс
+        const reson = type === TILE.RESONITE;
+        if (type !== TILE.FERRITE && !reson) continue;
         const s2 = toScreen(tx * TS + TS / 2, ty * TS + TS / 2);
-        lights.push({ x: s2.x, y: s2.y, r: L.ferriteLight * TS * z, soft: 0.55, tint: CFG.look.ferriteGlow });
+        lights.push({ x: s2.x, y: s2.y,
+                      r: (reson ? L.ferriteLight * 1.5 : L.ferriteLight) * TS * z,
+                      soft: reson ? 0.4 : 0.55,
+                      tint: reson ? '96,178,255' : CFG.look.ferriteGlow });
         if (lights.length > L.maxLights) break;
+      }
+    }
+    // тлеющие угли корабля: тёплое пятно на старте (только пока он в кадре)
+    if (this.ship) {
+      const ss = toScreen(this.ship.cx, this.ship.cy + this.ship.hpx * 0.05);
+      if (ss.x > -240 && ss.x < this.vw + 240 && ss.y > -240 && ss.y < this.vh + 240) {
+        lights.push({ x: ss.x, y: ss.y, r: 3.4 * TS * z, soft: 0.55, tint: '255,140,60' });
       }
     }
     for (const t of this.terminals) {
@@ -5095,16 +6106,10 @@ class Game {
     ctx.globalAlpha = 1;
   }
 
+  // M8.1: тайлы рисуются спрайтами прямо в кадр — мирового буфера больше нет.
+  // Стоимость зависит от размера экрана, а не от размера мира
   drawTiles(ctx, camX, camY) {
-    // Дорисовываем текстуру того, что попало в кадр
-    this.tiles.detailVisible(this.world, this.camera, this.player);
-
-    const buf = this.tiles.canvas;
-    const sx = clamp(camX, 0, buf.width);
-    const sy = clamp(camY, 0, buf.height);
-    const w = Math.min(this.camera.w + 2, buf.width - sx);
-    const h = Math.min(this.camera.h + 2, buf.height - sy);
-    if (w > 0 && h > 0) ctx.drawImage(buf, sx, sy, w, h, sx, sy, w, h);
+    this.tiles.drawWorld(ctx, this.camera);
   }
 
   drawCrates(ctx) {
@@ -6008,10 +7013,7 @@ class Game {
     // В CATASTROPHE — сколько построек ещё под угрозой
     if (ph.id === 'CATASTROPHE' || ph.id === 'WARNING') {
       let danger = 0;
-      for (let i = 0; i < this.world.tiles.length; i++) {
-        if (!this.world.placed[i] || this.world.tiles[i] === TILE.EMPTY) continue;
-        if (!this.isProtected(i % this.world.cols, Math.floor(i / this.world.cols))) danger++;
-      }
+      this.world.forEachPlaced((tx, ty) => { if (!this.isProtected(tx, ty)) danger++; });
       ctx.font = '11px ' + CFG.render.font;
       ctx.textAlign = 'left';
       // M3: 10% в секунду — прилив съест незащищённое за ~10 волн
@@ -6050,8 +7052,31 @@ class Game {
   // Подсказка «[E] Прочитать» над терминалом: прицел игрока не должен
   // превращаться в поиск горячей клавиши наугад
   drawPrompt(ctx) {
+    if (this.lore) return;
+    // M8.1: у обломков корабля своя подсказка (shipNear, а не терминал)
+    const ship = this.promptTerminal ? null : this.shipNear();
+    if (ship) {
+      const label = '[E] Обломки';
+      const cx = ship.cx;
+      const cy = ship.y - 10;
+      ctx.font = 'bold 10px ' + CFG.render.font;
+      const w = ctx.measureText(label).width + 14;
+      ctx.fillStyle = 'rgba(6,12,18,0.82)';
+      rr(ctx, cx - w / 2, cy - 9, w, 18, 5);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,150,90,0.5)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = '#ffd7b0';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, cx, cy + 0.5);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      return;
+    }
     const t = this.promptTerminal;
-    if (!t || this.lore) return;
+    if (!t) return;
     const T = CFG.terminal;
     const cx = t.x + T.w / 2;
     const cy = t.y - 12;

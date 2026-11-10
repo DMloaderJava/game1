@@ -16,7 +16,12 @@ class FakeCtx {
   set strokeStyle(v) { this._ss = v; } get strokeStyle() { return this._ss; }
   fillRect() { calls.fillRect++; if (this.canvas.kind === 'offscreen') calls.fillTileRect++; }
   clearRect() {}
-  drawImage(img) { calls.drawImage++; if (img && img.kind === 'offscreen' && img.width === 200 * 32) calls.drawTileBuffer = (calls.drawTileBuffer || 0) + 1; }
+  drawImage(img) {
+    calls.drawImage++;
+    if (img && img.kind === 'offscreen' && img.width === 200 * 32) calls.drawTileBuffer = (calls.drawTileBuffer || 0) + 1;
+    // M8.1: тайл рисуется запечённым спрайтом TS*2 x TS*2 (SPR.scale = 2)
+    if (img && img.kind === 'offscreen' && img.width === 64 && img.height === 64) calls.tileSprites = (calls.tileSprites || 0) + 1;
+  }
   createLinearGradient() { return grad; }
   createRadialGradient() { return grad; }
   beginPath() {} moveTo() {} lineTo() {} arcTo() {} arc() {} closePath() {}
@@ -227,9 +232,12 @@ game.drops.push(new sandbox.__cls.Drop(P.cx - 6, P.cy - 6, TILE.STONE));
 frames(2);
 ok('дроп на игроке подбирается автоматически', game.inventory.counts[TILE.STONE] === invNow + 1,
    `inv=${game.inventory.counts[TILE.STONE]}`);
-// M6: к кольцу искр добавлена вспышка-«flash», поэтому частиц на одну больше
-ok('подбор дал burst-частицы', game.particles.list.length === CFG.particles.pickup + 1,
-   `particles=${game.particles.list.length}`);
+// M6: к кольцу искр добавлена вспышка-«flash».
+// M8.1: на спавне дымит корабль, поэтому считаем именно всплеск подбора
+const burstSparks = game.particles.list.filter(p => p.kind === 'spark').length;
+const burstFlash = game.particles.list.filter(p => p.kind === 'flash').length;
+ok('подбор дал burst-частицы', burstSparks >= CFG.particles.pickup && burstFlash >= 1,
+   `искр=${burstSparks} вспышек=${burstFlash} всего=${game.particles.list.length}`);
 ok('HUD пульсирует после подбора', game.inventory.pulse[TILE.STONE] > 0,
    `pulse=${game.inventory.pulse[TILE.STONE].toFixed(2)}`);
 
@@ -411,16 +419,19 @@ const p50 = tPerf[Math.floor(tPerf.length / 2)];
 const p95 = tPerf[Math.floor(tPerf.length * 0.95)];
 ok('update+render < 16.6мс (p95) при 300 телах', p95 < 16.6, `p50=${p50.toFixed(2)}мс p95=${p95.toFixed(2)}мс`);
 
-// ---------------------------------------------------------------- тайловый буфер
+// ---------------------------------------------------------------- тайлы
 calls.fillTileRect = 0;
 calls.drawImage = 0;
 calls.drawTileBuffer = 0;
+calls.tileSprites = 0;
 frames(1);
 ok('в простое offscreen тайлов не перерисовывается', calls.fillTileRect === 0, `fillRect в буфер за кадр=${calls.fillTileRect}`);
-// M6: кроме буфера тайлов есть спрайты (игрок, жук, дропы, ящики) — но мир
-// по-прежнему выводится ОДНИМ блитом, а не по тайлам
-ok('тайлы выводятся одним блитом буфера', calls.drawTileBuffer === 1,
-   `блитов буфера=${calls.drawTileBuffer}, всего drawImage=${calls.drawImage}`);
+// M8.1: мира-полотна больше нет, тайлы рисуются запечёнными спрайтами.
+// Их число зависит от размера кадра, а не от размера мира
+ok('M8.1: за кадр рисуются только видимые тайлы', calls.tileSprites > 0 && calls.tileSprites <= 1200,
+   `спрайтов тайлов=${calls.tileSprites}, всего drawImage=${calls.drawImage}`);
+ok('M8.1: блита буфера размером с мир больше нет', (calls.drawTileBuffer || 0) === 0,
+   `блитов=${calls.drawTileBuffer || 0}`);
 const beforeFlush = game.tiles.world.dirty.length;
 game.world.set(3, 3, TILE.STONE);
 ok('изменение тайла попадает в dirty', game.world.dirty.length === beforeFlush + 1);
@@ -633,7 +644,8 @@ game.tide.t = 20;   // 80 секунд до прилива
 game.inventory.counts[TILE.FERRITE] = 7;
 game.doSave();
 const saved = JSON.parse(sandbox.localStorage.getItem(CFG.save.key));
-ok('сейв записан', !!saved && saved.v === 3 && saved.tiles.length > 0, 'v=' + (saved && saved.v));
+// M8.1: формат сейва v4 — вместо RLE всей карты хранится overlay правок
+ok('сейв записан', !!saved && saved.v === 4 && saved.tiles.length > 0, 'v=' + (saved && saved.v));
 ok('в сейве есть фаза', saved.cycle && saved.cycle.phase === 'STABLE', JSON.stringify(saved.cycle));
 
 // загрузка STABLE: таймер продолжается
@@ -1245,11 +1257,21 @@ const PM5 = gM5.player;
 stepG(gM5, 60);
 
 // --- 1. мир стал глубже
-ok('M5: мир вырос до 200x130', gM5.world.cols === 200 && gM5.world.rows === 130,
+// M8.1: мир вырос до 1000x300 — старые проверки M5 обновлены под новую сетку
+ok('M5/M8.1: мир вырос до 1000x300', gM5.world.cols === 1000 && gM5.world.rows === 300,
    `${gM5.world.cols}x${gM5.world.rows}`);
 ok('M5: Глубокие пещеры начинаются с 50-го ряда', CFG.layers.deepTopRow === 50 && gM5.world.deepRow === 50);
-ok('M5: под старым дном есть 30 новых рядов породы',
-   gM5.world.rows - 100 === 30 && gM5.world.solid(100, 128), `rows=${gM5.world.rows}`);
+{
+  // M8.1: сетка выросла на 200 рядов; внизу по-прежнему порода (с пещерами,
+  // поэтому считаем не один тайл, а массу)
+  let rockBottom = 0;
+  for (let ty = gM5.world.rows - 12; ty < gM5.world.rows; ty++) {
+    for (let tx = 100; tx < 300; tx++) if (gM5.world.solid(tx, ty)) rockBottom++;
+  }
+  ok('M5: под старым дном есть 200 новых рядов породы',
+     gM5.world.rows - 100 === 200 && rockBottom > 500,
+     `rows=${gM5.world.rows} породы внизу=${rockBottom}`);
+}
 
 // физический замер концентрации FERRITE: считаем по тайлам, а не по конфигу
 function ferriteRatioIn(fromRow, toRow) {
@@ -1532,7 +1554,9 @@ gM5.scanCd = 0;
 {
   gM5.doSave();
   const raw = JSON.parse(sandbox.localStorage.getItem(CFG.save.key));
-  ok('M5: сейв версии 3', raw.v === 3, `v=${raw.v}`);
+  ok('M8.1: сейв версии 4', raw.v === 4, `v=${raw.v}`);
+  ok('M8.1: в сейве только правки, а не вся карта', raw.tileFormat === 'mods' && raw.tiles.length < 5000,
+     `записей=${raw.tiles.length}`);
   ok('M5: в сейве есть сканер', raw.player.scanner === true);
   ok('M5: в сейве есть список терминалов с координатами',
      raw.terminals.length === 3 && raw.terminals.every(t => typeof t.tx === 'number' && typeof t.ty === 'number'));
@@ -1583,17 +1607,18 @@ ok('M5: глубина затемняется экранным слоем', /dra
    /destination-out/.test(String(gM5.drawLighting)));
 ok('M5: без console.log в новом коде', !/console\.(log|warn|error)/.test(String(gM5.useScanner) + String(gM5.readTerminal) + String(gM5.spawnTerminals) + String(gM5.drawScan)));
 
-// полотно тайлов выросло, но в кадр по-прежнему попадает один drawImage
-ok('M5: слой тайлов размером с новый мир',
-   gM5.tiles.canvas.height === 130 * TS, `h=${gM5.tiles.canvas.height}`);
+// M8.1: полотна размером с мир больше нет — 1000x300 тайлов в 32 px
+// это 32000x9600 px (~1.2 ГБ), поэтому тайлы рисуются спрайтами
+ok('M8.1: тайлового полотна размером с мир нет', gM5.tiles.canvas === null);
+ok('M8.1: мир нарезан на чанки 64x64 (16x5)', CFG.world.chunk === 64 &&
+   gM5.world.chunksX === 16 && gM5.world.chunksY === 5,
+   `${gM5.world.chunksX}x${gM5.world.chunksY}`);
 {
-  // M6: спрайты и тайлы тоже рисуются через drawImage, поэтому считаем
-  // именно блит большого буфера тайлов (единственный источник мира-сетки)
+  const before = calls.tileSprites || 0;
   gM5.render();
-  const before = calls.drawTileBuffer || 0;
-  gM5.render();
-  ok('M5: рендер мира — один блит буфера тайлов за кадр, а не 130 рядов',
-     (calls.drawTileBuffer || 0) - before === 1, `dt=${(calls.drawTileBuffer || 0) - before}`);
+  const per = (calls.tileSprites || 0) - before;
+  ok('M8.1: кадр рисует видимые тайлы, а не 130 рядов мира',
+     per > 0 && per < 1000, `тайлов за кадр=${per} из ${gM5.world.cols * gM5.world.rows}`);
 }
 
 // камера в глубине не выходит за мир
@@ -1630,7 +1655,9 @@ ok('M5: слой тайлов размером с новый мир',
   ok('M6: спрайты кэшируются — 10 кадров не пекут новых',
      sandbox.__SPR.built === built1 && sandbox.__SPR.hits > hits1,
      `built=${built1} hits=${hits1}→${sandbox.__SPR.hits}`);
-  ok('M6: кэш не разрастается до сотен картинок', built1 < 120, `спрайтов=${built1}`);
+  // M8.1: тайлы пекутся вариантами (тип × тон × маска соседей), поэтому
+  // спрайтов больше, но их число ограничено и не зависит от размера мира
+  ok('M6: кэш не разрастается до сотен картинок', built1 < 400, `спрайтов=${built1}`);
 }
 
 // --- 2. ключи спрайтов: броня, шаг, ранение — разные кадры
@@ -2063,6 +2090,181 @@ ok('M5: слой тайлов размером с новый мир',
   ok('M7: на узком экране панель крафта масштабируется', small.s < 1, `s=${small.s.toFixed(2)}`);
   ok('M7: попадание по строке считается с тем же масштабом',
      /box\.s/.test(String(g.updateCraft)) || /rowH \* box\.s/.test(String(g.updateCraft)));
+}
+
+// ---------------------------------------------------------------- M8.1: корабль
+{
+  const S = game.ship;
+  ok('M8.1: на старте есть объект «Корабль» 5x4', !!S && S.w === 5 && S.h === 4,
+     S ? `тайл ${S.tx},${S.ty}, ${S.w}x${S.h}, ${S.wpx}x${S.hpx||S.hpx}px` : 'нет');
+  ok('M8.1: обломки лежат на полу зала', !!S && W.solid(S.tx, S.ty + S.h) && !W.solid(S.tx, S.ty),
+     S ? `под=${W.get(S.tx, S.ty + S.h)} внутри=${W.get(S.tx, S.ty)}` : '');
+  const shipSpr = sandbox.__Sprites.ship(S.wpx, S.hpx);
+  ok('M8.1: обломки пекутся в спрайт 5x4 тайла',
+     !!shipSpr && shipSpr.width === S.wpx * sandbox.__SPR.scale,
+     shipSpr ? `${shipSpr.width}x${shipSpr.height}` : 'нет спрайта');
+}
+
+// shipNear() по аналогии с benchNear(): объект или null
+{
+  const S = game.ship;
+  const px = P.x, py = P.y;
+  P.x = S.cx - P.w / 2; P.y = S.cy - P.h / 2; P.vx = P.vy = 0;
+  ok('M8.1: shipNear() находит обломки вплотную', game.shipNear() === S);
+  P.x = (S.tx + 40) * TS; P.y = S.y;
+  ok('M8.1: shipNear() молчит вдали', game.shipNear() === null);
+  // E у обломков откликается, но сюжетных текстов не трогает
+  P.x = S.cx - P.w / 2; P.y = S.cy - P.h / 2;
+  const hints = game.shipHintT;
+  ok('M8.1: inspectShip() откликается у обломков', game.inspectShip() === true && game.shipHintT >= hints);
+  P.x = px; P.y = py; P.vx = P.vy = 0; game.camera.snap(P); frames(2);
+}
+
+// Корабль уезжает в сейв вместе с остальным состоянием
+{
+  const S0 = game.ship;
+  const keep = { tx: S0.tx, ty: S0.ty, looted: S0.looted };
+  S0.tx = 21;                    // сдвигаем, чтобы сейв нельзя было «угадать»
+  S0.looted = true;
+  game.doSave();
+  const raw = JSON.parse(sandbox.localStorage.getItem(CFG.save.key) || 'null');
+  ok('M8.1: корабль пишется в сейв', !!raw && !!raw.ship &&
+     raw.ship.w === CFG.ship.w && raw.ship.h === CFG.ship.h &&
+     raw.ship.tx === 21 && raw.ship.looted === true,
+     raw && raw.ship ? JSON.stringify(raw.ship) : 'нет ship');
+
+  const g2 = new (sandbox.__cls.Game)(view);
+  ok('M8.1: корабль восстанавливается из сейва', !!g2.ship &&
+     g2.ship.tx === 21 && g2.ship.looted === true && g2.ship.w === CFG.ship.w,
+     g2.ship ? JSON.stringify({ tx: g2.ship.tx, looted: g2.ship.looted }) : 'нет ship');
+
+  S0.tx = keep.tx; S0.ty = keep.ty; S0.looted = keep.looted;
+  S0.x = S0.tx * TS; S0.cx = S0.x + S0.wpx / 2;
+  game.doSave();
+}
+
+// ---------------------------------------------------------------- M8.1: RESONITE
+{
+  let spot = null;
+  for (let y = CFG.biomes.crystalFromRow + 2; y < CFG.layers.deepTopRow + 60 && !spot; y++) {
+    for (let x = 200; x < 560; x++) if (W.get(x, y) === TILE.RESONITE) { spot = { x, y }; break; }
+  }
+  ok('M8.1: в кристальных пещерах есть RESONITE', !!spot, spot ? `тайл ${spot.x},${spot.y}` : 'не найдено');
+  ok('M8.1: RESONITE копается заметно дольше породы',
+     CFG.dig.times[TILE.RESONITE] > CFG.dig.times[TILE.DIRT] * 3,
+     `${CFG.dig.times[TILE.RESONITE]}с против ${CFG.dig.times[TILE.DIRT]}с`);
+
+  if (spot) {
+    const inv = game.inventory.counts;
+    const before = { f: inv[TILE.FERRITE] || 0, s: inv[TILE.STONE] || 0 };
+    const n0 = game.drops.length;
+    game.mineTile(spot.x, spot.y);
+    const made = game.drops.slice(n0);
+    const f = made.filter(d => d.type === TILE.FERRITE).length;
+    const s = made.filter(d => d.type === TILE.STONE).length;
+    ok('M8.1: RESONITE рассыпается на 2 FERRITE + 1 STONE', f === 2 && s === 1,
+       `ferrite=${f} stone=${s}`);
+    ok('M8.1: RESONITE исчез из мира', W.get(spot.x, spot.y) === TILE.EMPTY);
+
+    // подбираем: ставим дропы в игрока и даём кадр на подбор
+    for (const d of made) {
+      d.x = P.cx - d.w / 2; d.y = P.cy - d.h / 2;
+      d.vx = 0; d.vy = 0;
+    }
+    frames(6);
+    const af = game.inventory.counts[TILE.FERRITE] || 0, as = game.inventory.counts[TILE.STONE] || 0;
+    ok('M8.1: RESONITE попадает в инвентарь', af === before.f + 2 && as === before.s + 1,
+       `ferrite ${before.f}→${af}, stone ${before.s}→${as}`);
+  }
+}
+
+// ---------------------------------------------------------------- M8.1: чанки
+{
+  const w = game.world;
+  const cs = CFG.world.chunk;
+  const cam = (tx, ty) => ({ x: tx * TS, y: ty * TS, w: 640, h: 360 });
+
+  // загружаем квадрат руин и правим в нём тайл
+  const refer = { tx: 704, ty: 30 };
+  w.updateChunks(cam(refer.tx - 10, refer.ty - 5));
+  // берём именно твёрдый тайл: у пустого set() вернётся без записи в overlay
+  let tx = refer.tx, ty = refer.ty;
+  for (let dy = 0; dy < 20 && w.get(tx, ty) === TILE.EMPTY; dy++) ty = refer.ty + dy;
+  const cx = (tx / cs) | 0, cy = (ty / cs) | 0;
+  ok('M8.1: чанк камеры загружается по требованию', w.isChunkLoaded(cx, cy));
+  const typeBefore = w.get(tx, ty);
+  w.set(tx, ty, TILE.EMPTY);
+  const overlay = w.mods.get(w.chunkKey(cx, cy));
+  ok('M8.1: правка тайла уходит в overlay, а не в гигантский массив',
+     !!overlay && overlay.has(w.localIndex(tx, ty, cx, cy)));
+
+  // уезжаем на старт: чанк должен выгрузиться, а копка — остаться в overlay.
+  // LRU не выкидывает только что тронутый чанк, поэтому сначала проезжаем
+  // несколько других мест, иначе руинный чанк остаётся самым свежим
+  const keep = w.keepChunks;
+  w.keepChunks = 6;                  // столько чанков держит LRU в этом прогоне
+  for (let k = 0; k < 3; k++) w.updateChunks(cam(300 + k * 40, 120));
+  w.updateChunks(cam(0, 0));
+  w.updateChunks(cam(0, 0));
+  ok('M8.1: дальний чанк выгружается', !w.isChunkLoaded(cx, cy), `загружено ${w.loadedChunks()}`);
+  ok('M8.1: загруженных чанков не больше лимита', w.loadedChunks() <= w.keepChunks,
+     `${w.loadedChunks()} <= ${w.keepChunks}`);
+  w.keepChunks = keep;
+  ok('M8.1: выгрузка не теряет overlay-правку', w.mods.get(w.chunkKey(cx, cy)).has(w.localIndex(tx, ty, cx, cy)));
+
+  // возвращаемся: чанк перегенерируется, правка применяется поверх
+  w.updateChunks(cam(tx - 10, ty - 5));
+  ok('M8.1: копка переживает выгрузку и повторную загрузку', w.get(tx, ty) === TILE.EMPTY,
+     `было ${typeBefore}, стало ${w.get(tx, ty)}`);
+}
+
+// ---------------------------------------------------------------- M8.1: турели Руин
+{
+  const w = game.world;
+  const spots = [];
+  for (let cy = 0; cy < w.chunksY; cy++) {
+    for (let cx = (CFG.biomes.ruinsFromX / CFG.world.chunk) | 0; cx < w.chunksX; cx++) {
+      const ch = w.ensureChunk(cx, cy);
+      if (ch.turrets.length) spots.push(ch.turrets[0]);
+    }
+  }
+  ok('M8.1: в Руинах расставлены турели', spots.length >= 8, `точек ${spots.length}`);
+
+  const spot = spots[0];
+  const turretTileBelow = w.get(spot.tx, spot.ty + 1);
+  ok('M8.1: турель стоит на металле, а не в воздухе',
+     turretTileBelow === TILE.METAL, `под турелью ${turretTileBelow}`);
+
+  // ставим игрока под ствол: турель должна заметить, прицелиться и выстрелить
+  const px = P.x, py = P.y, hp0 = P.health;
+  game.camera.snap(P);
+  w.updateChunks({ x: spot.tx * TS - 320, y: spot.ty * TS - 180, w: 640, h: 360 });
+  game.syncTurrets();
+  const near = game.turrets.find(t => Math.abs(t.tx - spot.tx) < 2 && Math.abs(t.ty - spot.ty) < 2);
+  ok('M8.1: турель попадает в список активных', !!near, `турелей ${game.turrets.length}`);
+  if (near) {
+    P.x = near.cx - P.w / 2;
+    P.y = (near.ty + 1) * TS - P.h;
+    P.vx = P.vy = 0;
+    P.invuln = 0;
+    game.camera.snap(P);
+    let sawBolt = false, sawAim = false;
+    for (let i = 0; i < 180 && P.health === hp0; i++) {
+      frames(1);
+      if (game.bolts.length) sawBolt = true;
+      if (near.aim > 0) sawAim = true;
+    }
+    ok('M8.1: турель прицеливается в игрока', sawAim);
+    ok('M8.1: турель стреляет болтом', sawBolt);
+    ok('M8.1: болт наносит урон', P.health < hp0, `hp ${hp0}→${P.health}`);
+  }
+
+  P.x = px; P.y = py; P.vx = P.vy = 0;
+  P.health = P.maxHealth;
+  P.invuln = 1;
+  game.bolts.length = 0;
+  game.camera.snap(P);
+  frames(2);
 }
 
 // ---------------------------------------------------------------- итог
