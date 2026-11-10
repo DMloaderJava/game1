@@ -471,6 +471,138 @@ ok('M8.2: журнал — экземпляр QuestLog', narrative.log instanceo
      fresh.repairStage === 3 && fresh.coreActive === true);
 }
 
+// ---------------------------------------------------------------- M9: арсенал из ремонта
+{
+  const stages = sandbox.window.Narrative.REPAIR_STAGES;
+  ok('M9: стадия 1 выдаёт ЛАЗЕРНЫЙ ПИСТОЛЕТ',
+     stages[1].reward.weapon === 'hasLaserPistol' &&
+     /ЛАЗЕРНЫЙ ПИСТОЛЕТ/.test(stages[1].reward.blueprint),
+     `${stages[1].reward.blueprint} → ${stages[1].reward.weapon}`);
+  ok('M9: стадия 2 выдаёт ГРАВИ-ПУШКУ',
+     stages[2].reward.weapon === 'hasGravityGun' &&
+     /ПУШКА/.test(stages[2].reward.blueprint),
+     `${stages[2].reward.blueprint} → ${stages[2].reward.weapon}`);
+
+  // стадии выдают именно эти флаги в настоящей игре
+  // (сейв сюжета от предыдущих проверок может уже держать стадию 3 —
+  // иначе ремонт просто нечего чинить, а флаги оружия останутся пустыми)
+  sandbox.localStorage.removeItem(N.KEY);
+  const g = new sandbox.Game(view);
+  g.update(CFG.step);
+  const p = g.player;
+  const s = g.narrative.ship;
+  p.hasLaserPistol = false;
+  p.hasGravityGun = false;
+  p.hasArmor = false;
+  p.hasLaser = false;
+  g.inventory.counts[TILE.FERRITE] = 60;
+  g.inventory.counts[TILE.STONE] = 60;
+  g.inventory.counts[8] = 6;
+
+  for (let i = 0; i < 3; i++) {
+    s.lastReward = null;
+    g.narrative.menu = 'ship';
+    g.narrative.menuSel = s.repairStage;
+    g.narrative.shipMenuAct(g);
+    // награду выдаёт Ship.update именно этого экземпляра игры: глобальный
+    // frames() крутит другой game, и оружие бы не выдалось
+    g.update(CFG.step);
+    g.update(CFG.step);
+  }
+  ok('M9: после стадии 0 в руках резак', p.hasLaser === true);
+  ok('M9: после ремонта есть лазерный пистолет', p.hasLaserPistol === true);
+  ok('M9: после ремонта есть грави-пушка', p.hasGravityGun === true);
+  ok('M9: старые флаги не мешают и не сбрасываются',
+     p.hasLaser === true && p.hasArmor === true,
+     `hasLaser=${p.hasLaser}, hasArmor=${p.hasArmor}`);
+  ok('M9: все три стадии пройдены', s.repairStage === 3, `stage=${s.repairStage}`);
+
+  // повторная выдача не ломается: игрок уже вооружён
+  const NShip = sandbox.window.Ship;
+  const dummy = new NShip();
+  dummy.repairStage = 1;
+  dummy.lastStage = 0;
+  p.hasLaserPistol = true;
+  const gave = sandbox.window.Narrative.giveWeapon(p, 'hasLaserPistol', 'hasArmor');
+  ok('M9: giveWeapon не выдаёт оружие повторно', gave === null, `вернул ${gave}`);
+  ok('M9: флаг не перезаписывается при повторной выдаче', p.hasLaserPistol === true);
+
+  // если игрок скрафтил оружие сам — сюжет только добавляет, что не хватает
+  sandbox.localStorage.removeItem(N.KEY);
+  const g3 = new sandbox.Game(view);
+  g3.update(CFG.step);
+  const p3 = g3.player;
+  p3.hasLaserPistol = true;          // «скрафтил сам»
+  p3.hasGravityGun = false;
+  g3.inventory.counts[TILE.FERRITE] = 60;
+  g3.inventory.counts[TILE.STONE] = 60;
+  g3.inventory.counts[8] = 6;
+  for (let i = 0; i < 3; i++) {
+    g3.narrative.menu = 'ship';
+    g3.narrative.menuSel = g3.narrative.ship.repairStage;
+    g3.narrative.shipMenuAct(g3);
+    g3.update(CFG.step);
+    g3.update(CFG.step);
+  }
+  ok('M9: чужой крафт не мешает сюжету и не падает',
+     p3.hasLaserPistol === true && p3.hasGravityGun === true && g3.narrative.ship.repairStage === 3,
+     `пистолет=${p3.hasLaserPistol}, пушка=${p3.hasGravityGun}, стадия=${g3.narrative.ship.repairStage}`);
+
+  // журнал: строка «вооружён», и она не наезжает на очки
+  const guns = sandbox.window.Narrative.weaponsOf(p3);
+  ok('M9: журнал знает, что игрок вооружён', guns.length >= 2, guns.join(' · '));
+}
+
+// ---------------------------------------------------------------- M9: сейв оружия
+{
+  const g = new sandbox.Game(view);
+  g.update(CFG.step);
+  const p = g.player;
+  p.hasLaserPistol = true;
+  p.hasGravityGun = false;
+  g.narrative.menu = 'ship';           // чтобы была открытая стадия
+  const st = g.narrative.state();
+  ok('M9: state() пишет снимок оружия', st.weapons && st.weapons.hasLaserPistol === true,
+     JSON.stringify(st.weapons));
+
+  // загрузка не затирает флаги, которые уже поставил сейв игры
+  const raw = { v: 1, log: { fragments: 0, archives: 0, score: 0, blueprints: [], started: true },
+                ship: { stage: 3, last: 3, core: false },
+                fragments: [0, 0, 0], archives: [0, 0, 0, 0, 0], nodes: [0, 0, 0],
+                weapons: { hasLaser: true, hasLaserPistol: true, hasGravityGun: true } };
+  sandbox.localStorage.setItem(sandbox.window.Narrative.KEY, JSON.stringify(raw));
+  const g2 = new sandbox.Game(view);
+  g2.player.hasLaserPistol = false;    // игра «не восстановила» флаг
+  g2.player.hasGravityGun = false;
+  g2.update(CFG.step);
+  ok('M9: load() досдаёт оружие по пройденным стадиям',
+     g2.player.hasLaserPistol === true && g2.player.hasGravityGun === true,
+     `пистолет=${g2.player.hasLaserPistol}, пушка=${g2.player.hasGravityGun}`);
+
+  // старый сейв M8.3: стадии пройдены, оружия в снимке нет вовсе
+  const raw3 = JSON.parse(JSON.stringify(raw));
+  delete raw3.weapons;
+  sandbox.localStorage.setItem(sandbox.window.Narrative.KEY, JSON.stringify(raw3));
+  const g5 = new sandbox.Game(view);
+  g5.player.hasLaserPistol = false;
+  g5.player.hasGravityGun = false;
+  g5.update(CFG.step);
+  ok('M9: старый сейв без снимка оружия догоняет награды',
+     g5.player.hasLaserPistol === true && g5.player.hasGravityGun === true,
+     `пистолет=${g5.player.hasLaserPistol}, пушка=${g5.player.hasGravityGun}`);
+
+  // и не снимает оружие, если его нет в снимке
+  const raw2 = JSON.parse(JSON.stringify(raw));
+  raw2.weapons = {};
+  sandbox.localStorage.setItem(sandbox.window.Narrative.KEY, JSON.stringify(raw2));
+  const g4 = new sandbox.Game(view);
+  g4.player.hasLaserPistol = true;     // игра уже загрузила флаг из своего сейва
+  g4.update(CFG.step);
+  ok('M9: load() не снимает оружие, которого нет в снимке',
+     g4.player.hasLaserPistol === true);
+  sandbox.localStorage.removeItem(sandbox.window.Narrative.KEY);
+}
+
 // ---------------------------------------------------------------- итог
 const passed = results.filter(r => r.pass).length;
 console.log('\n=== РЕЗУЛЬТАТ ===');

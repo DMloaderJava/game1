@@ -79,11 +79,19 @@ game.render();
 shot('43-touch-quest');
 
 // ---------- меню ремонта на узком экране ----------
-game.inventory.counts[TILE.FERRITE] = 24;
-game.inventory.counts[TILE.STONE] = 22;
+// Первая стадия уже пройдена, оружие в руках: проверяем самый длинный
+// текст награды «→ ЛАЗЕРНЫЙ ПИСТОЛЕТ» — влезает ли он на телефоне
+N.ship.repairStage = 1;
+N.ship.lastStage = 1;
+P.hasLaser = true;
+P.hasLaserPistol = true;
+N.log.blueprints = ['АВАРИЙНЫЙ РЕЗАК'];
+N.log.score = 500;
+game.inventory.counts[TILE.FERRITE] = 34;
+game.inventory.counts[TILE.STONE] = 42;
 N.ship.interact(game);
 N.menuT = 1;
-N.menuSel = 0;
+N.menuSel = 1;
 game.render();
 const box = N.menuLayout(game);
 console.log('панель ремонта: ' + box.w.toFixed(0) + '×' + box.h.toFixed(0) +

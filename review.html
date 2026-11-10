@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>GRAVITY: VOID — ревью M8.2 «Сюжет и Ремонт» и M8.3 «Слияние Мира и Сюжета»</title>
+<title>GRAVITY: VOID — ревью M8.2 «Сюжет и Ремонт», M8.3 «Слияние Мира и Сюжета» и M9 «Арсенал и Угрозы»</title>
 <style>
   :root {
     --bg: #070910;
@@ -156,22 +156,26 @@
 
 <header class="hero">
   <div class="wrap">
-    <div class="eyebrow">GRAVITY: VOID · протокол ревью · M8.2 → M8.3</div>
-    <h1>Сюжет и Ремонт <span class="sub">— ревью · M8.2 + M8.3</span></h1>
+    <div class="eyebrow">GRAVITY: VOID · протокол ревью · M8.2 → M8.3 → M9</div>
+    <h1>Сюжет и Ремонт <span class="sub">— ревью · M8.2 + M8.3 + M9</span></h1>
     <div class="verdict" style="background:linear-gradient(90deg,rgba(86,209,143,0.12),rgba(86,209,143,0.02));border-color:rgba(86,209,143,0.35)">
       <span class="tag" style="background:var(--ok);color:#04170d">ПРИНЯТА</span>
       <p style="color:#d6f3e3">Сюжетный слой вынесен в <b>narrative.js</b> и не тронул игру ни на строку:
          пять обёрток над <code>Game.prototype</code> вместо врезки в код. Корабль с тремя стадиями
          ремонта, журнал с «Ядро: 1/3», пять архивов, три фрагмента и резонит — всё на месте,
-         76/76 новых проверок, старые 344/344 целы. <b>M8.3:</b> корабль переехал на спавн
+         91/91 новых проверок, старые 344/344 целы. <b>M8.3:</b> корабль переехал на спавн
          (люк — 20-й тайл), резонит стал штатным ресурсом игры, заглушки
-         <code>shipNear</code>/<code>drawShip</code> убраны — ссылок на <code>game.ship</code> нет.</p>
+         <code>shipNear</code>/<code>drawShip</code> убраны — ссылок на <code>game.ship</code> нет.
+         <b>M9:</b> награда за ремонт — оружие в руках: стадия «ЗАЛАТАТЬ КОРПУС» выдаёт
+         <code>hasLaserPistol</code>, «ДВИГАТЕЛЬ» — <code>hasGravityGun</code>; повторная
+         выдача не перезаписывает то, что игрок скрафтил сам, а журнал и меню прямо
+         показывают, чем он вооружён.</p>
     </div>
 
     <div class="chips" id="chips">
       <span class="chip" id="chip-shots"><span class="led"></span><span>скриншоты: проверяю…</span></span>
       <span class="chip" id="chip-game"><span class="led"></span><span>игра: не проверена</span></span>
-      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>сюжет: 76 / 76</span></span>
+      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>сюжет: 91 / 91</span></span>
       <span class="chip"><span class="led" style="background:var(--ok)"></span><span>игра: 344 / 344</span></span>
       <span class="chip"><span class="led" style="background:var(--ok)"></span><span>зависимостей: 0</span></span>
     </div>
@@ -183,6 +187,7 @@
   <a href="#connect">Подключение</a>
   <a href="#criteria">Критерии M8.2</a>
   <a href="#merge">M8.3</a>
+  <a href="#arsenal">M9</a>
   <a href="#works">Что работает</a>
   <a href="#defects">Дефекты</a>
   <a href="#scope">Скоуп</a>
@@ -366,8 +371,71 @@
     </div>
   </section>
 
+  <section id="arsenal">
+    <h2><span class="num">05</span>M9 — арсенал и угрозы</h2>
+    <p class="hint">Ремонт перестал быть галочкой в журнале: каждая стадия кладёт в руки оружие,
+       которым стреляет боевая система. Файл игры по-прежнему не тронут ни на строку.</p>
+
+    <div class="grid g2">
+      <div class="card ok">
+        <h3><span class="dot"></span>Награда — оружие, а не рецепт</h3>
+        <ul class="tight sm">
+          <li>Стадия 1 «ЗАЛАТАТЬ КОРПУС» → <code>player.hasLaserPistol = true</code>,
+              рецепт «ЛАЗЕРНЫЙ ПИСТОЛЕТ» (был «ПРИВОД КОРПУСА»).</li>
+          <li>Стадия 2 «ДВИГАТЕЛЬ» → <code>player.hasGravityGun = true</code>,
+              рецепт «ГРАВИ-ПУШКА».</li>
+          <li>Старые флаги <code>hasLaser</code> / <code>hasArmor</code> выставляются рядом:
+              по ним HUD игры рисует иконки экипировки. Конфликта нет — проверено тестом.</li>
+        </ul>
+      </div>
+      <div class="card ok">
+        <h3><span class="dot"></span>Повторная выдача не ломается</h3>
+        <ul class="tight sm">
+          <li>Одна точка выдачи — <code>Narrative.giveWeapon(player, weapon, legacy)</code>
+              с проверкой <code>player[weapon] !== true</code>.</li>
+          <li>Игрок скрафтил лазерный пистолет сам → функция возвращает <code>null</code>,
+              флаг не перезаписывается, в уведомлении нет ложного «получил».</li>
+          <li>Тест: полный ремонт выдаёт оба флага; повторный вызов — <code>null</code>.</li>
+        </ul>
+      </div>
+      <div class="card ok">
+        <h3><span class="dot"></span>Сейв не затирает боевые флаги</h3>
+        <ul class="tight sm">
+          <li><code>state()</code> пишет снимок <code>weapons</code> по пройденным стадиям.</li>
+          <li><code>load()</code> только <b>досдаёт</b> недостающее: оружие не снимается никогда —
+              ни когда его нет в снимке, ни когда игра восстановила флаг сама.</li>
+          <li>Старый сейв M8.3 (стадии есть, блока <code>weapons</code> нет) догоняет награду
+              при загрузке.</li>
+        </ul>
+      </div>
+      <div class="card ok">
+        <h3><span class="dot"></span>Видно, что игрок вооружён</h3>
+        <ul class="tight sm">
+          <li>Журнал: «вооружён: ЛАЗЕР +1» вместо «корабль 2/3». Карточка расширена
+              178 → 200 px, длинная строка режется по словам и не наезжает на очки.</li>
+          <li>Меню ремонта: <code>→ ЛАЗЕРНЫЙ ПИСТОЛЕТ</code> справа от цены,
+              подвал «в руках: …» и «открыто: N».</li>
+          <li>Финальная панель: «арсенал: ГРАВИ-ПУШКА · ЛАЗЕР · РЕЗАК».</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card warn" style="margin-top:16px">
+      <h3><span class="dot"></span>Две оговорки, которые нужно знать ревьюеру</h3>
+      <ul class="tight sm">
+        <li>В <code>gravity-void.html</code> этой ветки поля <code>hasLaserPistol</code> ещё нет:
+            боевая система Агента 1 сюда не влита, игра знает только <code>hasGravityGun</code>.
+            <code>narrative.js</code> ставит флаг сам, поэтому награда работает и на текущей
+            сборке, а когда правки приедут — найдёт поле уже существующим.</li>
+        <li>Штатный сейв игры сохраняет из экипировки только <code>d.player.gun</code>.
+            Лазерный пистолет держит снимок <code>weapons</code> в сейве сюжета — после F5
+            оружие не пропадает.</li>
+      </ul>
+    </div>
+  </section>
+
   <section id="works">
-    <h2><span class="num">05</span>Что работает</h2>
+    <h2><span class="num">06</span>Что работает</h2>
 
     <div class="grid g2">
       <div class="card ok">
@@ -437,7 +505,7 @@
   </section>
 
   <section id="defects">
-    <h2><span class="num">06</span>Дефекты и ограничения</h2>
+    <h2><span class="num">07</span>Дефекты и ограничения</h2>
     <table>
       <thead><tr><th>Что</th><th>Почему</th><th>Насколько важно</th></tr></thead>
       <tbody>
@@ -459,17 +527,23 @@
             <td>Фрейм грузит <code>gravity-void.html</code> без строки подключения — так и задумано.
                 С сюжетом — после правки из §02.</td>
             <td><span class="pill">ожидаемо</span></td></tr>
+        <tr><td><b>В игре пока нет <code>hasLaserPistol</code> (M9)</b></td>
+            <td>Боевая система Агента 1 в эту ветку не влита: игра знает только
+                <code>hasGravityGun</code> и сохраняет из экипировки лишь <code>d.player.gun</code>.
+                Сюжет ставит флаг сам и держит его в снимке <code>weapons</code> своего сейва,
+                поэтому награда работает и после F5. Когда правки приедут — конфликта не будет.</td>
+            <td><span class="pill warn">внешнее</span></td></tr>
         <tr><td><b>Формат рецептов «свой»</b></td>
-            <td>Открытые рецепты — строки в журнале плюс предмет в руках игрока
-                (<code>hasLaser/hasArmor/hasGravityGun</code>). В меню крафта игры новые рецепты
-                не появляются: это потребовало бы правки <code>CFG.recipes</code>.</td>
+            <td>Открытые рецепты — строки в журнале плюс оружие в руках игрока
+                (<code>hasLaser / hasLaserPistol / hasGravityGun</code>, M9). В меню крафта игры
+                новые рецепты не появляются: это потребовало бы правки <code>CFG.recipes</code>.</td>
             <td><span class="pill warn">известно</span></td></tr>
       </tbody>
     </table>
   </section>
 
   <section id="scope">
-    <h2><span class="num">07</span>Скоуп и решения</h2>
+    <h2><span class="num">08</span>Скоуп и решения</h2>
     <table>
       <thead><tr><th>Что</th><th>Почему так</th><th>Что делать</th></tr></thead>
       <tbody>
@@ -509,7 +583,7 @@
   </section>
 
   <section id="questions">
-    <h2><span class="num">08</span>Запросы ревью</h2>
+    <h2><span class="num">09</span>Запросы ревью</h2>
     <div class="grid g2">
       <div class="card">
         <h3>1. Как реализован <code>Ship.interact / update</code> без правки игры?</h3>
@@ -540,11 +614,11 @@
   </section>
 
   <section id="shots">
-    <h2><span class="num">09</span>Скриншоты</h2>
+    <h2><span class="num">10</span>Скриншоты</h2>
     <div class="shots" id="shot-grid">
       <figure class="shot">
         <img src="screenshots/32-quest-start.png" alt="Старт с журналом квестов" loading="lazy">
-        <figcaption><b>Старт (M8.3)</b>Корабль стоит прямо на спавне: корпус 16–25, люк — 20-й тайл, под брюхом просвет для игрока и ящиков.</figcaption>
+        <figcaption><b>Старт (M8.3)</b>Корабль стоит прямо на спавне: корпус 16–25, люк — 20-й тайл, под брюхом просвет для игрока и ящиков. Внизу — журнал «Ядро: 0/3» и «корабль 0/3»: оружия ещё нет.</figcaption>
       </figure>
       <figure class="shot">
         <img src="screenshots/33-ship.png" alt="Корабль и подсказка ремонта" loading="lazy">
@@ -556,7 +630,7 @@
       </figure>
       <figure class="shot">
         <img src="screenshots/35-ship-menu-ready.png" alt="Меню ремонта после двух стадий" loading="lazy">
-        <figcaption><b>Две стадии готовы</b>Галочки, «Двигатель — не хватает 2 × RESONITE», рецепты в подвале.</figcaption>
+        <figcaption><b>Две стадии готовы (M9)</b>Справа от цены — обещанное оружие («→ ЛАЗЕРНЫЙ ПИСТОЛЕТ»), внизу «в руках: ЛАЗЕР · РЕЗАК · БРОНЯ», «Двигатель — не хватает 2 × RESONITE».</figcaption>
       </figure>
       <figure class="shot">
         <img src="screenshots/36-fragment.png" alt="Фрагмент ядра" loading="lazy">
@@ -584,15 +658,15 @@
       </figure>
       <figure class="shot">
         <img src="screenshots/42-ending.png" alt="Финальная панель" loading="lazy">
-        <figcaption><b>Финальный аккорд</b>«Ядро собрано. Корабль слушает.» и итоговые очки.</figcaption>
+        <figcaption><b>Финальный аккорд (M9)</b>«Ядро собрано. Корабль слушает.», итоговые очки и строка «арсенал: ГРАВИ-ПУШКА · ЛАЗЕР · РЕЗАК · БРОНЯ».</figcaption>
       </figure>
       <figure class="shot phone">
         <img src="screenshots/43-touch-quest.png" alt="Сюжет на телефоне" loading="lazy">
-        <figcaption><b>Телефон</b>Карточка журнала над джойстиком, кнопки не перекрыты (430×780).</figcaption>
+        <figcaption><b>Телефон (M9)</b>Карточка журнала над джойстиком: «Ядро: 0/3», «вооружён: ЛАЗЕР +1», очки — кнопки не перекрыты (430×780).</figcaption>
       </figure>
       <figure class="shot phone">
         <img src="screenshots/44-touch-ship-menu.png" alt="Меню ремонта на телефоне" loading="lazy">
-        <figcaption><b>Телефон · ремонт</b>Панель ужата до 0.78, все четыре строки и цены видны.</figcaption>
+        <figcaption><b>Телефон · ремонт (M9)</b>Панель ужата до 0.78: строка «30 STONE · 10 FERRITE → ЛАЗЕРНЫЙ ПИСТОЛЕТ» влезает целиком, внизу «в руках» и «открыто».</figcaption>
       </figure>
       <figure class="shot phone">
         <img src="screenshots/45-touch-fragment.png" alt="Фрагмент на телефоне" loading="lazy">
@@ -610,10 +684,10 @@
   </section>
 
   <section id="verify">
-    <h2><span class="num">10</span>Как проверено</h2>
-    <pre><span class="c"># сюжет: 76 проверок поверх настоящей игры (M8.2 + M8.3)</span>
+    <h2><span class="num">11</span>Как проверено</h2>
+    <pre><span class="c"># сюжет: 91 проверка поверх настоящей игры (M8.2 + M8.3 + M9)</span>
 cd tools
-node verify-narrative.mjs   <span class="c"># → 76/76 проверок пройдено</span>
+node verify-narrative.mjs   <span class="c"># → 91/91 проверок пройдено</span>
 
 <span class="c"># игра без сюжета — не сломана</span>
 node verify.mjs             <span class="c"># → 344/344 проверок пройдено</span>
@@ -623,12 +697,12 @@ node narrative-shots.mjs    <span class="c"># → 11 кадров ПК (32…42)
 node narrative-touch-shots.mjs               <span class="c"># → 4 кадра телефона (43…46)</span>
 SUF=-land TW=900 TH=430 node narrative-touch-shots.mjs  <span class="c"># → +4 в ландшафте</span>
 
-node perf.mjs               <span class="c"># → p50 5.84 мс, p95 7.24, p99 12.55</span>
+node perf.mjs               <span class="c"># → p50 6.35 мс, p95 7.19, p99 9.36</span>
 node verify-review-page.mjs <span class="c"># → структура страницы и запуск игры во фрейме</span></pre>
 
     <div class="grid g2" style="margin-top:14px">
       <div class="card">
-        <h3>Что покрыто в M8.2 + M8.3</h3>
+        <h3>Что покрыто в M8.2 + M8.3 + M9</h3>
         <ul class="tight sm">
           <li>Подключение: сюжет есть, классы доступны, терминалы игры на месте.</li>
           <li>Корабль: ровная площадка под корпусом, меню по <code>E</code>, цены 20+10 / 30+10 / 5.</li>
@@ -640,6 +714,11 @@ node verify-review-page.mjs <span class="c"># → структура стран�
           <li>Отрисовка не падает; меню ремонта влезает в экран, карточка журнала не перекрывает кнопки и джойстик.</li>
           <li>M8.3: корабль на спавне и не пересекает игрока, меню по E у люка на тайле 20,
               нет <code>game.ship</code> и заглушек, резонит — штатный ресурс, добыча без <code>NaN</code>.</li>
+          <li>M9: стадии объявляют <code>hasLaserPistol</code> / <code>hasGravityGun</code> и реально
+              их выставляют; повторная выдача возвращает <code>null</code> и не перезаписывает флаг;
+              оружие, скрафченное игроком заранее, не мешает ремонту; <code>state()</code> пишет снимок,
+              <code>load()</code> досдаёт оружие и не снимает его; старый сейв без блока
+              <code>weapons</code> догоняет награду.</li>
         </ul>
       </div>
       <div class="card">
@@ -664,8 +743,9 @@ node verify-review-page.mjs <span class="c"># → структура стран�
       <a class="btn ghost" href="M82.md">M82.md</a>
       <a class="btn ghost" href="narrative.js">narrative.js</a>
     </div>
-    <p>M8.2 + M8.3: сюжетный слой <code>narrative.js</code> — корабль на спавне, журнал,
-       пять архивов, три фрагмента ядра. Игра не тронута: 344/344 старых проверок и 76/76 новых.</p>
+    <p>M8.2 + M8.3 + M9: сюжетный слой <code>narrative.js</code> — корабль на спавне, журнал,
+       пять архивов, три фрагмента ядра, оружие за ремонт. Игра не тронута:
+       344/344 старых проверок и 91/91 новых.</p>
   </footer>
 </main>
 <script>

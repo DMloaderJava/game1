@@ -266,6 +266,10 @@
      аккорд, который открывается только с тремя фрагментами ядра.
      ------------------------------------------------------------ */
 
+  // Награда стадии — не только рецепт в журнале, но и реальное оружие в руках.
+  // weapon — имя поля игрока из боевой системы (M9, Агент 1); legacy — старый
+  // флаг той же сборки, оставлен для совместимости и для HUD игры, который
+  // рисует экипировку по hasLaser / hasArmor / hasGravityGun.
   var REPAIR_STAGES = [
     {
       id: 0,
@@ -273,7 +277,8 @@
       done: 'Питание есть',
       cost: { 3: 20, 2: 10 },                       // 20 FERRITE + 10 STONE
       costText: '20 FERRITE · 10 STONE',
-      reward: { blueprint: 'АВАРИЙНЫЙ РЕЗАК', score: 500 },
+      reward: { blueprint: 'АВАРИЙНЫЙ РЕЗАК', score: 500,
+                weapon: 'hasLaser',       label: 'РЕЗАК',      legacy: 'hasLaser' },
       hint: 'реактор держит заряд — резак снова режет'
     },
     {
@@ -282,8 +287,9 @@
       done: 'Корпус цел',
       cost: { 2: 30, 3: 10 },                       // 30 STONE + 10 FERRITE
       costText: '30 STONE · 10 FERRITE',
-      reward: { blueprint: 'ПРИВОД КОРПУСА', score: 750 },
-      hint: 'пластины встают на место — костюм крепче'
+      reward: { blueprint: 'ЛАЗЕРНЫЙ ПИСТОЛЕТ', score: 750,
+                weapon: 'hasLaserPistol', label: 'ЛАЗЕР',      legacy: 'hasArmor' },
+      hint: 'в бортовом сейфе нашёлся лазерный пистолет'
     },
     {
       id: 2,
@@ -291,10 +297,19 @@
       done: 'Двигатель жив',
       cost: { 8: 5 },                               // 5 RESONITE
       costText: '5 RESONITE',
-      reward: { blueprint: 'РЕЗОНАТОР', score: 1000 },
+      reward: { blueprint: 'ГРАВИ-ПУШКА', score: 1000,
+                weapon: 'hasGravityGun',  label: 'ГРАВИ-ПУШКА', legacy: 'hasGravityGun' },
       hint: 'резонанс в норме — гравитационная пушка в руках'
     }
   ];
+
+  // Человеческие названия флагов — для карточки журнала и меню
+  var WEAPON_NAMES = {
+    hasLaser: 'РЕЗАК',
+    hasLaserPistol: 'ЛАЗЕР',
+    hasGravityGun: 'ГРАВИ-ПУШКА',
+    hasArmor: 'БРОНЯ'
+  };
 
   class Ship {
     constructor() {
@@ -382,17 +397,20 @@
             q.unlock(st.reward.blueprint);
             q.addScore(st.reward.score);
           }
-          // Рецепт — не строчка в списке, а реальная вещь в руках
+          // Рецепт — не строчка в списке, а реальная вещь в руках.
+          // Если игрок уже скрафтил это оружие сам, второй раз не выдаём
+          // и не перезаписываем флаг — иначе можно случайно снять эффект
           var p = game.player;
-          if (p) {
-            if (this.lastStage === 0) p.hasLaser = true;
-            else if (this.lastStage === 1) p.hasArmor = true;
-            else if (this.lastStage === 2) p.hasGravityGun = true;
-          }
+          var gave = null;
+          if (p) gave = Narrative.giveWeapon(p, st.reward.weapon, st.reward.legacy);
           if (game.notice) {
-            game.notice(st.reward.blueprint + ' — рецепт открыт, +' + st.reward.score + ' очков', '#9bf7b4');
+            var tail = gave ? ' — ' + gave + ' в руках' : '';
+            game.notice(st.reward.blueprint + ' — рецепт открыт, +' + st.reward.score + ' очков' + tail,
+                        '#9bf7b4');
           }
-          reward = { stage: this.lastStage + 1, blueprint: st.reward.blueprint, score: st.reward.score };
+          reward = { stage: this.lastStage + 1, blueprint: st.reward.blueprint,
+                     score: st.reward.score, weapon: st.reward.weapon,
+                     label: st.reward.label, given: !!gave };
         }
         this.lastStage++;
       }
@@ -604,13 +622,42 @@
         Narrative.ensureResonite(this.game);
         this.game.inventory.counts[RESONITE] = d.resonite;
       }
+
+      // Оружие из наград: сейв игры пишет hasLaserPistol / hasGravityGun сам,
+      // и снимать его отсюда нельзя. Досдаём только то, что положено по уже
+      // пройденным стадиям: так сейв времён M8.3 (стадии есть, оружия нет)
+      // догоняет новую награду. Явное `false` в снимке не выдаём — это след
+      // того, что игрок с этим оружием уже расстался
+      if (this.game && this.game.player) {
+        var snap = d.weapons || {};
+        for (var wi = 0; wi < REPAIR_STAGES.length; wi++) {
+          var wstage = REPAIR_STAGES[wi];
+          if (wi < this.ship.repairStage && snap[wstage.reward.weapon] !== false) {
+            Narrative.giveWeapon(this.game.player, wstage.reward.weapon, wstage.reward.legacy);
+          }
+        }
+      }
       return true;
+    }
+
+    // Какое оружие положено игроку по пройденным стадиям ремонта
+    weaponsSnapshot() {
+      var out = {};
+      var p = this.game && this.game.player;
+      for (var i = 0; i < this.ship.repairStage && i < REPAIR_STAGES.length; i++) {
+        var w = REPAIR_STAGES[i].reward.weapon;
+        out[w] = !!(p && p[w]);
+      }
+      return out;
     }
 
     state() {
       return {
         v: 1,
         resonite: this.game && this.game.inventory ? (this.game.inventory.counts[RESONITE] || 0) : 0,
+        // Снимок досдачи оружия: не источник истины (её хранит сейв игры),
+        // а страховка на случай, если боевые флаги не дожили до загрузки
+        weapons: this.weaponsSnapshot(),
         log: this.log.state(),
         ship: this.ship.state(),
         fragments: this.fragments.map(function (f) { return f.taken ? 1 : 0; }),
@@ -805,7 +852,9 @@
     // над джойстиком: там оба угла заняты, но эти две зоны свободны всегда.
     cardLayout(game) {
       var touch = !!game.isTouch;
-      var w = 178 * (game.hudScale || 1);
+      // Ширина с запасом: в карточке теперь ещё и строка «вооружён: …»,
+      // иначе на ПК она упиралась в очки через 8 символов
+      var w = 200 * (game.hudScale || 1);
       var h = 76 * (game.hudScale || 1);
       var x = 14;
       var y;
@@ -1262,15 +1311,36 @@
         else { ctx.strokeStyle = 'rgba(140,175,215,0.4)'; ctx.lineWidth = 1; ctx.stroke(); }
       }
 
-      // Нижняя строка: стадия корабля слева, очки справа
+      // Нижняя строка: если в руках есть оружие — пишем, какое. Иначе стадию
+      // корабля. Ремонт должен читаться как «стало сильнее», а не как галочка
       ctx.font = fs(9);
-      var shipLine = this.ship.coreActive ? 'кораблю ядро' : 'корабль ' + this.ship.repairStage + '/3';
-      ctx.fillStyle = 'rgba(196,214,236,0.7)';
+      var guns = Narrative.weaponsOf(game.player);
+      var shipLine;
+      if (guns.length) {
+        // В карточке — только самое сильное оружие: перечисление
+        // «ЛАЗЕР · РЕЗАК» не влезало и резалось многоточием. Полный
+        // арсенал виден в меню ремонта и на финальной панели
+        shipLine = 'вооружён: ' + guns[0] + (guns.length > 1 ? ' +' + (guns.length - 1) : '');
+        ctx.fillStyle = 'rgba(255,196,122,0.9)';
+      } else {
+        shipLine = this.ship.coreActive ? 'кораблю ядро' : 'корабль ' + this.ship.repairStage + '/3';
+        ctx.fillStyle = 'rgba(196,214,236,0.7)';
+      }
+      var scoreText = q.score + ' очк.';
+      var scoreW = ctx.measureText(scoreText).width;
+      // Длинная строка оружия не должна наезжать на очки — обрезаем по словам
+      var maxW = b.w - 24 - 12 - scoreW;
+      if (ctx.measureText(shipLine).width > maxW) {
+        while (shipLine.length > 4 && ctx.measureText(shipLine + '…').width > maxW) {
+          shipLine = shipLine.slice(0, -1);
+        }
+        shipLine += '…';
+      }
       ctx.fillText(shipLine, b.x + 12, b.y + 57);
 
       ctx.textAlign = 'right';
       ctx.fillStyle = 'rgba(255,192,122,0.85)';
-      ctx.fillText(q.score + ' очк.', b.x + b.w - 12, b.y + 57);
+      ctx.fillText(scoreText, b.x + b.w - 12, b.y + 57);
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
     }
@@ -1430,7 +1500,15 @@
 
           ctx.font = '11px ' + (Narrative.font || 'monospace');
           ctx.fillStyle = 'rgba(170,195,225,0.72)';
-          ctx.fillText(st.costText, 50, rowY + rowH / 2 + 10);
+          // Цена слева, награда справа от неё: «→ ЛАЗЕРНЫЙ ПИСТОЛЕТ».
+          // Ремонт должен обещать не галочку, а оружие
+          var price = st.costText;
+          ctx.fillText(price, 50, rowY + rowH / 2 + 10);
+          if (st.reward.label) {
+            var pw = ctx.measureText(price).width + 14;
+            ctx.fillStyle = done ? 'rgba(150,175,205,0.45)' : 'rgba(255,196,122,0.9)';
+            ctx.fillText('→ ' + st.reward.blueprint, 50 + pw, rowY + rowH / 2 + 10);
+          }
 
           // справа: состояние
           ctx.textAlign = 'right';
@@ -1475,11 +1553,17 @@
         }
       }
 
-      // подвал: подсказка и открытые рецепты
+      // подвал: что уже в руках и какие рецепты открыты
       ctx.font = '10px ' + (Narrative.font || 'monospace');
-      ctx.fillStyle = 'rgba(150,180,215,0.6)';
-      var bp = this.log.blueprints.length ? 'рецепты: ' + this.log.blueprints.join(' · ') : 'рецептов пока нет';
-      ctx.fillText(bp, 20, dh - 10);
+      var guns = Narrative.weaponsOf(game.player);
+      ctx.fillStyle = guns.length ? 'rgba(255,196,122,0.85)' : 'rgba(150,180,215,0.6)';
+      ctx.fillText(guns.length ? 'в руках: ' + guns.join(' · ') : 'в руках: пусто', 20, dh - 10);
+
+      ctx.textAlign = 'right';
+      ctx.fillStyle = 'rgba(150,180,215,0.5)';
+      var bp = this.log.blueprints.length ? 'открыто: ' + this.log.blueprints.length : 'рецептов пока нет';
+      ctx.fillText(bp, dw - 20, dh - 10);
+      ctx.textAlign = 'left';
 
       ctx.restore();
       ctx.textAlign = 'left';
@@ -1536,13 +1620,18 @@
         ctx.fillText(lines[i], x + 34, y + 92 + i * 22);
       }
 
+      var guns = Narrative.weaponsOf(game.player);
       ctx.font = 'bold 13px ' + (Narrative.font || 'monospace');
       ctx.fillStyle = '#9bf7b4';
       ctx.fillText('очки: ' + this.log.score, x + 34, y + h - 54);
-
       ctx.font = '11px ' + (Narrative.font || 'monospace');
+      ctx.fillStyle = 'rgba(255,196,122,0.85)';
+      ctx.fillText(guns.length ? 'арсенал: ' + guns.join(' · ') : 'арсенал: пусто',
+                   x + 34, y + h - 38);
+
+      ctx.font = '10px ' + (Narrative.font || 'monospace');
       ctx.fillStyle = 'rgba(150,180,215,0.7)';
-      ctx.fillText('Esc / Enter — продолжить', x + 34, y + h - 30);
+      ctx.fillText('Esc / Enter — продолжить', x + 34, y + h - 20);
       ctx.textAlign = 'left';
     }
 
@@ -1592,6 +1681,32 @@
   // localStorage бывает и на window, и на глобальном объекте (так делает
   // headless-песочница в tools/verify-narrative.mjs). Берём то, что найдётся,
   // и не падаем, если хранилища нет вовсе — приватный режим
+  // Выдать оружие из награды за стадию. Возвращает его название, если
+  // оно реально появилось в руках, и null, если уже было.
+  //
+  // Проверка `if (!p[flag])` здесь принципиальна: оружие можно скрафтить
+  // самому, и тогда сюжет не должен ни перезаписывать флаг, ни врать
+  // в уведомлении «получил». Старые флаги (hasLaser/hasArmor) выставляем
+  // без проверки: HUD игры рисует по ним иконки экипировки.
+  Narrative.giveWeapon = function (player, weapon, legacy) {
+    if (!player || !weapon) return null;
+    var fresh = player[weapon] !== true;
+    if (fresh) player[weapon] = true;
+    if (legacy && legacy !== weapon && player[legacy] !== true) player[legacy] = true;
+    return fresh ? (WEAPON_NAMES[weapon] || weapon) : null;
+  };
+
+  // Что сейчас в руках — для карточки журнала. Порядок: от сильного к слабому
+  Narrative.weaponsOf = function (player) {
+    var out = [];
+    if (!player) return out;
+    if (player.hasGravityGun) out.push(WEAPON_NAMES.hasGravityGun);
+    if (player.hasLaserPistol) out.push(WEAPON_NAMES.hasLaserPistol);
+    if (player.hasLaser) out.push(WEAPON_NAMES.hasLaser);
+    if (player.hasArmor) out.push(WEAPON_NAMES.hasArmor);
+    return out;
+  };
+
   // Счётчик резонита в инвентаре. Когда игра объявляет RESONITE в CFG.resources
   // (M8.3, правки Агента 1), Inventory заводит ключ сам, и эта функция ничего
   // не делает. Она нужна только сборкам, где резонита в CFG.resources ещё нет:

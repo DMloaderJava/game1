@@ -99,9 +99,13 @@ game.render();
 shot('34-ship-menu');
 
 // ---------- меню ремонта: ресурсы есть, вторая стадия собрана ----------
+// M9: ремонт выдаёт оружие — ставим те же флаги, что выдал бы Ship.update
 N.ship.repairStage = 2;
 N.ship.lastStage = 2;
-N.log.blueprints = ['АВАРИЙНЫЙ РЕЗАК', 'ПРИВОД КОРПУСА'];
+P.hasLaser = true;
+P.hasLaserPistol = true;
+P.hasArmor = true;
+N.log.blueprints = ['АВАРИЙНЫЙ РЕЗАК', 'ЛАЗЕРНЫЙ ПИСТОЛЕТ'];
 N.log.score = 1250;
 game.inventory.counts[TILE.FERRITE] = 30;
 game.inventory.counts[TILE.STONE] = 46;
@@ -151,12 +155,17 @@ shot('40-resonite');
 N.log.fragments = 3;
 N.ship.repairStage = 3;
 N.ship.lastStage = 3;
+P.hasGravityGun = true;
 put(N.ship.doorX / TS, N.ship.floorRow - 1);
 frames(2);
 shot('41-ship-repaired');
 
 N.ship.activateCore(game);
 N.endingT = 1;
+// уведомление о последнем фрагменте живёт пару секунд и просвечивало
+// сквозь финальную панель — гасим его для чистого кадра
+game.noticeT = 0;
+game.noticeText = '';
 game.render();
 shot('42-ending');
 
