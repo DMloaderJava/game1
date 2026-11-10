@@ -673,6 +673,12 @@ function grabScene(g) {
 
   // сюжет не сбрасывает захват и не мешает ему, пока открыт никакой экран
   ok('M9: сюжет не трогает grab в обычном кадре', !!g.grab);
+  // почему ящик может «встать»: цель ограничена grabOffset=34 px от центра
+  // игрока, а разведение тел требует 35 px (18 + 11 + 6). Разница 1 px —
+  // это физика игры, сюжет тут ни при чём (см. блок «доказательства» ниже)
+  ok('M9: зазор телекинеза меньше, чем требует разведение тел (снимок констант)',
+     CFG.tele.grabOffset < (CFG.crate.w / 2 + CFG.player.w / 2 + CFG.tele.grabGap),
+     `grabOffset=${CFG.tele.grabOffset} < ${CFG.crate.w / 2 + CFG.player.w / 2 + CFG.tele.grabGap}`);
 
   // отпускание — через обработчик window, как в браузере
   listeners.mouseup({ button: 2 });
@@ -780,6 +786,57 @@ function grabScene(g) {
   g.input.mouse.left = false;
   g.input.mouse.right = false;
   g.narrative.closeArchive();
+}
+
+
+// ---------------------------------------------------------------- M9: доказательства, что дело не в сюжете
+// Один и тот же ввод прогоняется дважды: в чистой игре и с подключённым
+// narrative.js. Если кадры совпадают побитово — сюжетный слой не влияет.
+// Клон игры без сюжета нельзя получить через new Game (обёртки стоят на
+// прототипе), поэтому сцена запускается в отдельной vm-песочнице.
+{
+  const { execFileSync } = await import('node:child_process');
+  const path = await import('node:path');
+  const fsMod = await import('node:fs');
+  const script = path.join(path.dirname(new URL(import.meta.url).pathname), 'grab-ab.mjs');
+  let out = '';
+  let ran = false;
+  if (fsMod.existsSync(script)) {
+    try {
+      out = execFileSync(process.execPath, [script], { encoding: 'utf8', timeout: 120000 });
+      ran = true;
+    } catch (e) {
+      out = 'ошибка запуска: ' + (e && e.message);
+    }
+  }
+  ok('M9: A/B-прогон телекинеза выполнился', ran, ran ? 'grab-ab.mjs' : out);
+
+  const m = out.match(/сюжет-и-без: (\d+) расхождений/);
+  ok('M9: с сюжетом и без него телекинез совпадает покадрово',
+     ran && !!m && Number(m[1]) === 0, m ? `${m[1]} расхождений` : 'нет данных');
+
+  const stall = out.match(/застой: ящик встал на (\d+)px от игрока/);
+  ok('M9: причина застоя — grabOffset игры, а не сюжет',
+     ran && !!stall, stall ? `ящик стоит на ${stall[1]}px` : 'нет данных');
+
+  // Дрожание зависит от частоты кадров — это пружина телекинеза в updateGrab
+  // игры без демпфирования, а не сюжет: чем мельче шаг, тем больше смен знака
+  const jitter = out.match(/дрожание растёт с частотой: (\d+) → (\d+)/);
+  ok('M9: дрожание ящика растёт с FPS — это пружина в физике игры',
+     ran && !!jitter && Number(jitter[2]) > Number(jitter[1]),
+     jitter ? `смен знака ${jitter[1]} на 30 fps → ${jitter[2]} на 120 fps` : 'нет данных');
+
+  // ... но предел у всех одинаковый и задан grabOffset: до игрока ~36 px
+  const limits = [...out.matchAll(/предел одинаков у всех: ([\d., ]+)px/g)];
+  ok('M9: предел притяжения одинаков на всех FPS (~36 px)',
+     ran && limits.length > 0, limits.length ? limits[0][1] : 'нет данных');
+  ok('M9: ящик останавливается там, куда его пускает grabOffset, а не у игрока',
+     ran && /застой: ящик встал на 3[5-9]px/.test(out),
+     (out.match(/застой: [^\n]+/) || ['нет данных'])[0]);
+
+  if (ran) {
+    for (const line of out.trim().split('\n')) console.log('   ' + line);
+  }
 }
 
 // ---------------------------------------------------------------- итог

@@ -175,7 +175,7 @@
     <div class="chips" id="chips">
       <span class="chip" id="chip-shots"><span class="led"></span><span>скриншоты: проверяю…</span></span>
       <span class="chip" id="chip-game"><span class="led"></span><span>игра: не проверена</span></span>
-      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>сюжет: 107 / 107</span></span>
+      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>сюжет: 114 / 114</span></span>
       <span class="chip"><span class="led" style="background:var(--ok)"></span><span>игра: 344 / 344</span></span>
       <span class="chip"><span class="led" style="background:var(--ok)"></span><span>зависимостей: 0</span></span>
     </div>
@@ -433,6 +433,30 @@
             действия по фронту кнопки, поэтому клик в меню ремонта ещё и начинал телекинез
             (и ставил блок в режиме постройки). Теперь в кадре с панелью кнопки гасятся,
             захват отпускается; панель архива тоже перестала пропускать клики в мир.</li>
+      </ul>
+    </div>
+
+    <div class="card warn" style="margin-top:16px">
+      <h3><span class="dot"></span>Телекинез «не двигает / двигает рывками» — это физика игры</h3>
+      <p class="sm" style="margin:0 0 10px">Дифференциальный прогон <code>tools/grab-ab.mjs</code>:
+         один и тот же ввод двумя настоящими событиями канваса в чистую игру и в игру
+         с сюжетом.</p>
+      <ul class="tight sm">
+        <li><b>0 расхождений</b> на 45 кадрах (`x`, `y`, `vx`, `vy`, позиция игрока,
+            `mouse.right`, `grab`); на шести сценах — «кадры идентичны: true».
+            Если намеренно передавать в игру <code>dt * 0</code>, A/B даёт 187 расхождений
+            и тест падает — значит тест сторожит <code>dt</code>.</li>
+        <li>В логе конца: <code>right=true, grab=true</code>, ящик прошёл 62 px и встал
+            на <b>37 px</b> от игрока, до курсора осталось 65 px (курсор уехал за игроком).</li>
+        <li><b>Причина:</b> <code>grabOffset = 34</code> меньше, чем требуют
+            <code>18 + 11 + 6 = 35</code> в <code>separateFromPlayer</code>. Один пиксель —
+            и система балансирует на границе: скорость срезается и снова разгоняется.</li>
+        <li><b>Дрожание растёт с FPS:</b> 3 смены знака скорости на 30 fps → 26 на 120 fps
+            при одинаковом пределе 36.4–36.7 px. Это пружина <code>updateGrab</code>
+            без скоростного демпфирования.</li>
+        <li><b>Проблема в <code>updateGrab</code> / <code>separateFromPlayer</code> внутри
+            <code>gravity-void.html</code>, требуется Агент 1.</b> Правки сюжета не делают:
+            файл игры не тронут.</li>
       </ul>
     </div>
 
@@ -701,9 +725,9 @@
 
   <section id="verify">
     <h2><span class="num">11</span>Как проверено</h2>
-    <pre><span class="c"># сюжет: 107 проверок поверх настоящей игры (M8.2 + M8.3 + M9)</span>
+    <pre><span class="c"># сюжет: 114 проверок поверх настоящей игры (M8.2 + M8.3 + M9)</span>
 cd tools
-node verify-narrative.mjs   <span class="c"># → 107/107 проверок пройдено</span>
+node verify-narrative.mjs   <span class="c"># → 114/114 проверок пройдено</span>
 
 <span class="c"># игра без сюжета — не сломана</span>
 node verify.mjs             <span class="c"># → 344/344 проверок пройдено</span>
@@ -740,6 +764,9 @@ node verify-review-page.mjs <span class="c"># → структура стран�
               placeBlock</code> не вызываются ни разу, а кнопки после кадра не теряются;
               после закрытия меню ПКМ снова работает. Тесты падают на старой обёртке
               (<code>dt * 0</code>) — регресс ловится.</li>
+          <li>M9 (A/B): одинаковый ввод в чистую игру и с сюжетом даёт <code>0 расхождений</code>;
+              ящик встаёт на 35–39 px от игрока, дрожание растёт с FPS (3 → 26 смен знака) —
+              предел задаёт <code>grabOffset</code>, а не сюжет.</li>
         </ul>
       </div>
       <div class="card">
@@ -766,7 +793,7 @@ node verify-review-page.mjs <span class="c"># → структура стран�
     </div>
     <p>M8.2 + M8.3 + M9: сюжетный слой <code>narrative.js</code> — корабль на спавне, журнал,
        пять архивов, три фрагмента ядра, оружие за ремонт. Игра не тронута:
-       344/344 старых проверок и 107/107 новых.</p>
+       344/344 старых проверок и 114/114 новых.</p>
   </footer>
 </main>
 <script>
