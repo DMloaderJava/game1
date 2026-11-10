@@ -27,12 +27,15 @@
   var RESONITE = 8;
 
   // Корабль: 10 тайлов корпуса на поверхности, у самого старта игрока
+  // M8.3: корабль стоит там, где спавнится игрок (CFG.spawn.playerTileX = 16).
+  // Люк на 20-м тайле — в четырёх тайлах правее точки появления: игрок выходит
+  // из корабля, а не оказывается внутри корпуса
   var SHIP = {
-    tx0: 38,            // левый борт
-    tx1: 47,            // правый борт
+    tx0: 16,            // левый борт
+    tx1: 25,            // правый борт
     floorRow: 17,       // рядов ниже — твёрдый пол (surfaceRow)
     h: 4,               // высота корпуса в тайлах
-    doorTile: 42,       // где «люк»: отсюда считается радиус взаимодействия
+    doorTile: 20,       // где «люк»: отсюда считается радиус взаимодействия
     radius: 3.6         // тайлов до люка, чтобы открыть меню ремонта
   };
 
@@ -461,12 +464,9 @@
       this.prevLeft = false;
       this.toast = '';
 
-      // Резонит — новый ключ инвентаря: без нуля Inventory.add(8, n) даёт NaN
-      if (game && game.inventory && game.inventory.counts[RESONITE] === undefined) {
-        game.inventory.counts[RESONITE] = 0;
-        game.inventory.pulse[RESONITE] = 0;
-      }
-
+      // M8.3: резонит объявлен в CFG.resources игры, поэтому Inventory сам
+      // заводит для него нулевой счётчик, рисует его в HUD и кладёт в сейв.
+      // Ручной `counts[RESONITE] = 0` больше не нужен
       this.load();
       this.settle(game);
     }
@@ -533,9 +533,10 @@
       var g = this.game;
       if (!n || n.taken) return false;
       n.taken = true;
+      Narrative.ensureResonite(g);
       g.inventory.add(RESONITE, n.amount);
       // Своя вспышка: Particles.pickup красит искры по RES[type], а резонита
-      // в таблице ресурсов игры нет — id 8 живёт только в сюжете
+      // может не быть в таблице ресурсов игры — id 8 приходит из сюжета
       for (var i = 0; i < 10; i++) {
         var a = (i / 10) * Math.PI * 2;
         g.particles.add(n.x, n.y, Math.cos(a) * 90, Math.sin(a) * 90, 2.4,
@@ -600,6 +601,7 @@
       // Резонит живёт в инвентаре игры, но переживает F5 только здесь:
       // штатный сейв сохраняет все ключи, а восстанавливает лишь ресурсы CFG
       if (typeof d.resonite === 'number' && this.game && this.game.inventory) {
+        Narrative.ensureResonite(this.game);
         this.game.inventory.counts[RESONITE] = d.resonite;
       }
       return true;
@@ -628,7 +630,11 @@
       this.reading = null;
       this.ending = false;
       this.near = null;
-      if (game && game.inventory) game.inventory.counts[RESONITE] = 0;
+      if (game && game.inventory) {
+        // Обнуляем ровно те ключи, что уже лежат в инвентаре: и штатные ресурсы
+        // игры, и резонит, если игра его знает
+        for (var id in game.inventory.counts) game.inventory.counts[id] = 0;
+      }
       var ls = Narrative.storage();
       try { if (ls) ls.removeItem(Narrative.KEY); } catch (e) { /* пусто */ }
     }
@@ -828,28 +834,34 @@
       var s = this.ship;
       var t = game.time || 0;
       var x0 = s.tx0 * 32, x1 = (s.tx1 + 1) * 32;
-      var bottom = s.bottomY, top = s.topY;
+      var ground = s.bottomY;            // пол: здесь стоят стойки
       var stage = s.repairStage;
+      // M8.3: корабль переехал на спавн, и под брюхом теперь ходят игрок и ящики.
+      // Поэтому корпус поднят на стойках: под ним просвет в 30 px — видно и ноги
+      // игрока, и то, что он стоит ПОД кораблём, а не за ним
+      var legH = 30;
+      var bottom = ground - legH;         // низ корпуса
+      var top = bottom - s.h * 32;
 
-      // --- тень под кораблём: он не «стоит на картинке», а лежит на грунте
+      // --- тень на грунте: корабль стоит, а не висит в воздухе
       ctx.globalAlpha = 0.35;
       ctx.fillStyle = '#04070c';
       ctx.beginPath();
-      ctx.ellipse ? ctx.ellipse((x0 + x1) / 2, bottom + 2, (x1 - x0) * 0.46, 7, 0, 0, Math.PI * 2)
-                  : ctx.arc((x0 + x1) / 2, bottom + 2, (x1 - x0) * 0.4, 0, Math.PI * 2);
+      ctx.ellipse ? ctx.ellipse((x0 + x1) / 2, ground + 1, (x1 - x0) * 0.46, 5, 0, 0, Math.PI * 2)
+                  : ctx.arc((x0 + x1) / 2, ground + 1, (x1 - x0) * 0.4, 0, Math.PI * 2);
       ctx.fill();
       ctx.globalAlpha = 1;
 
-      // --- опоры: две стойки, левая и правая
+      // --- опоры: две стойки от корпуса до грунта, с пятками
       ctx.fillStyle = '#2a3442';
-      ctx.fillRect(x0 + 30, bottom - 26, 10, 26);
-      ctx.fillRect(x1 - 44, bottom - 26, 10, 26);
+      ctx.fillRect(x0 + 30, bottom - 2, 10, legH + 2);
+      ctx.fillRect(x1 - 44, bottom - 2, 10, legH + 2);
       ctx.fillStyle = '#151b24';
-      ctx.fillRect(x0 + 22, bottom - 8, 26, 8);
-      ctx.fillRect(x1 - 52, bottom - 8, 26, 8);
+      ctx.fillRect(x0 + 22, ground - 8, 26, 8);
+      ctx.fillRect(x1 - 52, ground - 8, 26, 8);
 
       // --- корпус: скруглённый силуэт с наклонным носом
-      var bx = x0 + 6, bw = (x1 - x0) - 12, by = top + 26, bh = (bottom - 34) - (top + 26);
+      var bx = x0 + 6, bw = (x1 - x0) - 12, by = top + 6, bh = bottom - top - 6;
       ctx.fillStyle = stage >= 2 ? '#3d4a5c' : '#333e4d';
       rr(ctx, bx, by, bw, bh, 12);
       ctx.fill();
@@ -959,26 +971,29 @@
       }
 
       // --- люк: подсвечен, когда есть чем заняться
-      var doorX = this.ship.doorX - 11, doorY = bottom - 52;
+      // люк: трап от грунта до брюха корабля, чтобы было видно, куда идти
+      var doorX = this.ship.doorX - 11, doorY = bottom - 8;
       var doorGlow = this.near && this.near.kind === 'ship' ? 0.55 + 0.45 * Math.sin(t * 6) : 0.3;
       ctx.globalAlpha = doorGlow;
       ctx.fillStyle = stage >= 1 ? '#7fd4ff' : '#5b7a95';
-      rr(ctx, doorX, doorY, 22, 40, 5);
+      rr(ctx, doorX, doorY, 22, legH + 6, 5);
       ctx.fill();
       ctx.globalAlpha = 1;
       ctx.strokeStyle = 'rgba(190,225,255,0.55)';
       ctx.lineWidth = 1.5;
-      rr(ctx, doorX, doorY, 22, 40, 5);
+      rr(ctx, doorX, doorY, 22, legH + 6, 5);
       ctx.stroke();
       ctx.fillStyle = 'rgba(10,18,28,0.65)';
-      ctx.fillRect(doorX + 10, doorY + 18, 3, 3);
+      ctx.fillRect(doorX + 10, doorY + 12, 3, 3);
 
-      // --- индикатор стадий над кораблём: три точки
+      // --- индикатор стадий над кораблём: три точки над люком.
+      // Корабль стоит у спавна, рядом уступы — вести счёт от левого борта
+      // нельзя: точки терялись на фоне породы
       for (var s2 = 0; s2 < 3; s2++) {
         var on = stage > s2;
         ctx.fillStyle = on ? '#7fd4ff' : 'rgba(120,150,190,0.28)';
         ctx.beginPath();
-        ctx.arc(x0 + 24 + s2 * 12, top + 12, 3, 0, Math.PI * 2);
+        ctx.arc(this.ship.doorX - 12 + s2 * 12, top - 2, 3, 0, Math.PI * 2);
         ctx.fill();
       }
     }
@@ -1132,8 +1147,11 @@
       // а не горячую клавишу — на экране за это отвечает кнопка «читать»
       var e = game.isTouch ? '' : '[E] ';
       if (n.kind === 'ship') {
-        cx = this.ship.doorX;
-        cy = this.ship.bottomY - 78;
+        // Подсказка стоит на грунте у трапа: над корпусом на телефоне её
+        // накрывает HUD, а в середине корабля — спрайт самого игрока
+        // (он рисуется позже и перекрывает надпись)
+        cx = this.ship.doorX + 70;
+        cy = this.ship.bottomY + 24;
         label = this.ship.finished
           ? (this.ship.canActivateCore(game) ? e + 'Активировать ядро' : e + 'Корабль')
           : e + 'Ремонт корабля';
@@ -1158,6 +1176,25 @@
       var bob = Math.sin(t * 3) * 1.5;
       ctx.font = 'bold 9px ' + (Narrative.font || 'monospace');
       var w = ctx.measureText(label).width + 14;
+
+      // Плашка не должна вылезать за экран: переводим мир в экранные пиксели
+      // и обратно. Корабль стоит у спавна, у самого левого края карты —
+      // без этого подсказка обрезалась о край
+      if (game.camera && game.vw) {
+        var z = (typeof CFG !== 'undefined' && CFG.camera) ? CFG.camera.zoom : 2;
+        var camX = game.camera.x + (game.camera.ox || 0);
+        var camY = game.camera.y + (game.camera.oy || 0);
+        var sx = (cx - camX) * z, sy = (cy - camY) * z;
+        var margin = 8;
+        var minX = w / 2 + margin, maxX = game.vw - w / 2 - margin;
+        if (sx < minX) sx = minX;
+        if (sx > maxX) sx = Math.max(minX, maxX);
+        var minY = 20, maxY = game.vh - 20;
+        if (sy < minY) sy = minY;
+        if (sy > maxY) sy = maxY;
+        cx = camX + sx / z;
+        cy = camY + sy / z;
+      }
       ctx.fillStyle = 'rgba(6,12,18,0.85)';
       rr(ctx, cx - w / 2, cy - 9 + bob, w, 18, 5);
       ctx.fill();
@@ -1555,6 +1592,43 @@
   // localStorage бывает и на window, и на глобальном объекте (так делает
   // headless-песочница в tools/verify-narrative.mjs). Берём то, что найдётся,
   // и не падаем, если хранилища нет вовсе — приватный режим
+  // Счётчик резонита в инвентаре. Когда игра объявляет RESONITE в CFG.resources
+  // (M8.3, правки Агента 1), Inventory заводит ключ сам, и эта функция ничего
+  // не делает. Она нужна только сборкам, где резонита в CFG.resources ещё нет:
+  // без нуля Inventory.add(8, n) даёт NaN. Одна функция — одно место, чтобы
+  // потом удалить её целиком
+  Narrative.ensureResonite = function (game) {
+    var inv = game && game.inventory;
+    if (!inv || !inv.counts) return false;
+    if (Narrative.isResource(game, RESONITE)) return false;
+    if (typeof inv.counts[RESONITE] === 'number') return false;
+    inv.counts[RESONITE] = 0;
+    if (inv.pulse) inv.pulse[RESONITE] = 0;
+    return true;
+  };
+
+  // Есть ли такой ресурс в таблице игры. Резонит появился в CFG.resources
+  // в M8.3; если его там нет (старая сборка), сюжет работает как раньше
+  Narrative.isResource = function (game, id) {
+    var list = null;
+    try {
+      // CFG объявлен как const в скрипте игры: в браузере он виден следующему
+      // скрипту той же страницы, в vm-песочнице — нет. Поэтому сначала смотрим
+      // во всём мире, потом в этой области видимости
+      if (global && global.CFG && global.CFG.resources) list = global.CFG.resources;
+    } catch (e) { list = null; }
+    try { if (!list && typeof CFG !== 'undefined' && CFG.resources) list = CFG.resources; } catch (e) { /* нет CFG */ }
+    if (!list) {
+      var res = game && game.inventory && game.inventory.resources;
+      list = res || null;
+    }
+    if (!list) return false;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && list[i].id === id) return true;
+    }
+    return false;
+  };
+
   Narrative.storage = function () {
     try {
       if (global && global.localStorage) return global.localStorage;

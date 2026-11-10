@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>GRAVITY: VOID — ревью M8.2 «Сюжет и Ремонт»</title>
+<title>GRAVITY: VOID — ревью M8.2 «Сюжет и Ремонт» и M8.3 «Слияние Мира и Сюжета»</title>
 <style>
   :root {
     --bg: #070910;
@@ -156,20 +156,22 @@
 
 <header class="hero">
   <div class="wrap">
-    <div class="eyebrow">GRAVITY: VOID · протокол ревью · M8.2</div>
-    <h1>Сюжет и Ремонт <span class="sub">— ревью</span></h1>
+    <div class="eyebrow">GRAVITY: VOID · протокол ревью · M8.2 → M8.3</div>
+    <h1>Сюжет и Ремонт <span class="sub">— ревью · M8.2 + M8.3</span></h1>
     <div class="verdict" style="background:linear-gradient(90deg,rgba(86,209,143,0.12),rgba(86,209,143,0.02));border-color:rgba(86,209,143,0.35)">
       <span class="tag" style="background:var(--ok);color:#04170d">ПРИНЯТА</span>
       <p style="color:#d6f3e3">Сюжетный слой вынесен в <b>narrative.js</b> и не тронул игру ни на строку:
          пять обёрток над <code>Game.prototype</code> вместо врезки в код. Корабль с тремя стадиями
          ремонта, журнал с «Ядро: 1/3», пять архивов, три фрагмента и резонит — всё на месте,
-         62/62 новых проверок, старые 344/344 целы.</p>
+         76/76 новых проверок, старые 344/344 целы. <b>M8.3:</b> корабль переехал на спавн
+         (люк — 20-й тайл), резонит стал штатным ресурсом игры, заглушки
+         <code>shipNear</code>/<code>drawShip</code> убраны — ссылок на <code>game.ship</code> нет.</p>
     </div>
 
     <div class="chips" id="chips">
       <span class="chip" id="chip-shots"><span class="led"></span><span>скриншоты: проверяю…</span></span>
       <span class="chip" id="chip-game"><span class="led"></span><span>игра: не проверена</span></span>
-      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>сюжет: 62 / 62</span></span>
+      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>сюжет: 76 / 76</span></span>
       <span class="chip"><span class="led" style="background:var(--ok)"></span><span>игра: 344 / 344</span></span>
       <span class="chip"><span class="led" style="background:var(--ok)"></span><span>зависимостей: 0</span></span>
     </div>
@@ -180,6 +182,7 @@
   <a href="#play">▶ Играть</a>
   <a href="#connect">Подключение</a>
   <a href="#criteria">Критерии M8.2</a>
+  <a href="#merge">M8.3</a>
   <a href="#works">Что работает</a>
   <a href="#defects">Дефекты</a>
   <a href="#scope">Скоуп</a>
@@ -296,6 +299,18 @@
             <td><code>Ship.canActivateCore()</code> требует собранный двигатель <b>и</b> три фрагмента;
                 без ядра активация не срабатывает (тест)</td>
             <td><span class="pill ok">да</span></td></tr>
+        <tr><td>M8.3 · корабль на спавне и люк на тайле 20</td>
+            <td><code>tx0 16</code>, <code>tx1 25</code>, <code>doorTile 20</code>; меню по E
+                открывается сразу после старта</td>
+            <td><span class="pill ok">да</span></td></tr>
+        <tr><td>M8.3 · никаких <code>game.ship</code> и заглушек</td>
+            <td><code>shipNear</code>/<code>drawShip</code> в игру не подставляются, в коде нет
+                обращений к <code>game.ship</code></td>
+            <td><span class="pill ok">да</span></td></tr>
+        <tr><td>M8.3 · резонит как ресурс игры</td>
+            <td>Счётчик заводит игра, добыча через <code>inventory.add(8, n)</code>,
+                сейв — на стороне игры; шим остался только для старых сборок</td>
+            <td><span class="pill ok">да</span></td></tr>
         <tr><td>Только <code>narrative.js</code>, игра не тронута</td>
             <td><code>git diff</code> по <code>gravity-void.html</code> пуст; старые 344/344 проходят
                 без единой правки</td>
@@ -304,8 +319,55 @@
     </table>
   </section>
 
+  <section id="merge">
+    <h2><span class="num">04</span>M8.3 — слияние мира и сюжета</h2>
+    <p class="hint">Игра перестала быть чужой территорией: корабль встал на спавн, резонит
+       стал её собственным ресурсом, заглушки из сюжета убраны.</p>
+
+    <div class="grid g2">
+      <div class="card ok">
+        <h3><span class="dot"></span>Корабль на спавне</h3>
+        <ul class="tight sm">
+          <li><code>SHIP</code>: <code>tx0 16</code>, <code>tx1 25</code>, люк — тайл <code>20</code>.
+              Корпус накрывает точку появления, люк на четыре тайла правее неё.</li>
+          <li>Игрок не появляется внутри корпуса: ряд над полом на спавне свободен (проверка).</li>
+          <li>Меню ремонта открывается по <b>E</b> у люка сразу после старта — проверено
+              отдельным тестом на тайле 20.</li>
+          <li>Корпус поднят на стойках: 30 px просвета под брюхом, игрок и ящики проходят
+              под кораблём, а не прячутся за ним.</li>
+        </ul>
+      </div>
+      <div class="card ok">
+        <h3><span class="dot"></span>Резонит — ресурс игры</h3>
+        <ul class="tight sm">
+          <li>Игра объявила его в <code>CFG.resources</code> — сама заводит счётчик,
+              рисует в HUD и сохраняет. Ручной <code>counts[8] = 0</code> из сюжета убран.</li>
+          <li>Добыча идёт через <code>inventory.add(8, n.amount)</code>. Тест: число, а не <code>NaN</code>.</li>
+          <li>Осталась страховка <code>Narrative.ensureResonite()</code> для сборки, где ресурса
+              ещё нет. В M8.3 она возвращает <code>false</code> и ничего не трогает — это проверено.</li>
+        </ul>
+      </div>
+      <div class="card ok">
+        <h3><span class="dot"></span>Без заглушек</h3>
+        <ul class="tight sm">
+          <li><code>game.shipNear</code> и <code>game.drawShip</code> не подставляются:
+              в игре их нет (<code>undefined</code>), в <code>Narrative.attach</code> — тоже.</li>
+          <li>В сюжете нет обращений к <code>game.ship</code> — только к своему <code>this.ship</code>.</li>
+        </ul>
+      </div>
+      <div class="card ok">
+        <h3><span class="dot"></span>Сейв</h3>
+        <ul class="tight sm">
+          <li><code>state()</code> по-прежнему кладёт <code>this.ship.state()</code>.</li>
+          <li><code>load()</code> подхватывает стадию ремонта и финальный аккорд — проверено
+              на пустом <code>Ship</code> с сохранением <code>stage 2</code> и <code>stage 3 / core</code>.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
   <section id="works">
-    <h2><span class="num">04</span>Что работает</h2>
+    <h2><span class="num">05</span>Что работает</h2>
 
     <div class="grid g2">
       <div class="card ok">
@@ -375,15 +437,15 @@
   </section>
 
   <section id="defects">
-    <h2><span class="num">05</span>Дефекты и ограничения</h2>
+    <h2><span class="num">06</span>Дефекты и ограничения</h2>
     <table>
       <thead><tr><th>Что</th><th>Почему</th><th>Насколько важно</th></tr></thead>
       <tbody>
-        <tr><td><b>Резонита нет в HUD игры</b></td>
-            <td>Чтобы он попал в правый столбец ресурсов, нужна правка <code>CFG.resources</code>
-                внутри <code>gravity-void.html</code> — а его по условию трогать нельзя.
-                Резонит виден в меню ремонта как цена стадии и в подсказке «не хватает».</td>
-            <td><span class="pill warn">известно</span></td></tr>
+        <tr><td><b>Резонит в HUD — с M8.3</b></td>
+            <td>Закрыто: игра объявила RESONITE в <code>CFG.resources</code>, и он виден
+                в правом столбце наравне с остальными. До M8.3 ресурс жил только в сюжете
+                и был виден лишь как цена стадии.</td>
+            <td><span class="pill ok">снято</span></td></tr>
         <tr><td><b>Терминал игры и архив могут стоять рядом</b></td>
             <td>Древние терминалы игры расставляются от сида, архивы — по фиксированным точкам.
                 E отдаётся ближайшему сюжетному объекту; терминал читается, когда рядом
@@ -407,7 +469,7 @@
   </section>
 
   <section id="scope">
-    <h2><span class="num">06</span>Скоуп и решения</h2>
+    <h2><span class="num">07</span>Скоуп и решения</h2>
     <table>
       <thead><tr><th>Что</th><th>Почему так</th><th>Что делать</th></tr></thead>
       <tbody>
@@ -447,7 +509,7 @@
   </section>
 
   <section id="questions">
-    <h2><span class="num">07</span>Запросы ревью</h2>
+    <h2><span class="num">08</span>Запросы ревью</h2>
     <div class="grid g2">
       <div class="card">
         <h3>1. Как реализован <code>Ship.interact / update</code> без правки игры?</h3>
@@ -478,15 +540,15 @@
   </section>
 
   <section id="shots">
-    <h2><span class="num">08</span>Скриншоты</h2>
+    <h2><span class="num">09</span>Скриншоты</h2>
     <div class="shots" id="shot-grid">
       <figure class="shot">
         <img src="screenshots/32-quest-start.png" alt="Старт с журналом квестов" loading="lazy">
-        <figcaption><b>Старт</b>Карточка «МИССИЯ · ЯДРО» с «Ядро: 0/3»; корабль — правее по поверхности.</figcaption>
+        <figcaption><b>Старт (M8.3)</b>Корабль стоит прямо на спавне: корпус 16–25, люк — 20-й тайл, под брюхом просвет для игрока и ящиков.</figcaption>
       </figure>
       <figure class="shot">
         <img src="screenshots/33-ship.png" alt="Корабль и подсказка ремонта" loading="lazy">
-        <figcaption><b>Корабль VOID-7</b>Три точки стадий, пробоина, мёртвый двигатель, подсказка «[E] Ремонт корабля».</figcaption>
+        <figcaption><b>Корабль VOID-7 (M8.3)</b>Подсказка «[E] Ремонт корабля» появляется сразу после старта — идти никуда не нужно.</figcaption>
       </figure>
       <figure class="shot">
         <img src="screenshots/34-ship-menu.png" alt="Меню ремонта, ресурсов не хватает" loading="lazy">
@@ -548,10 +610,10 @@
   </section>
 
   <section id="verify">
-    <h2><span class="num">09</span>Как проверено</h2>
-    <pre><span class="c"># сюжет: 62 проверки поверх настоящей игры</span>
+    <h2><span class="num">10</span>Как проверено</h2>
+    <pre><span class="c"># сюжет: 76 проверок поверх настоящей игры (M8.2 + M8.3)</span>
 cd tools
-node verify-narrative.mjs   <span class="c"># → 62/62 проверок пройдено</span>
+node verify-narrative.mjs   <span class="c"># → 76/76 проверок пройдено</span>
 
 <span class="c"># игра без сюжета — не сломана</span>
 node verify.mjs             <span class="c"># → 344/344 проверок пройдено</span>
@@ -566,7 +628,7 @@ node verify-review-page.mjs <span class="c"># → структура стран�
 
     <div class="grid g2" style="margin-top:14px">
       <div class="card">
-        <h3>Что покрыто в M8.2</h3>
+        <h3>Что покрыто в M8.2 + M8.3</h3>
         <ul class="tight sm">
           <li>Подключение: сюжет есть, классы доступны, терминалы игры на месте.</li>
           <li>Корабль: ровная площадка под корпусом, меню по <code>E</code>, цены 20+10 / 30+10 / 5.</li>
@@ -576,6 +638,8 @@ node verify-review-page.mjs <span class="c"># → структура стран�
           <li>Архивы: пять текстов из задания, панель открывается/закрывается, <code>E</code> у терминала игры жив.</li>
           <li>Сейв: пишется, подхватывается новой игрой, сбрасывается <code>Backspace</code>.</li>
           <li>Отрисовка не падает; меню ремонта влезает в экран, карточка журнала не перекрывает кнопки и джойстик.</li>
+          <li>M8.3: корабль на спавне и не пересекает игрока, меню по E у люка на тайле 20,
+              нет <code>game.ship</code> и заглушек, резонит — штатный ресурс, добыча без <code>NaN</code>.</li>
         </ul>
       </div>
       <div class="card">
@@ -600,8 +664,8 @@ node verify-review-page.mjs <span class="c"># → структура стран�
       <a class="btn ghost" href="M82.md">M82.md</a>
       <a class="btn ghost" href="narrative.js">narrative.js</a>
     </div>
-    <p>M8.2: сюжетный слой <code>narrative.js</code> — корабль, журнал, пять архивов, три фрагмента ядра.
-       Игра не тронута: 344/344 старых проверок и 62/62 новых.</p>
+    <p>M8.2 + M8.3: сюжетный слой <code>narrative.js</code> — корабль на спавне, журнал,
+       пять архивов, три фрагмента ядра. Игра не тронута: 344/344 старых проверок и 76/76 новых.</p>
   </footer>
 </main>
 <script>

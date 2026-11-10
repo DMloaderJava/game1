@@ -131,10 +131,14 @@ put(a.tx - 1, a.ty + 1);
 frames(2);
 shot('38-archive-near');
 N.openArchive(a);
-game.loreT = 1;
+N.readT = 1;
 game.render();
 shot('39-archive-lore');
-game.closeLore();
+// закрываем панель архива, а не только лор игры: иначе она останется
+// висеть на всех следующих кадрах
+N.closeArchive();
+N.reading = null;
+game.render();
 
 // ---------- резонит в глубине ----------
 const node = N.nodes[0];

@@ -114,9 +114,17 @@ ok('M8.2: журнал — экземпляр QuestLog', narrative.log instanceo
   }
   ok('M8.2: под кораблём ровная площадка без породы', clear,
      `${s.tx0}..${s.tx1}, ряды ${s.floorRow - s.h}..${s.floorRow - 1}`);
-  ok('M8.2: корабль стоит на поверхности, рядом со стартом',
-     s.floorRow === w.surfaceRow && s.tx0 > CFG.spawn.playerTileX && s.tx1 < 60,
+  // M8.3: корабль переехал на спавн — корпус накрывает точку появления,
+  // а люк стоит правее неё, чтобы игрок не появлялся внутри корпуса
+  ok('M8.3: корабль стоит на поверхности у старта',
+     s.floorRow === w.surfaceRow && s.tx0 <= CFG.spawn.playerTileX && s.tx1 >= CFG.spawn.playerTileX,
      `старт ${CFG.spawn.playerTileX}, корабль ${s.tx0}..${s.tx1}`);
+  ok('M8.3: корпус корабля не пересекает игрока на спавне',
+     !game.world.solid(CFG.spawn.playerTileX, w.surfaceRow - 1),
+     'ряд над полом свободен');
+  ok('M8.3: люк на 20-м тайле, в четырёх от старта',
+     N.SHIP.doorTile === 20 && Math.abs(N.SHIP.doorTile - CFG.spawn.playerTileX) >= 3,
+     `люк ${N.SHIP.doorTile}, старт ${CFG.spawn.playerTileX}`);
 }
 
 // ---------------------------------------------------------------- меню ремонта
@@ -381,8 +389,6 @@ ok('M8.2: журнал — экземпляр QuestLog', narrative.log instanceo
 
 // ---------------------------------------------------------------- отрисовка
 {
-  try { narrative.save(); console.log('[dbg] после narrative.save:', [...sandbox.localStorage._mem.keys()].join(',')); }
-  catch (e) { console.log('[dbg] save threw:', e.message); }
   const before = calls.fillText;
   frames(3);
   game.render();
@@ -398,6 +404,71 @@ ok('M8.2: журнал — экземпляр QuestLog', narrative.log instanceo
   const small = narrative.menuLayout(game);
   game.vw = oldVw;
   ok('M8.2: на телефоне панель ремонта сжимается', small.s < 1, `s=${small.s.toFixed(2)}`);
+}
+
+// ---------------------------------------------------------------- M8.3: слияние мира и сюжета
+{
+  // 1. Никаких «костылей» поверх игры: сюжет работает только со своим this.ship
+  ok('M8.3: в сюжете нет ссылок на game.ship',
+     !/game\.ship\b/.test(String(N.prototype.drawWorld)) &&
+     !/game\.ship\b/.test(String(N.prototype.update)) &&
+     !/game\.ship\b/.test(String(N.prototype.nearest)),
+     'game.ship не используется');
+  ok('M8.3: костыли shipNear/drawShip не подставляются в игру',
+     typeof game.shipNear === 'undefined' && typeof game.drawShip === 'undefined',
+     `shipNear=${typeof game.shipNear}, drawShip=${typeof game.drawShip}`);
+  ok('M8.3: Narrative.attach не патчит игру заглушками',
+     !/shipNear|drawShip/.test(String(N.attach)));
+
+  // 2. Меню ремонта открывается по E у люка на 20-м тайле
+  const g = new sandbox.Game(view);
+  g.update(CFG.step);
+  const p = g.player;
+  p.x = N.SHIP.doorTile * TS + TS / 2 - p.w / 2;
+  p.y = g.world.surfaceRow * TS - p.h;
+  p.vx = p.vy = 0;
+  g.camera.snap(p);
+  for (let i = 0; i < 4; i++) g.update(CFG.step);
+  ok('M8.3: у люка на тайле 20 подсказка «ремонт»',
+     g.narrative.nearest() && g.narrative.nearest().kind === 'ship',
+     g.narrative.nearest() && g.narrative.nearest().kind);
+  key('KeyE', true); g.update(CFG.step); key('KeyE', false);
+  ok('M8.3: E у люка на тайле 20 открывает меню ремонта', g.narrative.menu === 'ship',
+     `menu=${g.narrative.menu}`);
+  g.narrative.menu = null;
+
+  // 3. Резонит: штатный ресурс игры, добыча — через inventory.add(8, n)
+  ok('M8.3: добыча резонита идёт через inventory.add(8, n)',
+     /inventory\.add\(RESONITE, n\.amount\)/.test(String(N.prototype.takeResonite)),
+     'inventory.add(RESONITE, …)');
+  {
+    // Когда игра знает RESONITE (M8.3), шим не срабатывает и ничего не трогает
+    const patchCfg = vm.runInContext('CFG.resources.push({ id: 8, name: "RESONITE", color: "#b98bff" }); CFG.resources.length', ctx);
+    const g2 = new sandbox.Game(view);
+    g2.update(CFG.step);
+    ok('M8.3: с резонитом в CFG.resources счётчик заводит игра',
+       g2.inventory.counts[8] === 0 && patchCfg === 5, `counts[8]=${g2.inventory.counts[8]}`);
+    ok('M8.3: шим резонита не срабатывает, если ресурс штатный',
+       sandbox.window.Narrative.ensureResonite(g2) === false);
+    const node = g2.narrative.nodes[0];
+    g2.narrative.takeResonite(node);
+    ok('M8.3: добыча даёт число, а не NaN',
+       g2.inventory.counts[8] === node.amount && !Number.isNaN(g2.inventory.counts[8]),
+       `резонит=${g2.inventory.counts[8]}`);
+    // убираем добавленный ресурс, чтобы не влиять на следующие проверки
+    vm.runInContext('CFG.resources.pop();', ctx);
+  }
+
+  // 4. Сейв: стадия корабля сохраняется и подхватывается
+  const st = g.narrative.state();
+  ok('M8.3: state() по-прежнему содержит состояние корабля',
+     st.ship && typeof st.ship.stage === 'number', JSON.stringify(st.ship));
+  const fresh = new sandbox.window.Ship();
+  fresh.load({ stage: 2, last: 2, core: false });
+  ok('M8.3: load() подхватывает стадию ремонта', fresh.repairStage === 2, `stage=${fresh.repairStage}`);
+  fresh.load({ stage: 3, last: 3, core: true });
+  ok('M8.3: load() подхватывает финальный аккорд',
+     fresh.repairStage === 3 && fresh.coreActive === true);
 }
 
 // ---------------------------------------------------------------- итог
