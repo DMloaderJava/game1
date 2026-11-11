@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 
 const HTML = fs.readFileSync(new URL('../gravity-void.html', import.meta.url), 'utf8');
-let SRC = HTML.match(/<script>([\s\S]*)<\/script>/)[1];
+let SRC = HTML.match(/<script>([\s\S]*?)<\/script>/)[1];
 const NARR = fs.readFileSync(new URL('../narrative.js', import.meta.url), 'utf8');
 
 const grad = { addColorStop() {} };
@@ -95,7 +95,13 @@ function frames(n) { for (let i = 0; i < n; i++) game.update(CFG.step); }
 
 // ---------------------------------------------------------------- подключение
 ok('M8.2: narrative.js подключился к игре', !!narrative, 'game.narrative');
-ok('M8.2: игра не изменилась — терминалы на месте', game.terminals.length === 3);
+// M8.3+ переехал на чанковый мир: древние терминалы игры убраны, архивы
+// сюжета живут в narrative.js. Проверяем то, что действительно должно быть
+ok('M8.2: игра отдала сюжету лор-панель и уведомления',
+   typeof game.lore !== 'undefined' && typeof game.notice === 'function' &&
+   typeof game.closeLore === 'function' && typeof game.doSave === 'function');
+ok('M8.2: терминалы игры убраны, архивы — забота сюжета',
+   game.terminals === undefined && N.ARCHIVES.length === 5);
 ok('M8.2: классы сюжета доступны', typeof N === 'function' &&
    typeof sandbox.window.QuestLog === 'function' && typeof sandbox.window.Ship === 'function' &&
    typeof sandbox.window.Fragment === 'function');
@@ -339,19 +345,25 @@ ok('M8.2: журнал — экземпляр QuestLog', narrative.log instanceo
 
 // ---------------------------------------------------------------- E не конфликтует с игрой
 {
-  // терминал игры читается по E, если сюжетного объекта рядом нет
-  const t = game.terminals.find(x => !x.read) || game.terminals[0];
+  // В M9-сборке у игры нет своих терминалов: панель лора открывает сюжет.
+  // Проверяем обратное — пока панель открыта, E принадлежит ей, а не сюжету
+  const a = narrative.archives[0];
   const p = game.player;
-  t.read = false;
-  p.x = t.x + CFG.terminal.w / 2 - p.w / 2;
-  p.y = (t.ty + 1) * TS - p.h;
+  p.x = a.x - p.w / 2;
+  p.y = a.ty * TS;
   p.vx = p.vy = 0;
   game.camera.snap(p);
   frames(2);
   tapKey('KeyE');
-  ok('M8.2: E у терминала игры по-прежнему работает',
-     !!game.lore || t.read === true, `lore=${!!game.lore} read=${t.read}`);
-  if (game.lore) tapKey('Escape');
+  ok('M8.2: E у сюжетного объекта открывает архив/панель',
+     !!narrative.reading || !!game.lore,
+     `reading=${!!narrative.reading} lore=${!!game.lore}`);
+  // панель забирает E себе: повторное нажатие закрывает
+  narrative.closeArchive();
+  if (game.lore) game.closeLore();
+  frames(1);
+  ok('M8.2: панель закрывается и отдаёт управление игре',
+     !narrative.reading && !game.lore);
 }
 
 // ---------------------------------------------------------------- сохранение прогресса
@@ -442,12 +454,18 @@ ok('M8.2: журнал — экземпляр QuestLog', narrative.log instanceo
      /inventory\.add\(RESONITE, n\.amount\)/.test(String(N.prototype.takeResonite)),
      'inventory.add(RESONITE, …)');
   {
-    // Когда игра знает RESONITE (M8.3), шим не срабатывает и ничего не трогает
-    const patchCfg = vm.runInContext('CFG.resources.push({ id: 8, name: "RESONITE", color: "#b98bff" }); CFG.resources.length', ctx);
+    // Когда игра знает RESONITE, шим не срабатывает и ничего не трогает.
+    // В M9-сборке ресурс уже объявлен в CFG.resources — тогда ничего не правим,
+    // иначе добавляем его, чтобы проверить тот же путь
+    const hasRes = CFG.resources.some(r => r.id === 8);
+    const patchCfg = hasRes
+      ? CFG.resources.length
+      : vm.runInContext('CFG.resources.push({ id: 8, name: "RESONITE", color: "#b98bff" }); CFG.resources.length', ctx);
     const g2 = new sandbox.Game(view);
     g2.update(CFG.step);
     ok('M8.3: с резонитом в CFG.resources счётчик заводит игра',
-       g2.inventory.counts[8] === 0 && patchCfg === 5, `counts[8]=${g2.inventory.counts[8]}`);
+       g2.inventory.counts[8] === 0 && patchCfg === CFG.resources.length,
+       `counts[8]=${g2.inventory.counts[8]}, ресурсов ${patchCfg}`);
     ok('M8.3: шим резонита не срабатывает, если ресурс штатный',
        sandbox.window.Narrative.ensureResonite(g2) === false);
     const node = g2.narrative.nodes[0];
@@ -456,7 +474,7 @@ ok('M8.2: журнал — экземпляр QuestLog', narrative.log instanceo
        g2.inventory.counts[8] === node.amount && !Number.isNaN(g2.inventory.counts[8]),
        `резонит=${g2.inventory.counts[8]}`);
     // убираем добавленный ресурс, чтобы не влиять на следующие проверки
-    vm.runInContext('CFG.resources.pop();', ctx);
+    if (!hasRes) vm.runInContext('CFG.resources.pop();', ctx);
   }
 
   // 4. Сейв: стадия корабля сохраняется и подхватывается
@@ -854,6 +872,38 @@ function grabScene(g) {
   if (ran) {
     for (const line of out.trim().split('\n')) console.log('   ' + line);
   }
+}
+
+// ---------------------------------------------------------------- слияние с M8.1/M9-игрой
+{
+  // Сюжетный слой рисуется из drawTiles: в M8.1+ древних терминалов игры
+  // больше нет, и старая обёртка над drawTerminals молча перестала рисовать
+  // корабль, фрагменты и архивы. Ловим именно это: считаем вызовы drawWorld
+  // за кадр — ровно один, иначе сюжет «невидим» или рисуется дважды.
+  const savedKeydown = listeners.keydown;
+  sandbox.localStorage.removeItem(CFG.save.key);
+  const g = new sandbox.Game(view);
+  listeners.keydown = savedKeydown;
+  g.update(CFG.step);
+
+  ok('M9: у игры есть drawTiles (мировой слой M8.1)', typeof g.drawTiles === 'function');
+  ok('M9: у игры больше нет drawTerminals', g.drawTerminals === undefined);
+
+  let drawn = 0;
+  const proto = Object.getPrototypeOf(g.narrative);
+  const origDrawWorld = proto.drawWorld;
+  proto.drawWorld = function (ctx, game) { drawn++; return origDrawWorld.call(this, ctx, game); };
+  g.render();
+  proto.drawWorld = origDrawWorld;
+  ok('M9: сюжетный мир рисуется ровно один раз за кадр', drawn === 1, `вызовов ${drawn}`);
+
+  // HUD сюжета тоже один раз — иначе карточка мигает двойной отрисовкой
+  let hudCalls = 0;
+  const orig = proto.drawHud;
+  proto.drawHud = function (ctx, game) { hudCalls++; return orig.call(this, ctx, game); };
+  g.render();
+  proto.drawHud = orig;
+  ok('M9: HUD сюжета рисуется ровно один раз за кадр', hudCalls === 1, `вызовов ${hudCalls}`);
 }
 
 // ---------------------------------------------------------------- итог

@@ -6,7 +6,7 @@ import vm from 'node:vm';
 
 const HERE = new URL('.', import.meta.url);
 const HTML = fs.readFileSync(new URL('../gravity-void.html', HERE), 'utf8');
-const SRC = HTML.match(/<script>([\s\S]*)<\/script>/)[1];
+const SRC = HTML.match(/<script>([\s\S]*?)<\/script>/)[1];
 const NARR = fs.readFileSync(new URL('../narrative.js', HERE), 'utf8');
 
 const grad = { addColorStop() {} };

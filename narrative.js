@@ -1782,11 +1782,27 @@
       if (this.narrative) this.narrative.update(this, dt);
     };
 
-    var origDrawTerminals = P.drawTerminals;
-    P.drawTerminals = function (ctx) {
-      origDrawTerminals.call(this, ctx);
-      if (this.narrative) this.narrative.drawWorld(ctx, this);
-    };
+    // Мир рисуем в двух местах кадра:
+    //  - drawTiles (M8.1+) — вызывается внутри мирового трансформа, сразу за тайлами.
+    //    Старая игра звала тут drawTerminals, новая её больше не имеет, поэтому
+    //    опираемся на существующий метод, а не на устаревший.
+    //  - drawHud — слой интерфейса, уже в экранных координатах.
+    var origDrawTiles = P.drawTiles;
+    if (typeof origDrawTiles === 'function') {
+      P.drawTiles = function (ctx, camX, camY) {
+        origDrawTiles.call(this, ctx, camX, camY);
+        if (this.narrative) this.narrative.drawWorld(ctx, this);
+      };
+    } else {
+      // Совсем старые сборки: там был drawTerminals
+      var origDrawTerminals = P.drawTerminals;
+      if (typeof origDrawTerminals === 'function') {
+        P.drawTerminals = function (ctx) {
+          origDrawTerminals.call(this, ctx);
+          if (this.narrative) this.narrative.drawWorld(ctx, this);
+        };
+      }
+    }
 
     var origDrawHud = P.drawHud;
     P.drawHud = function (ctx) {

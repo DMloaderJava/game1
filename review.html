@@ -175,8 +175,8 @@
     <div class="chips" id="chips">
       <span class="chip" id="chip-shots"><span class="led"></span><span>скриншоты: проверяю…</span></span>
       <span class="chip" id="chip-game"><span class="led"></span><span>игра: не проверена</span></span>
-      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>сюжет: 117 / 117</span></span>
-      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>игра: 344 / 344</span></span>
+      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>сюжет: 123 / 123</span></span>
+      <span class="chip"><span class="led" style="background:var(--ok)"></span><span>игра: 392 / 392</span></span>
       <span class="chip"><span class="led" style="background:var(--ok)"></span><span>зависимостей: 0</span></span>
     </div>
   </div>
@@ -731,19 +731,19 @@
 
   <section id="verify">
     <h2><span class="num">11</span>Как проверено</h2>
-    <pre><span class="c"># сюжет: 117 проверок поверх настоящей игры (M8.2 + M8.3 + M9)</span>
+    <pre><span class="c"># сюжет: 123 проверки поверх настоящей игры (M8.2 + M8.3 + M9)</span>
 cd tools
-node verify-narrative.mjs   <span class="c"># → 117/117 проверок пройдено</span>
+node verify-narrative.mjs   <span class="c"># → 123/123 проверок пройдено</span>
 
 <span class="c"># игра без сюжета — не сломана</span>
-node verify.mjs             <span class="c"># → 344/344 проверок пройдено</span>
+node verify.mjs             <span class="c"># → 392/392 проверок пройдено</span>
 
 <span class="c"># кадры</span>
 node narrative-shots.mjs    <span class="c"># → 11 кадров ПК (32…42)</span>
 node narrative-touch-shots.mjs               <span class="c"># → 4 кадра телефона (43…46)</span>
 SUF=-land TW=900 TH=430 node narrative-touch-shots.mjs  <span class="c"># → +4 в ландшафте</span>
 
-node perf.mjs               <span class="c"># → p50 6.65 мс, p95 8.25, p99 10.12</span>
+node perf.mjs               <span class="c"># → p50 1.46 мс, p95 2.14, p99 4.48</span>
 node verify-review-page.mjs <span class="c"># → структура страницы и запуск игры во фрейме</span></pre>
 
     <div class="grid g2" style="margin-top:14px">
@@ -799,7 +799,7 @@ node verify-review-page.mjs <span class="c"># → структура стран�
     </div>
     <p>M8.2 + M8.3 + M9: сюжетный слой <code>narrative.js</code> — корабль на спавне, журнал,
        пять архивов, три фрагмента ядра, оружие за ремонт. Игра не тронута:
-       344/344 старых проверок и 117/117 новых.</p>
+       392/392 проверок игры и 123/123 сюжета.</p>
   </footer>
 </main>
 <script>

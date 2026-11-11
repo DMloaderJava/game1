@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 
 const HTML = fs.readFileSync(new URL('../gravity-void.html', import.meta.url), 'utf8');
-const m = HTML.match(/<script>([\s\S]*)<\/script>/);
+const m = HTML.match(/<script>([\s\S]*?)<\/script>/);
 if (!m) throw new Error('script не найден');
 let SRC = m[1];
 
@@ -16,7 +16,12 @@ class FakeCtx {
   set strokeStyle(v) { this._ss = v; } get strokeStyle() { return this._ss; }
   fillRect() { calls.fillRect++; if (this.canvas.kind === 'offscreen') calls.fillTileRect++; }
   clearRect() {}
-  drawImage(img) { calls.drawImage++; if (img && img.kind === 'offscreen' && img.width === 200 * 32) calls.drawTileBuffer = (calls.drawTileBuffer || 0) + 1; }
+  drawImage(img) {
+    calls.drawImage++;
+    if (img && img.kind === 'offscreen' && img.width === 200 * 32) calls.drawTileBuffer = (calls.drawTileBuffer || 0) + 1;
+    // M8.1: тайл рисуется запечённым спрайтом TS*2 x TS*2 (SPR.scale = 2)
+    if (img && img.kind === 'offscreen' && img.width === 64 && img.height === 64) calls.tileSprites = (calls.tileSprites || 0) + 1;
+  }
   createLinearGradient() { return grad; }
   createRadialGradient() { return grad; }
   beginPath() {} moveTo() {} lineTo() {} arcTo() {} arc() {} closePath() {}
@@ -227,9 +232,12 @@ game.drops.push(new sandbox.__cls.Drop(P.cx - 6, P.cy - 6, TILE.STONE));
 frames(2);
 ok('дроп на игроке подбирается автоматически', game.inventory.counts[TILE.STONE] === invNow + 1,
    `inv=${game.inventory.counts[TILE.STONE]}`);
-// M6: к кольцу искр добавлена вспышка-«flash», поэтому частиц на одну больше
-ok('подбор дал burst-частицы', game.particles.list.length === CFG.particles.pickup + 1,
-   `particles=${game.particles.list.length}`);
+// M6: к кольцу искр добавлена вспышка-«flash».
+// M8.1: на спавне дымит корабль, поэтому считаем именно всплеск подбора
+const burstSparks = game.particles.list.filter(p => p.kind === 'spark').length;
+const burstFlash = game.particles.list.filter(p => p.kind === 'flash').length;
+ok('подбор дал burst-частицы', burstSparks >= CFG.particles.pickup && burstFlash >= 1,
+   `искр=${burstSparks} вспышек=${burstFlash} всего=${game.particles.list.length}`);
 ok('HUD пульсирует после подбора', game.inventory.pulse[TILE.STONE] > 0,
    `pulse=${game.inventory.pulse[TILE.STONE].toFixed(2)}`);
 
@@ -411,16 +419,19 @@ const p50 = tPerf[Math.floor(tPerf.length / 2)];
 const p95 = tPerf[Math.floor(tPerf.length * 0.95)];
 ok('update+render < 16.6мс (p95) при 300 телах', p95 < 16.6, `p50=${p50.toFixed(2)}мс p95=${p95.toFixed(2)}мс`);
 
-// ---------------------------------------------------------------- тайловый буфер
+// ---------------------------------------------------------------- тайлы
 calls.fillTileRect = 0;
 calls.drawImage = 0;
 calls.drawTileBuffer = 0;
+calls.tileSprites = 0;
 frames(1);
 ok('в простое offscreen тайлов не перерисовывается', calls.fillTileRect === 0, `fillRect в буфер за кадр=${calls.fillTileRect}`);
-// M6: кроме буфера тайлов есть спрайты (игрок, жук, дропы, ящики) — но мир
-// по-прежнему выводится ОДНИМ блитом, а не по тайлам
-ok('тайлы выводятся одним блитом буфера', calls.drawTileBuffer === 1,
-   `блитов буфера=${calls.drawTileBuffer}, всего drawImage=${calls.drawImage}`);
+// M8.1: мира-полотна больше нет, тайлы рисуются запечёнными спрайтами.
+// Их число зависит от размера кадра, а не от размера мира
+ok('M8.1: за кадр рисуются только видимые тайлы', calls.tileSprites > 0 && calls.tileSprites <= 1200,
+   `спрайтов тайлов=${calls.tileSprites}, всего drawImage=${calls.drawImage}`);
+ok('M8.1: блита буфера размером с мир больше нет', (calls.drawTileBuffer || 0) === 0,
+   `блитов=${calls.drawTileBuffer || 0}`);
 const beforeFlush = game.tiles.world.dirty.length;
 game.world.set(3, 3, TILE.STONE);
 ok('изменение тайла попадает в dirty', game.world.dirty.length === beforeFlush + 1);
@@ -633,7 +644,8 @@ game.tide.t = 20;   // 80 секунд до прилива
 game.inventory.counts[TILE.FERRITE] = 7;
 game.doSave();
 const saved = JSON.parse(sandbox.localStorage.getItem(CFG.save.key));
-ok('сейв записан', !!saved && saved.v === 3 && saved.tiles.length > 0, 'v=' + (saved && saved.v));
+// M8.1: формат сейва v4 — вместо RLE всей карты хранится overlay правок
+ok('сейв записан', !!saved && saved.v === 4 && saved.tiles.length > 0, 'v=' + (saved && saved.v));
 ok('в сейве есть фаза', saved.cycle && saved.cycle.phase === 'STABLE', JSON.stringify(saved.cycle));
 
 // загрузка STABLE: таймер продолжается
@@ -1082,7 +1094,8 @@ g7.craftOpen = false;
 pressG(g7, 'KeyC');
 stepG(g7, 1);
 ok('M4: C открывает меню рядом с верстаком', g7.craftOpen === true);
-ok('M4: в меню 3 рецепта M4 (+1 сканер в M5)', CFG.recipes.length === 4, String(CFG.recipes.length));
+ok('M4: в меню 3 рецепта M4 (+1 сканер в M5, +1 пистолет в M9)', CFG.recipes.length === 5,
+   `${CFG.recipes.length}: ${CFG.recipes.map(r => r.id).join(',')}`);
 
 // --- меню не открывается без верстака
 const gNoBench = new (sandbox.__cls.Game)(view);
@@ -1161,12 +1174,15 @@ P7.health = 100;
 g7.damagePlayer(30, 'прилив');
 ok('M4: броня снижает урон прилива 30 → 21', P7.health === 79, `hp=${P7.health}`);
 
-// --- гравитационная пушка: радиус 8 → 15
+// --- грави-пушка (M9 переоценила рецепт): радиус 8 → 15 и стрельба
 g7.craftOpen = true;
-g7.inventory.counts[TILE.FERRITE] = 8;
-g7.inventory.counts[ITEM.BIOGEL] = 2;
+g7.inventory.counts[TILE.STONE] = 15;
+g7.inventory.counts[TILE.FERRITE] = 10;
+g7.inventory.counts[ITEM.RESONITE] = 2;
 const gunRecipe = CFG.recipes.find(r => r.id === 'gun');
-ok('M4: рецепт пушки 8 FERRITE + 2 BIOGEL', gunRecipe.cost[3] === 8 && gunRecipe.cost[4] === 2);
+ok('M9: рецепт грави-пушки 15 STONE + 10 FERRITE + 2 RESONITE',
+   gunRecipe.cost[2] === 15 && gunRecipe.cost[3] === 10 && gunRecipe.cost[8] === 2,
+   JSON.stringify(gunRecipe.cost));
 const baseRange = g7.teleRange;
 ok('M4: без пушки радиус 8 тайлов', baseRange === 8, String(baseRange));
 ok('M4: пушка создаётся и экипируется', g7.craft(gunRecipe) === true && P7.hasGravityGun === true);
@@ -1245,11 +1261,21 @@ const PM5 = gM5.player;
 stepG(gM5, 60);
 
 // --- 1. мир стал глубже
-ok('M5: мир вырос до 200x130', gM5.world.cols === 200 && gM5.world.rows === 130,
+// M8.1: мир вырос до 1000x300 — старые проверки M5 обновлены под новую сетку
+ok('M5/M8.1: мир вырос до 1000x300', gM5.world.cols === 1000 && gM5.world.rows === 300,
    `${gM5.world.cols}x${gM5.world.rows}`);
 ok('M5: Глубокие пещеры начинаются с 50-го ряда', CFG.layers.deepTopRow === 50 && gM5.world.deepRow === 50);
-ok('M5: под старым дном есть 30 новых рядов породы',
-   gM5.world.rows - 100 === 30 && gM5.world.solid(100, 128), `rows=${gM5.world.rows}`);
+{
+  // M8.1: сетка выросла на 200 рядов; внизу по-прежнему порода (с пещерами,
+  // поэтому считаем не один тайл, а массу)
+  let rockBottom = 0;
+  for (let ty = gM5.world.rows - 12; ty < gM5.world.rows; ty++) {
+    for (let tx = 100; tx < 300; tx++) if (gM5.world.solid(tx, ty)) rockBottom++;
+  }
+  ok('M5: под старым дном есть 200 новых рядов породы',
+     gM5.world.rows - 100 === 200 && rockBottom > 500,
+     `rows=${gM5.world.rows} породы внизу=${rockBottom}`);
+}
 
 // физический замер концентрации FERRITE: считаем по тайлам, а не по конфигу
 function ferriteRatioIn(fromRow, toRow) {
@@ -1326,80 +1352,28 @@ ok('M5: в зале осталось 3 хищника',
 ok('M5: глубина не пустая — там есть где стоять',
    deepCrawlers.every(c => !gM5.world.solid(Math.floor(c.cx / TS), Math.floor(c.cy / TS))));
 
-// --- 3. терминалы
-const T5 = CFG.terminal;
-ok('M5: терминалов 3', gM5.terminals.length === 3, `n=${gM5.terminals.length}`);
-ok('M5: два терминала в глубине, один на поверхности',
-   gM5.terminals.filter(t => t.deep).length === 2 && gM5.terminals.filter(t => !t.deep).length === 1,
-   gM5.terminals.map(t => (t.deep ? 'deep' : 'top') + '@' + t.tx + ',' + t.ty).join(' '));
-ok('M5: терминалы стоят на полу, а не в породе',
-   gM5.terminals.every(t => !gM5.world.solid(t.tx, t.ty) && gM5.world.solid(t.tx, t.ty + 1)),
-   gM5.terminals.map(t => `${t.tx},${t.ty}:${gM5.world.get(t.tx, t.ty)}/${gM5.world.get(t.tx, t.ty + 1)}`).join(' '));
-ok('M5: тексты терминалов — три разных куска лора',
-   new Set(gM5.terminals.map(t => t.id)).size === 3);
-const loreText = T5.texts.map(t => t.body).join(' ');
-ok('M5: есть лор про протокол ядра', /протокол стабилизации ядра нарушен/.test(loreText));
-ok('M5: есть лор про приливы как агонию планеты', /гравитационные приливы — это агония планеты/.test(loreText));
-ok('M5: есть лор про ушедшую экспедицию', /экспедиция не вернулась, они ушли глубже/.test(loreText));
-ok('M5: награда за терминал +5 FERRITE и +1 BIOGEL',
-   T5.reward[3] === 5 && T5.reward[4] === 1, JSON.stringify(T5.reward));
-
-// далеко от терминала: E ничего не открывает
+// --- 3. M8.3: старые терминалы ушли в narrative.js, панель лора осталась
+ok('M8.3: в игре больше нет старых терминалов',
+   gM5.terminals === undefined && typeof gM5.spawnTerminals === 'undefined' &&
+   typeof gM5.terminalNear === 'undefined' && typeof gM5.readTerminal === 'undefined' &&
+   typeof gM5.drawTerminals === 'undefined' && gM5.terminalsRead === undefined);
+ok('M8.3: сюжетных заготовок в конфиге нет', CFG.terminal === undefined);
+ok('M8.3: панель лора осталась точкой входа для narrative.js',
+   typeof gM5.closeLore === 'function' && /drawLore/.test(String(gM5.drawHud)));
 {
-  const t0 = gM5.terminals[1];
-  PM5.x = (t0.tx + 12) * TS; PM5.y = gM5.world.surfaceRow * TS - PM5.h;
-  gM5.camera.snap(PM5);
-  stepG(gM5, 2);
-  pressG(gM5, 'KeyE');
-  stepG(gM5, 1);
-  ok('M5: E вдали от терминала ничего не открывает', gM5.lore === null, `lore=${!!gM5.lore}`);
-  ok('M5: счётчик терминалов на нуле', gM5.terminalsRead === 0, String(gM5.terminalsRead));
-}
-
-// вплотную: E читает лор и выдаёт запас древних
-{
-  const t0 = gM5.terminals[1];
-  PM5.x = (t0.tx - 1) * TS; PM5.y = (t0.ty + 1) * TS - PM5.h;
-  PM5.vx = 0; PM5.vy = 0;
-  gM5.camera.snap(PM5);
-  stepG(gM5, 3);
-  ok('M5: терминал в радиусе взаимодействия даёт подсказку', gM5.promptTerminal === t0,
-     `prompt=${gM5.promptTerminal && gM5.promptTerminal.id}`);
-  const fer0 = gM5.inventory.counts[TILE.FERRITE];
-  const gel0 = gM5.inventory.counts[ITEM.BIOGEL];
-  pressG(gM5, 'KeyE');
-  stepG(gM5, 1);
-  ok('M5: E открывает панель лора', !!gM5.lore && gM5.lore.id === t0.id,
-     JSON.stringify(gM5.lore && gM5.lore.id));
-  ok('M5: в панели есть текст терминала', !!gM5.lore && gM5.lore.body.length > 30);
-  ok('M5: терминал гаснет после прочтения', t0.read === true);
-  ok('M5: выдан запас древних +5 FERRITE +1 BIOGEL',
-     gM5.inventory.counts[TILE.FERRITE] === fer0 + 5 && gM5.inventory.counts[ITEM.BIOGEL] === gel0 + 1,
-     `ferrite ${fer0} → ${gM5.inventory.counts[TILE.FERRITE]}, biogel ${gel0} → ${gM5.inventory.counts[ITEM.BIOGEL]}`);
-  ok('M5: счётчик терминалов стал 1/3', gM5.terminalsRead === 1 && gM5.terminals.length === 3,
-     `${gM5.terminalsRead}/${gM5.terminals.length}`);
-
-  // панель лора забирает мышь: копания не начинается
-  gM5.input.mouse.left = true;
-  const beforeDig = gM5.dig;
-  stepG(gM5, 5);
-  ok('M5: под панелью лора мир не копается', gM5.dig === null && beforeDig === null);
-  gM5.input.mouse.left = false;
-
+  // сюжетный слой кладёт текст сам — панель должна его нарисовать
+  gM5.lore = { title: 'ПРОВЕРКА СВЯЗИ', body: 'текст пришёл из narrative.js' };
+  gM5.loreT = 1;
+  let drewLore = false;
+  const origLore = gM5.drawLore;
+  gM5.drawLore = function (c) { drewLore = true; return origLore.call(gM5, c); };
+  gM5.render();
+  gM5.drawLore = origLore;
+  ok('M8.3: панель лора рисуется, когда текст задан снаружи', drewLore);
   pressG(gM5, 'Escape');
   stepG(gM5, 1);
-  ok('M5: Escape закрывает панель лора', gM5.lore === null);
-
-  // повторное E: терминал погас и больше не взаимодействуется
-  pressG(gM5, 'KeyE');
-  stepG(gM5, 1);
-  ok('M5: погасший терминал не открывается снова', gM5.lore === null && gM5.promptTerminal === null,
-     `lore=${!!gM5.lore} prompt=${!!gM5.promptTerminal}`);
-  ok('M5: награду нельзя получить дважды',
-     gM5.inventory.counts[TILE.FERRITE] === fer0 + 5 && gM5.inventory.counts[ITEM.BIOGEL] === gel0 + 1);
+  ok('M8.3: Escape закрывает панель лора', gM5.lore === null, `lore=${!!gM5.lore}`);
 }
-const readTerminalId = gM5.terminals[1].id;
-const readTerminalPos = { tx: gM5.terminals[1].tx, ty: gM5.terminals[1].ty };
 
 // --- 4. сканер: рецепт и экипировка
 ok('M5: рецепт сканера 5 FERRITE + 5 STONE + 1 BIOGEL', (() => {
@@ -1433,7 +1407,8 @@ ok('M5: без сканера Q не срабатывает', (() => {
   stepG(gM5, 2);
   pressG(gM5, 'KeyC');
   stepG(gM5, 1);
-  ok('M5: меню крафта открывается с 4 рецептами', gM5.craftOpen === true && CFG.recipes.length === 4);
+  ok('M5: меню крафта открывается, сканер на 4-й строке',
+     gM5.craftOpen === true && CFG.recipes[3].id === 'scanner');
   gM5.inventory.counts[TILE.FERRITE] = 5;
   gM5.inventory.counts[TILE.STONE] = 5;
   gM5.inventory.counts[ITEM.BIOGEL] = 1;
@@ -1469,35 +1444,37 @@ pressG(gM5, 'KeyQ');
 stepG(gM5, 1);
 ok('M5: во время кулдауна Q не срабатывает повторно', gM5.scanCd > 0 && gM5.scanT < CFG.scanner.holdTime);
 
-// цели: терминал, хищник и феррит в радиусе
+// цели: хищник и феррит в радиусе (терминалов больше нет)
 {
-  // ставим игрока к непрочитанному терминалу, подводим хищника и феррит
-  const t1 = gM5.terminals.find(t => !t.read);
-  PM5.x = t1.x - 6 * TS;
-  PM5.y = t1.y + CFG.terminal.h - PM5.h;
+  PM5.x = 40 * TS; PM5.y = gM5.world.surfaceRow * TS - PM5.h; PM5.vx = 0; PM5.vy = 0;
   gM5.camera.snap(PM5);
   // феррит в 6 тайлах: тайл в породе рядом
-  const fx = t1.tx + 6, fy = t1.ty + 3;
+  const fx = Math.floor(PM5.cx / TS) + 6, fy = gM5.world.surfaceRow + 3;
   gM5.world.set(fx, fy, TILE.FERRITE, false);
   gM5.tiles.flush();
   // хищник в 8 тайлах
   gM5.crawlers.length = 0;
-  const cScan = new Crawler((t1.tx + 8) * TS, t1.ty * TS - CFG.crawler.h);
+  const cScan = new Crawler((Math.floor(PM5.cx / TS) + 8) * TS, PM5.y);
   cScan.home = { x: cScan.cx, y: cScan.cy };
   gM5.crawlers.push(cScan);
   // дроп FERRITE в 3 тайлах
-  const fd = new sandbox.__cls.Drop(t1.tx * TS - 3 * TS, t1.ty * TS, TILE.FERRITE);
+  const fd = new sandbox.__cls.Drop(PM5.cx - 3 * TS, PM5.cy, TILE.FERRITE);
   gM5.drops.push(fd);
+  // жила RESONITE в 5 тайлах: сканер должен видеть и её
+  const rx = Math.floor(PM5.cx / TS) - 5, ry = gM5.world.surfaceRow + 4;
+  gM5.world.set(rx, ry, TILE.RESONITE, false);
+  gM5.tiles.flush();
 
   gM5.scanCd = 0; gM5.scanT = 0;
   gM5.scanTargets = gM5.collectScanTargets();
   const kinds = {};
   for (const t of gM5.scanTargets) kinds[t.kind] = (kinds[t.kind] || 0) + 1;
-  ok('M5: волна видит терминал', kinds.terminal >= 1, JSON.stringify(kinds));
+  ok('M8.3: в целях сканера нет терминалов', !kinds.terminal, JSON.stringify(kinds));
   ok('M5: волна видит хищника', kinds.crawler >= 1, JSON.stringify(kinds));
   ok('M5: волна видит феррит (дроп и руда)', kinds.ferrite >= 2, JSON.stringify(kinds));
-  ok('M5: цвета меток — синий/оранжевый/красный',
-     CFG.scanner.colors.ferrite === '#63b8ff' && CFG.scanner.colors.terminal === '#ffa63d' &&
+  ok('M8.3: волна видит RESONITE своим цветом', kinds.resonite >= 1, JSON.stringify(kinds));
+  ok('M5: цвета меток — синий/фиолетовый/красный',
+     CFG.scanner.colors.ferrite === '#63b8ff' && CFG.scanner.colors.resonite === '#b98bff' &&
      CFG.scanner.colors.crawler === '#ff3b48');
 
   // за пределами радиуса цели не попадают
@@ -1508,14 +1485,10 @@ ok('M5: во время кулдауна Q не срабатывает повт�
      !withFar.some(t => Math.hypot(t.wx - PM5.cx, t.wy - PM5.cy) / TS > 25.5),
      `max=${Math.max(...withFar.map(t => Math.hypot(t.wx - PM5.cx, t.wy - PM5.cy) / TS)).toFixed(1)}`);
 
-  // прочитанный терминал больше не подсвечивается
-  const readOnes = withFar.filter(t => t.kind === 'terminal');
-  ok('M5: прочитанный терминал сканер не подсвечивает',
-     readOnes.every(t => t.wx !== gM5.terminals[1].x + CFG.terminal.w / 2 ||
-                         gM5.terminals[1].read === false));
-
+  gM5.drops.pop();
   gM5.drops.pop();
   gM5.world.set(fx, fy, TILE.STONE, false);
+  gM5.world.set(rx, ry, TILE.STONE, false);
   gM5.tiles.flush();
 }
 
@@ -1532,25 +1505,19 @@ gM5.scanCd = 0;
 {
   gM5.doSave();
   const raw = JSON.parse(sandbox.localStorage.getItem(CFG.save.key));
-  ok('M5: сейв версии 3', raw.v === 3, `v=${raw.v}`);
+  ok('M8.1: сейв версии 4', raw.v === 4, `v=${raw.v}`);
+  ok('M8.1: в сейве только правки, а не вся карта', raw.tileFormat === 'mods' && raw.tiles.length < 5000,
+     `записей=${raw.tiles.length}`);
   ok('M5: в сейве есть сканер', raw.player.scanner === true);
-  ok('M5: в сейве есть список терминалов с координатами',
-     raw.terminals.length === 3 && raw.terminals.every(t => typeof t.tx === 'number' && typeof t.ty === 'number'));
-  ok('M5: в сейве отмечен прочитанный терминал',
-     raw.terminals.filter(t => t.read).length === 1 &&
-     raw.terminals.find(t => t.read).id === readTerminalId);
+  ok('M8.3: в сейве больше нет ship и terminals',
+     raw.ship === undefined && raw.terminals === undefined,
+     Object.keys(raw).join(','));
 
   const gReload = new (sandbox.__cls.Game)(view);
   stepG(gReload, 5);
   ok('M5: hasScanner переживает перезагрузку', gReload.player.hasScanner === true);
-  ok('M5: счётчик терминалов переживает перезагрузку',
-     gReload.terminalsRead === 1 && gReload.terminals.length === 3,
-     `${gReload.terminalsRead}/${gReload.terminals.length}`);
-  const same = gReload.terminals.find(t => t.tx === readTerminalPos.tx && t.ty === readTerminalPos.ty);
-  ok('M5: координаты терминалов не съехали после F5', !!same && same.read === true,
-     same ? `${same.tx},${same.ty}` : 'нет совпадения');
-  ok('M5: два терминала после загрузки всё ещё в глубине',
-     gReload.terminals.filter(t => t.ty >= CFG.layers.deepTopRow).length === 2);
+  ok('M8.3: терминалы не воскресают при загрузке сейва',
+     gReload.terminals === undefined && gReload.ship === undefined);
 
   // старый сейв v2 не должен ломать загрузку
   const legacy = JSON.parse(sandbox.localStorage.getItem(CFG.save.key));
@@ -1562,7 +1529,6 @@ gM5.scanCd = 0;
   let gLegacy = null;
   try { gLegacy = new (sandbox.__cls.Game)(view); stepG(gLegacy, 3); } catch (e) { legacyOk = false; }
   ok('M5: сейв M4 (v2) читается без ошибок', legacyOk && !!gLegacy);
-  ok('M5: на сейве v2 терминалы заспавнены заново', !!gLegacy && gLegacy.terminals.length === 3);
   sandbox.localStorage.removeItem(CFG.save.key);
 }
 
@@ -1571,29 +1537,28 @@ ok('M5: Q и E есть в плашке управления',
    /'Q'/.test(String(gM5.drawControls)) && /'E'/.test(String(gM5.drawControls)) &&
    /сканер/.test(String(gM5.drawControls)) && /читать/.test(String(gM5.drawControls)));
 ok('M5: иконка сканера в HUD', /hasScanner/.test(String(gM5.drawHealthBar)));
-ok('M5: счётчик терминалов в HUD', /Терминалы:/.test(String(gM5.drawHealthBar)));
+ok('M8.3: счётчика терминалов в HUD больше нет', !/Терминалы:/.test(String(gM5.drawHealthBar)));
 ok('M5: индикатор кулдауна сканера в HUD', /scanCd/.test(String(gM5.drawHealthBar)));
 ok('M5: сканер рисует волну поверх мира', /drawScan/.test(String(gM5.render)) &&
    /scanTargets/.test(String(gM5.drawScan)));
-ok('M5: терминалы рисуются обелисками', /drawTerminals/.test(String(gM5.render)) &&
-   /обелиск|moveTo/.test(String(gM5.drawTerminals)));
-ok('M5: подсказка «[E] Прочитать» нарисована', /\[E\] Прочитать/.test(String(gM5.drawPrompt)));
+ok('M8.3: терминалов в конвейере рендера нет', !/drawTerminals|drawShip|drawPrompt/.test(String(gM5.render)));
 // M6: drawDeepFog заменён на настоящую маску света (см. блок M6 ниже)
 ok('M5: глубина затемняется экранным слоем', /drawLighting/.test(String(gM5.render)) &&
    /destination-out/.test(String(gM5.drawLighting)));
-ok('M5: без console.log в новом коде', !/console\.(log|warn|error)/.test(String(gM5.useScanner) + String(gM5.readTerminal) + String(gM5.spawnTerminals) + String(gM5.drawScan)));
+ok('M5: без console.log в новом коде', !/console\.(log|warn|error)/.test(String(gM5.useScanner) + String(gM5.drawScan)));
 
-// полотно тайлов выросло, но в кадр по-прежнему попадает один drawImage
-ok('M5: слой тайлов размером с новый мир',
-   gM5.tiles.canvas.height === 130 * TS, `h=${gM5.tiles.canvas.height}`);
+// M8.1: полотна размером с мир больше нет — 1000x300 тайлов в 32 px
+// это 32000x9600 px (~1.2 ГБ), поэтому тайлы рисуются спрайтами
+ok('M8.1: тайлового полотна размером с мир нет', gM5.tiles.canvas === null);
+ok('M8.1: мир нарезан на чанки 64x64 (16x5)', CFG.world.chunk === 64 &&
+   gM5.world.chunksX === 16 && gM5.world.chunksY === 5,
+   `${gM5.world.chunksX}x${gM5.world.chunksY}`);
 {
-  // M6: спрайты и тайлы тоже рисуются через drawImage, поэтому считаем
-  // именно блит большого буфера тайлов (единственный источник мира-сетки)
+  const before = calls.tileSprites || 0;
   gM5.render();
-  const before = calls.drawTileBuffer || 0;
-  gM5.render();
-  ok('M5: рендер мира — один блит буфера тайлов за кадр, а не 130 рядов',
-     (calls.drawTileBuffer || 0) - before === 1, `dt=${(calls.drawTileBuffer || 0) - before}`);
+  const per = (calls.tileSprites || 0) - before;
+  ok('M8.1: кадр рисует видимые тайлы, а не 130 рядов мира',
+     per > 0 && per < 1000, `тайлов за кадр=${per} из ${gM5.world.cols * gM5.world.rows}`);
 }
 
 // камера в глубине не выходит за мир
@@ -1630,7 +1595,9 @@ ok('M5: слой тайлов размером с новый мир',
   ok('M6: спрайты кэшируются — 10 кадров не пекут новых',
      sandbox.__SPR.built === built1 && sandbox.__SPR.hits > hits1,
      `built=${built1} hits=${hits1}→${sandbox.__SPR.hits}`);
-  ok('M6: кэш не разрастается до сотен картинок', built1 < 120, `спрайтов=${built1}`);
+  // M8.1: тайлы пекутся вариантами (тип × тон × маска соседей), поэтому
+  // спрайтов больше, но их число ограничено и не зависит от размера мира
+  ok('M6: кэш не разрастается до сотен картинок', built1 < 400, `спрайтов=${built1}`);
 }
 
 // --- 2. ключи спрайтов: броня, шаг, ранение — разные кадры
@@ -2063,6 +2030,401 @@ ok('M5: слой тайлов размером с новый мир',
   ok('M7: на узком экране панель крафта масштабируется', small.s < 1, `s=${small.s.toFixed(2)}`);
   ok('M7: попадание по строке считается с тем же масштабом',
      /box\.s/.test(String(g.updateCraft)) || /rowH \* box\.s/.test(String(g.updateCraft)));
+}
+
+// ---------------------------------------------------------------- M8.3: корабль ушёл в narrative.js
+{
+  ok('M8.3: в игре больше нет старого корабля',
+     game.ship === undefined && CFG.ship === undefined &&
+     typeof game.makeShip === 'undefined' && typeof game.shipNear === 'undefined' &&
+     typeof game.inspectShip === 'undefined' && typeof game.updateShipFx === 'undefined' &&
+     typeof game.drawShip === 'undefined');
+  ok('M8.3: спрайт обломков больше не печётся игрой', typeof sandbox.__Sprites.ship === 'undefined');
+
+  // сейв не тащит за собой сюжетные объекты
+  game.doSave();
+  const raw = JSON.parse(sandbox.localStorage.getItem(CFG.save.key) || 'null');
+  ok('M8.3: сейв без корабля', !!raw && raw.ship === undefined, raw ? Object.keys(raw).join(',') : 'нет сейва');
+}
+
+// ---------------------------------------------------------------- M8.3: RESONITE в HUD
+{
+  const r = CFG.resources.find(x => x.id === 8);
+  ok('M8.3: RESONITE 8 в списке ресурсов',
+     !!r && r.name === 'RESONITE' && r.color === '#b98bff' && r.shade === '#6b3fb8' && r.light === '#eaf8ff',
+     r ? JSON.stringify(r) : 'нет записи');
+  ok('M8.3: в инвентаре есть строка RESONITE с нулём',
+     game.inventory.counts[8] === 0, String(game.inventory.counts[8]));
+  ok('M8.3: панель ресурсов выросла на пятую строку',
+     CFG.resources.length === 5 && game.hudMetrics().h === CFG.hud.pad * 2 + CFG.hud.rowH * 5,
+     `h=${game.hudMetrics().h}`);
+
+  // строка реально попадает в кадр HUD
+  const c2 = view.getContext('2d');
+  const origFill = c2.fillText.bind(c2);
+  const seen = [];
+  c2.fillText = (t) => { seen.push(String(t)); };
+  game.render();
+  c2.fillText = origFill;
+  ok('M8.3: HUD рисует строку RESONITE', seen.includes('RESONITE'));
+  ok('M8.3: HUD с пятой строкой не уезжает за экран',
+     game.hudMetrics().bottom < game.vh - 24, `bottom=${game.hudMetrics().bottom.toFixed(0)} из ${game.vh}`);
+}
+
+// ---------------------------------------------------------------- M8.1: RESONITE
+{
+  let spot = null;
+  for (let y = CFG.biomes.crystalFromRow + 2; y < CFG.layers.deepTopRow + 60 && !spot; y++) {
+    for (let x = 200; x < 560; x++) if (W.get(x, y) === TILE.RESONITE) { spot = { x, y }; break; }
+  }
+  ok('M8.1: в кристальных пещерах есть RESONITE', !!spot, spot ? `тайл ${spot.x},${spot.y}` : 'не найдено');
+  ok('M8.1: RESONITE копается заметно дольше породы',
+     CFG.dig.times[TILE.RESONITE] > CFG.dig.times[TILE.DIRT] * 3,
+     `${CFG.dig.times[TILE.RESONITE]}с против ${CFG.dig.times[TILE.DIRT]}с`);
+
+  if (spot) {
+    const inv = game.inventory.counts;
+    const before = { f: inv[TILE.FERRITE] || 0, s: inv[TILE.STONE] || 0 };
+    const n0 = game.drops.length;
+    game.mineTile(spot.x, spot.y);
+    const made = game.drops.slice(n0);
+    const f = made.filter(d => d.type === TILE.FERRITE).length;
+    const s = made.filter(d => d.type === TILE.STONE).length;
+    ok('M8.1: RESONITE рассыпается на 2 FERRITE + 1 STONE', f === 2 && s === 1,
+       `ferrite=${f} stone=${s}`);
+    ok('M8.1: RESONITE исчез из мира', W.get(spot.x, spot.y) === TILE.EMPTY);
+
+    // подбираем: ставим дропы в игрока и даём кадр на подбор
+    for (const d of made) {
+      d.x = P.cx - d.w / 2; d.y = P.cy - d.h / 2;
+      d.vx = 0; d.vy = 0;
+    }
+    frames(6);
+    const af = game.inventory.counts[TILE.FERRITE] || 0, as = game.inventory.counts[TILE.STONE] || 0;
+    ok('M8.1: RESONITE попадает в инвентарь', af === before.f + 2 && as === before.s + 1,
+       `ferrite ${before.f}→${af}, stone ${before.s}→${as}`);
+  }
+}
+
+// ---------------------------------------------------------------- M8.1: чанки
+{
+  const w = game.world;
+  const cs = CFG.world.chunk;
+  const cam = (tx, ty) => ({ x: tx * TS, y: ty * TS, w: 640, h: 360 });
+
+  // загружаем квадрат руин и правим в нём тайл
+  const refer = { tx: 704, ty: 30 };
+  w.updateChunks(cam(refer.tx - 10, refer.ty - 5));
+  // берём именно твёрдый тайл: у пустого set() вернётся без записи в overlay
+  let tx = refer.tx, ty = refer.ty;
+  for (let dy = 0; dy < 20 && w.get(tx, ty) === TILE.EMPTY; dy++) ty = refer.ty + dy;
+  const cx = (tx / cs) | 0, cy = (ty / cs) | 0;
+  ok('M8.1: чанк камеры загружается по требованию', w.isChunkLoaded(cx, cy));
+  const typeBefore = w.get(tx, ty);
+  w.set(tx, ty, TILE.EMPTY);
+  const overlay = w.mods.get(w.chunkKey(cx, cy));
+  ok('M8.1: правка тайла уходит в overlay, а не в гигантский массив',
+     !!overlay && overlay.has(w.localIndex(tx, ty, cx, cy)));
+
+  // уезжаем на старт: чанк должен выгрузиться, а копка — остаться в overlay.
+  // LRU не выкидывает только что тронутый чанк, поэтому сначала проезжаем
+  // несколько других мест, иначе руинный чанк остаётся самым свежим
+  const keep = w.keepChunks;
+  w.keepChunks = 6;                  // столько чанков держит LRU в этом прогоне
+  for (let k = 0; k < 3; k++) w.updateChunks(cam(300 + k * 40, 120));
+  w.updateChunks(cam(0, 0));
+  w.updateChunks(cam(0, 0));
+  ok('M8.1: дальний чанк выгружается', !w.isChunkLoaded(cx, cy), `загружено ${w.loadedChunks()}`);
+  ok('M8.1: загруженных чанков не больше лимита', w.loadedChunks() <= w.keepChunks,
+     `${w.loadedChunks()} <= ${w.keepChunks}`);
+  w.keepChunks = keep;
+  ok('M8.1: выгрузка не теряет overlay-правку', w.mods.get(w.chunkKey(cx, cy)).has(w.localIndex(tx, ty, cx, cy)));
+
+  // возвращаемся: чанк перегенерируется, правка применяется поверх
+  w.updateChunks(cam(tx - 10, ty - 5));
+  ok('M8.1: копка переживает выгрузку и повторную загрузку', w.get(tx, ty) === TILE.EMPTY,
+     `было ${typeBefore}, стало ${w.get(tx, ty)}`);
+}
+
+// ---------------------------------------------------------------- M8.1: турели Руин
+{
+  const w = game.world;
+  const spots = [];
+  for (let cy = 0; cy < w.chunksY; cy++) {
+    for (let cx = (CFG.biomes.ruinsFromX / CFG.world.chunk) | 0; cx < w.chunksX; cx++) {
+      const ch = w.ensureChunk(cx, cy);
+      if (ch.turrets.length) spots.push(ch.turrets[0]);
+    }
+  }
+  ok('M8.1: в Руинах расставлены турели', spots.length >= 8, `точек ${spots.length}`);
+
+  const spot = spots[0];
+  const turretTileBelow = w.get(spot.tx, spot.ty + 1);
+  ok('M8.1: турель стоит на металле, а не в воздухе',
+     turretTileBelow === TILE.METAL, `под турелью ${turretTileBelow}`);
+
+  // ставим игрока под ствол: турель должна заметить, прицелиться и выстрелить
+  const px = P.x, py = P.y, hp0 = P.health;
+  game.camera.snap(P);
+  w.updateChunks({ x: spot.tx * TS - 320, y: spot.ty * TS - 180, w: 640, h: 360 });
+  game.syncTurrets();
+  const near = game.turrets.find(t => Math.abs(t.tx - spot.tx) < 2 && Math.abs(t.ty - spot.ty) < 2);
+  ok('M8.1: турель попадает в список активных', !!near, `турелей ${game.turrets.length}`);
+  if (near) {
+    P.x = near.cx - P.w / 2;
+    P.y = (near.ty + 1) * TS - P.h;
+    P.vx = P.vy = 0;
+    P.invuln = 0;
+    game.camera.snap(P);
+    let sawBolt = false, sawAim = false;
+    for (let i = 0; i < 180 && P.health === hp0; i++) {
+      frames(1);
+      if (game.bolts.length) sawBolt = true;
+      if (near.aim > 0) sawAim = true;
+    }
+    ok('M8.1: турель прицеливается в игрока', sawAim);
+    ok('M8.1: турель стреляет болтом', sawBolt);
+    ok('M8.1: болт наносит урон', P.health < hp0, `hp ${hp0}→${P.health}`);
+  }
+
+  P.x = px; P.y = py; P.vx = P.vy = 0;
+  P.health = P.maxHealth;
+  P.invuln = 1;
+  game.bolts.length = 0;
+  game.camera.snap(P);
+  frames(2);
+}
+
+// ================================================================
+// M9: арсенал и угрозы
+// ================================================================
+sandbox.localStorage.removeItem(CFG.save.key);
+const gM9 = new (sandbox.__cls.Game)(view);
+const PM9 = gM9.player;
+stepG(gM9, 30);
+
+// --- 1. рецепты и стартовое состояние
+const pistolR = CFG.recipes.find(r => r.id === 'pistol');
+ok('M9: рецепт лазерного пистолета 10 FERRITE + 5 RESONITE',
+   !!pistolR && pistolR.cost[3] === 10 && pistolR.cost[8] === 5,
+   JSON.stringify(pistolR && pistolR.cost));
+ok('M9: пистолет и грави-пушка стоят в меню крафта',
+   CFG.recipes.some(r => r.id === 'pistol') && CFG.recipes.some(r => r.id === 'gun'),
+   CFG.recipes.map(r => r.id).join(','));
+ok('M9: на старте в руках резак',
+   PM9.weapon === 'cutter' && !PM9.hasLaserPistol && !PM9.hasGravityGun, PM9.weapon);
+ok('M9: пока оружия нет, переключать нечего', gM9.weaponList().join(',') === 'cutter');
+
+// --- 2. крафт пистолета через настоящее меню верстака
+{
+  const s9 = gM9.world.surfaceRow;
+  const bx9 = Math.floor(PM9.cx / TS) + 4;
+  for (let i = 0; i < 2; i++) {
+    gM9.world.set(bx9 + i, s9 - 1, TILE.EMPTY, false);
+    gM9.world.set(bx9 + i, s9 - 2, TILE.EMPTY, false);
+    gM9.world.set(bx9 + i, s9, TILE.STONE, false);
+  }
+  gM9.world.set(bx9, s9 - 1, TILE.WORKBENCH, true);
+  gM9.world.set(bx9 + 1, s9 - 1, TILE.WORKBENCH, true);
+  gM9.tiles.flush();
+  PM9.x = (bx9 - 1) * TS;
+  PM9.y = s9 * TS - PM9.h;
+  gM9.camera.snap(PM9);
+  stepG(gM9, 2);
+
+  gM9.inventory.counts[TILE.FERRITE] = 10;
+  gM9.inventory.counts[ITEM.RESONITE] = 5;
+  ok('M9: без меню пистолет не крафтится', gM9.craft(pistolR) === false);
+
+  pressG(gM9, 'KeyC');
+  stepG(gM9, 1);
+  ok('M9: меню крафта открылось с пистолетом', gM9.craftOpen === true && gM9.canCraft(pistolR) === true);
+  ok('M9: меню выросло до пяти строк',
+     Math.round(gM9.craftLayout().dh) === 54 + 62 * CFG.recipes.length + 16,
+     'dh=' + gM9.craftLayout().dh);
+
+  pressG(gM9, 'Digit5');
+  stepG(gM9, 1);
+  ok('M9: пистолет скрафчен и взят в руки', PM9.hasLaserPistol === true && PM9.weapon === 'pistol',
+     `pistol=${PM9.hasLaserPistol} weapon=${PM9.weapon}`);
+  ok('M9: списано 10 FERRITE + 5 RESONITE',
+     gM9.inventory.counts[TILE.FERRITE] === 0 && gM9.inventory.counts[ITEM.RESONITE] === 0,
+     `f=${gM9.inventory.counts[TILE.FERRITE]} r=${gM9.inventory.counts[ITEM.RESONITE]}`);
+  ok('M9: второй пистолет не крафтится', gM9.craft(pistolR) === false);
+  pressG(gM9, 'Escape');
+  stepG(gM9, 1);
+}
+
+// --- 3. луч: жук умирает с двух попаданий, режим 4 = стрельба
+{
+  const row = gM9.world.surfaceRow;
+  const ptx = Math.floor(PM9.cx / TS);
+  for (let tx = ptx - 1; tx <= ptx + 6; tx++) {
+    for (let ty = row - 3; ty <= row - 1; ty++) gM9.world.set(tx, ty, TILE.EMPTY, false);
+    gM9.world.set(tx, row, TILE.STONE, false);
+  }
+  gM9.tiles.flush();
+  PM9.y = row * TS - PM9.h;
+  PM9.vx = PM9.vy = 0;
+  gM9.camera.snap(PM9);
+  gM9.setMode(4);
+  ok('M9: в режиме копания с пистолетом ЛКМ = стрелять', gM9.firingMode() === 'pistol');
+
+  const bug = new Crawler(PM9.cx + 72, PM9.cy - 6);
+  bug.vx = bug.vy = 0;
+  gM9.crawlers = [bug];
+  PM9.fireCd = 0;
+  const hp1 = bug.hp;
+  const fired = gM9.fireWeapon({ x: bug.cx, y: bug.cy });
+  ok('M9: выстрел пистолета попадает в жука', fired === true && bug.hp < hp1, `${hp1}→${bug.hp}`);
+  ok('M9: луч оставляет след на кадр', gM9.beams.length === 1, 'beams=' + gM9.beams.length);
+  ok('M9: лазер не убивает жука одним попаданием', bug.dead === false);
+  PM9.fireCd = 0;
+  gM9.fireWeapon({ x: bug.cx, y: bug.cy });
+  ok('M9: двух попаданий хватает', bug.dead === true, `hp=${bug.hp}`);
+  ok('M9: у выстрела есть перезарядка', PM9.fireCd > 0, String(PM9.fireCd.toFixed(2)));
+}
+
+// --- 4. грави-пушка: сгусток летит, бьёт и отбрасывает
+{
+  PM9.hasGravityGun = true;
+  gM9.setWeapon('grav');
+  const bug2 = new Crawler(PM9.cx + 130, PM9.cy - 8);
+  bug2.vx = bug2.vy = 0;
+  gM9.crawlers = [bug2];
+  gM9.shots.length = 0;
+  PM9.fireCd = 0;
+  const hp2 = bug2.hp;
+  gM9.fireWeapon({ x: bug2.cx, y: bug2.cy });
+  ok('M9: грави-пушка выпускает сгусток', gM9.shots.length === 1, 'shots=' + gM9.shots.length);
+  for (let i = 0; i < 90 && gM9.shots.length; i++) stepG(gM9, 1);
+  ok('M9: сгусток долетел и нанёс урон', bug2.dead === true || bug2.hp < hp2,
+     `hp ${hp2}→${bug2.hp} dead=${bug2.dead}`);
+  ok('M9: попадание отбрасывает жука', Math.abs(bug2.vx) > 120 || bug2.dead === true,
+     'vx=' + Math.round(bug2.vx));
+  ok('M9: сгусток исчез при попадании', gM9.shots.length === 0);
+}
+
+// --- 5. турель: hp, слом, лут, тишина
+{
+  const w = gM9.world;
+  let spot = null;
+  for (let cy = 0; cy < w.chunksY && !spot; cy++) {
+    for (let cx = (CFG.biomes.ruinsFromX / CFG.world.chunk) | 0; cx < w.chunksX; cx++) {
+      const ch = w.ensureChunk(cx, cy);
+      if (ch.turrets.length) { spot = ch.turrets[0]; break; }
+    }
+  }
+  gM9.deadTurrets.clear();
+  if (gM9.turretMap) gM9.turretMap.clear();
+  const viewT = { x: spot.tx * TS - 320, y: spot.ty * TS - 200, w: 640, h: 400 };
+  w.updateChunks(viewT);
+  gM9.syncTurrets(true);
+  const t = gM9.turrets.find(x => x.tx === spot.tx && x.ty === spot.ty);
+  ok('M9: турель несёт 30 hp', !!t && t.hp === 30 && t.maxHp === 30, t ? `hp=${t.hp}` : 'нет');
+
+  if (t) {
+    // игрок рядом, линия обстрела расчищена
+    PM9.x = t.cx - 70;
+    PM9.y = t.cy - PM9.h / 2;
+    PM9.vx = PM9.vy = 0;
+    PM9.invuln = 1;
+    PM9.health = PM9.maxHealth;
+    gM9.camera.snap(PM9);
+    for (let tx = Math.floor(PM9.cx / TS); tx <= t.tx; tx++) {
+      for (let ty = t.ty - 3; ty <= t.ty; ty++) w.set(tx, ty, TILE.EMPTY, false);
+    }
+    gM9.tiles.flush();
+    gM9.setWeapon('pistol');
+
+    const hpT = t.hp;
+    PM9.fireCd = 0;
+    gM9.fireWeapon({ x: t.cx, y: t.cy });
+    ok('M9: выстрел снимает hp турели', t.hp < hpT, `${hpT}→${t.hp}`);
+
+    const dropsBefore = gM9.drops.length;
+    for (let i = 0; i < 6 && !t.broken; i++) { PM9.fireCd = 0; gM9.fireWeapon({ x: t.cx, y: t.cy }); }
+    ok('M9: турель разбивается', t.broken === true, `hp=${t.hp}`);
+    ok('M9: сломанная турель помечена мёртвой', gM9.deadTurrets.has(t.tx + ',' + t.ty));
+
+    const loot = gM9.drops.slice(dropsBefore);
+    const ferrite = loot.filter(d => d.type === TILE.FERRITE).length;
+    const reson = loot.filter(d => d.type === ITEM.RESONITE).length;
+    ok('M9: с турели падает 3–5 FERRITE', ferrite >= 3 && ferrite <= 5, 'ferrite=' + ferrite);
+    ok('M9: RESONITE — не больше одного и с шансом', reson === 0 || reson === 1, 'resonite=' + reson);
+
+    let shotsFromT = 0;
+    for (let i = 0; i < 120; i++) { stepG(gM9, 1); if (t.flash > 0) shotsFromT++; }
+    ok('M9: сломанная турель больше не стреляет', shotsFromT === 0, 'выстрелов ' + shotsFromT);
+
+    w.updateChunks(viewT);
+    gM9.syncTurrets(true);
+    const t2 = gM9.turrets.find(x => x.tx === t.tx && x.ty === t.ty);
+    ok('M9: сломанная турель остаётся грудой металла', !!t2 && t2.broken === true);
+
+    gM9.doSave();
+    const gM9b = new (sandbox.__cls.Game)(view);
+    ok('M9: сломанная турель не оживает после F5', gM9b.deadTurrets.has(t.tx + ',' + t.ty));
+    ok('M9: пистолет и оружие в руках переживают F5',
+       gM9b.player.hasLaserPistol === true && gM9b.player.weapon === 'pistol',
+       `pistol=${gM9b.player.hasLaserPistol} weapon=${gM9b.player.weapon}`);
+  }
+}
+
+// --- 6. мобильная кнопка «Действие» стреляет
+{
+  gM9.craftOpen = false;
+  gM9.turrets.length = 0;                 // болты соседей не мешают тесту
+  gM9.setMode(4);
+  gM9.setWeapon('pistol');
+  const bug3 = new Crawler(PM9.cx + 64, PM9.cy - 4);
+  bug3.vx = bug3.vy = 0;
+  gM9.crawlers = [bug3];
+  gM9.camera.snap(PM9);
+  PM9.fireCd = 0;
+  const z = CFG.camera.zoom;
+  gM9.input.mouse.x = (bug3.cx - gM9.camera.x) * z;
+  gM9.input.mouse.y = (bug3.cy - gM9.camera.y) * z;
+  gM9.input.mouse.left = true;            // так это делает TouchUI.aim/update
+  gM9.prevLeft = false;
+  const hpM = bug3.hp;
+  gM9.updateMouse(CFG.step);
+  gM9.input.mouse.left = false;
+  ok('M9: кнопка «Действие» на телефоне тоже стреляет', bug3.hp < hpM, `${hpM}→${bug3.hp}`);
+  ok('M9: в режиме сноса ЛКМ не стреляет', (() => {
+    gM9.setMode(5);
+    PM9.fireCd = 0;
+    return gM9.fireWeapon({ x: bug3.cx, y: bug3.cy }) === false && gM9.firingMode() === null;
+  })());
+}
+
+// --- 7. индикатор оружия
+{
+  const mw = gM9.weaponPanelMetrics();
+  const pp = gM9.phasePanelMetrics();
+  ok('M9: индикатор стоит над панелью прилива', mw.x === pp.x && mw.y + mw.h <= pp.y,
+     `y=${Math.round(mw.y)} панель=${Math.round(pp.y)}`);
+  ok('M9: индикатор не вылезает за экран', mw.x >= 0 && mw.x + mw.w <= gM9.vw && mw.y > 0,
+     `x=${Math.round(mw.x)} w=${Math.round(mw.w)} vw=${gM9.vw}`);
+  ok('M9: тычок по индикатору попадает в него',
+     gM9.weaponPanelHit(mw.x + 4, mw.y + 4) === true &&
+     gM9.weaponPanelHit(mw.x - 20, mw.y + 4) === false);
+  ok('M9: у резака, пистолета и пушки есть названия',
+     ['cutter', 'pistol', 'grav'].every(id => typeof CFG.weapons[id].name === 'string'));
+
+  const before = PM9.weapon;
+  pressG(gM9, 'KeyX');
+  stepG(gM9, 1);
+  ok('M9: X переключает оружие', PM9.weapon !== before, `${before}→${PM9.weapon}`);
+
+  const list = gM9.weaponList();
+  for (let i = 0; i < list.length; i++) gM9.cycleWeapon();
+  ok('M9: цикл переключения замкнут', PM9.weapon === list[list.length - 1] , PM9.weapon);
+  ok('M9: в списке три оружия', list.join(',') === 'cutter,pistol,grav', list.join(','));
+
+  ok('M9: кадр с индикатором рисуется без ошибок', (() => {
+    try { gM9.render(); return true; } catch (e) { return false; }
+  })());
 }
 
 // ---------------------------------------------------------------- итог
