@@ -1187,8 +1187,8 @@ const baseRange = g7.teleRange;
 ok('M4: без пушки радиус 8 тайлов', baseRange === 8, String(baseRange));
 ok('M4: пушка создаётся и экипируется', g7.craft(gunRecipe) === true && P7.hasGravityGun === true);
 ok('M4: с пушкой радиус 15 тайлов', g7.teleRange === 15, String(g7.teleRange));
-ok('M4: пушка усиливает притяжение', CFG.tele.stiffnessGun > CFG.tele.stiffness,
-   `${CFG.tele.stiffness} → ${CFG.tele.stiffnessGun}`);
+ok('M4: пушка усиливает притяжение', CFG.tele.followGun > CFG.tele.follow,
+   `${CFG.tele.follow} → ${CFG.tele.followGun}`);
 
 // тело за пределами старого радиуса теперь достаётся
 g7.craftOpen = false;
@@ -2425,6 +2425,135 @@ ok('M9: пока оружия нет, переключать нечего', gM9.
   ok('M9: кадр с индикатором рисуется без ошибок', (() => {
     try { gM9.render(); return true; } catch (e) { return false; }
   })());
+}
+
+// ================================================================
+// M9.1: телекинез — координаты курсора, пружина-серво и трение ящика
+// ================================================================
+{
+  const gT = new (sandbox.__cls.Game)(view);
+  const p = gT.player;
+  const sr = gT.world.surfaceRow;
+  // чистая арена над полом: рельеф не должен влиять на замер
+  for (let x = 12; x <= 52; x++) {
+    for (let y = sr - 10; y <= sr - 1; y++) gT.world.set(x, y, TILE.EMPTY, false);
+    gT.world.set(x, sr, TILE.STONE, false);
+  }
+  gT.crates.length = 0;
+  gT.tiles.flush();
+  p.x = 20 * TS; p.y = sr * TS - p.h; p.vx = p.vy = 0;
+  gT.camera.snap(p);
+  stepG(gT, 4);
+
+  const z = CFG.camera.zoom;
+  const aimAt = (wx, wy) => {
+    gT.input.mouse.x = (wx - Math.round(gT.camera.x)) * z;
+    gT.input.mouse.y = (wy - Math.round(gT.camera.y)) * z;
+  };
+
+  // --- 1. экранные координаты мыши → мировые
+  let maxErr = 0;
+  for (const pt of [[p.cx + 37, p.cy - 21], [p.cx - 180, p.cy + 64], [p.cx + 401, p.cy + 9],
+                    [p.cx + 5, p.cy - 300]]) {
+    aimAt(pt[0], pt[1]);
+    maxErr = Math.max(maxErr, Math.hypot(gT.mouseW.x - pt[0], gT.mouseW.y - pt[1]));
+  }
+  ok('M9.1: экран → мир переводится без ошибки', maxErr < 1.5,
+     `макс ошибка ${maxErr.toFixed(2)} px при зуме ${z}`);
+
+  // --- 2. захват и подход к курсору
+  const crate = new (sandbox.__cls.Crate)(24 * TS, sr * TS - CFG.crate.h - 2 * TS);
+  crate.gravityScale = 0;            // чистый замер: без падения
+  crate.vx = crate.vy = 0;
+  gT.crates.push(crate);
+  gT.grab = crate;
+  gT.input.mouse.right = true;
+  crate.wake();
+
+  const targetX = crate.cx + 100;
+  const x0 = crate.cx;
+  aimAt(targetX, crate.cy);
+
+  const log = ['M9.1 · диагностика: цель x=' + Math.round(targetX) + ' (ящик стартует с ' + Math.round(x0) + ')'];
+  let prev = crate.cx, backwards = 0;
+  for (let i = 1; i <= 10; i++) {
+    stepG(gT, 1);
+    log.push('  кадр ' + String(i).padStart(2) + ': targetX=' + Math.round(targetX) +
+             '  box.x=' + Math.round(crate.cx) + '  box.vx=' + crate.vx.toFixed(1));
+    if (crate.cx < prev - 0.001) backwards++;
+    prev = crate.cx;
+  }
+  console.log(log.join('\n'));
+
+  ok('M9.1: за 10 кадров ящик идёт к курсору', backwards === 0 && crate.cx > x0 + 20,
+     `прошёл ${Math.round(crate.cx - x0)} px из 100`);
+  ok('M9.1: за 10 кадров курсор не проскочен', crate.cx <= targetX + 1,
+     `перелёт ${(crate.cx - targetX).toFixed(1)} px`);
+
+  // полный подход: тело доезжает и не перелетает
+  let maxOver = 0;
+  for (let i = 0; i < 90; i++) {
+    stepG(gT, 1);
+    maxOver = Math.max(maxOver, crate.cx - targetX);
+  }
+  ok('M9.1: за весь подход перелёта нет', maxOver <= 1, `макс перелёт ${maxOver.toFixed(1)} px`);
+  ok('M9.1: ящик доезжает до курсора', Math.abs(crate.cx - targetX) <= 8,
+     `осталось ${(targetX - crate.cx).toFixed(1)} px`);
+  ok('M9.1: у стоящего курсора ящик стоит, а не ползёт',
+     Math.abs(crate.vx) < 1 && Math.abs(crate.vy) < 1,
+     `vx=${crate.vx.toFixed(2)} vy=${crate.vy.toFixed(2)}`);
+
+  // --- 3. обратное направление: знак не перепутан
+  const backX = crate.cx - 100;
+  aimAt(backX, crate.cy);
+  let minX = crate.cx, overLeft = 0;
+  for (let i = 0; i < 90; i++) {
+    stepG(gT, 1);
+    minX = Math.min(minX, crate.cx);
+    overLeft = Math.max(overLeft, backX - crate.cx);
+  }
+  ok('M9.1: влево ящик едет так же послушно', Math.abs(crate.cx - backX) <= 8 && overLeft <= 1,
+     `x=${Math.round(crate.cx)} цель ${Math.round(backX)}, перелёт влево ${overLeft.toFixed(1)}`);
+
+  // --- 4. лимит скорости держится каждый кадр
+  let maxSp = 0;
+  for (let i = 0; i < 120; i++) {
+    aimAt(p.cx + 7 * TS * Math.cos(i * 0.4), p.cy + 3 * TS * Math.sin(i * 0.9));
+    stepG(gT, 1);
+    maxSp = Math.max(maxSp, Math.hypot(crate.vx, crate.vy));
+  }
+  ok('M9.1: лимит скорости держится каждый кадр', maxSp <= CFG.tele.holdSpeed + 1,
+     `макс ${maxSp.toFixed(0)} из ${CFG.tele.holdSpeed} px/s`);
+
+  // --- 5. отпускание: остаточная скорость гаснет о пол, ящик не уезжает сам
+  crate.gravityScale = 1;
+  crate.y = sr * TS - crate.h - 0.01;
+  crate.vy = 0;
+  crate.vx = 800;                    // сильный рывок вправо
+  gT.grab = crate;
+  gT.releaseGrab();
+  const relX = crate.cx;
+  const v0 = Math.hypot(crate.vx, crate.vy);
+  stepG(gT, 120);
+  ok('M9.1: отпущенный ящик не уезжает сам по себе',
+     Math.abs(crate.cx - relX) < 60 && Math.abs(crate.vx) < 1,
+     `сдвиг ${Math.round(crate.cx - relX)} px за 2 с (было ${v0.toFixed(0)} px/s), vx=${crate.vx.toFixed(2)}`);
+  // --- 6. флаг «в руках» не залипает, если захват сняли в обход releaseGrab
+  crate.x = 32 * TS;
+  crate.y = sr * TS - crate.h - 0.01;
+  crate.vy = 0;
+  crate.vx = 300;
+  crate.held = true;
+  gT.grab = null;
+  const x6 = crate.cx;
+  stepG(gT, 120);
+  ok('M9.1: снятый в обход захват возвращает трение',
+     Math.abs(crate.cx - x6) < 60 && Math.abs(crate.vx) < 1,
+     `сдвиг ${Math.round(crate.cx - x6)} px за 2 с, vx=${crate.vx.toFixed(2)}`);
+
+  ok('M9.1: трение задано в конфиге',
+     CFG.crate.groundDamp > 0 && CFG.crate.stopSpeed > 0 && CFG.tele.follow > 0 && CFG.tele.grip > 0,
+     `groundDamp=${CFG.crate.groundDamp} follow=${CFG.tele.follow} grip=${CFG.tele.grip}`);
 }
 
 // ---------------------------------------------------------------- итог

@@ -371,7 +371,8 @@ const CFG = {
     wakeRadius: 2, wakeKick: 60
   },
 
-  crate: { w: 36, h: 36 },
+  // M9.1: трение ящика. Без него отпущенный ящик скользил по полу бесконечно
+  crate: { w: 36, h: 36, groundDamp: 9, airDamp: 0.8, stopSpeed: 10 },
 
   dig: {
     radius: 4,                          // тайлов от центра игрока
@@ -384,11 +385,16 @@ const CFG = {
 
   // M7: телекинез. Скорость захваченного тела ограничена отдельно от физики падения
   // (maxSpeed), демпфирование выше, а при отпускании скорость гасится, а не сохраняется
-  tele: { range: 8, rangeGun: 15, stiffness: 90, stiffnessGun: 135,
+  tele: { range: 8, rangeGun: 15,
+          // M9.1: пружина-серво вместо «постоянной тяги».
+          // follow — сколько px/s скорости на каждый px ошибки (9 → подход без перелёта),
+          // grip — как быстро скорость догоняет заданную, 1/с.
+          follow: 9, followGun: 13, grip: 22,
+          snapDist: 6,          // ближе этого ящик паркуется у курсора вместо «ползёт»
+          snapSpeed: 70,
           damping: 15, maxSpeed: 950, pushImpulse: 620, pushCooldown: 0.15,
           crateDamage: 15,
           holdSpeed: 400,       // предел скорости тела в захвате, px/s
-          holdDamping: 26,      // сопротивление среды при телекинезе (было общее 15)
           releaseKeep: 0.2,     // доля скорости, которая остаётся после отпускания
           grabGap: 6,           // зазор до игрока: ящик не входит в него и не пролетает сквозь
           grabOffset: 34,       // на сколько ящик не доезжает до центра игрока, px:
@@ -2295,6 +2301,22 @@ class PhysBody {
 class Crate extends PhysBody {
   constructor(x, y) {
     super(x, y, CFG.crate.w, CFG.crate.h);
+    this.held = false;        // M9.1: в захвате скоростью управляет телекинез, трение не мешает
+  }
+
+  // M9.1: трение о пол и слабое сопротивление воздуха.
+  // Раньше у ящика не было ни того, ни другого: после отпускания он ехал
+  // с остаточной скоростью по прямой, пока не встречал стену.
+  onLanded(impactVy, dt) {
+    if (this.held) return;
+    const C = CFG.crate;
+    if (this.onGround) {
+      this.vx *= Math.exp(-C.groundDamp * dt);
+      if (Math.abs(this.vx) < C.stopSpeed) this.vx = 0;
+      if (Math.abs(this.vy) < C.stopSpeed) this.vy = 0;
+    } else {
+      this.vx *= Math.exp(-C.airDamp * dt);
+    }
   }
 }
 
@@ -5151,6 +5173,7 @@ class Game {
   releaseGrab() {
     if (!this.grab) return;
     const b = this.grab;
+    b.held = false;                      // трение снова работает
     b.vx *= CFG.tele.releaseKeep;
     b.vy *= CFG.tele.releaseKeep;
     const cap = CFG.tele.holdSpeed * CFG.tele.releaseKeep;
@@ -5161,14 +5184,22 @@ class Game {
     this.grab = null;
   }
 
-  // M7: захват. Три источника «улёта» закрыты:
+  // M7 + M9.1: захват. Источники «улёта» закрыты:
   //  1) скорость ограничена holdSpeed (было 950 — как у свободного падения);
   //  2) цель притяжения не доезжает до центра игрока (grabOffset) — тело не пролетает
   //     сквозь него и не получает рывок от смены знака разницы;
-  //  3) демпфирование отдельное и выше, поэтому ящик тормозит, а не разгоняется.
+  //  3) M9.1: вместо «постоянной тяги» — серво-пружина: желаемая скорость
+  //     пропорциональна остатку пути (follow) и подводится к ней с конечной
+  //     скоростью (grip), а жёсткий лимит «не больше 90 % остатка за кадр»
+  //     исключает перелёт. У цели тело паркуется (snapDist/snapSpeed).
+  //  4) M9.1: отпущенное тело тормозит трением о пол (CFG.crate.groundDamp),
+  //     поэтому не скользит «само собой» до ближайшей стены.
   updateGrab(dt, mw) {
     const b = this.grab;
-    if (!b || b.dead) { this.grab = null; this.leftAction = null; return; }
+    if (!b || b.dead) {
+      if (b) b.held = false;
+      this.grab = null; this.leftAction = null; return;
+    }
 
     // Цель — курсор, но не дальше радиуса телекинеза от игрока
     const p = this.player;
@@ -5191,20 +5222,39 @@ class Game {
       else { tx = p.cx + (ndx / nd) * minD; ty = p.cy + (ndy / nd) * minD; }
     }
 
-    // Пушка тянет на 50% сильнее
-    const pull = this.player.hasGravityGun ? CFG.tele.stiffnessGun : CFG.tele.stiffness;
-    b.vx += (tx - b.cx) * pull * dt;
-    b.vy += (ty - b.cy) * pull * dt;
-    const damp = Math.exp(-CFG.tele.holdDamping * dt);
-    b.vx *= damp;
-    b.vy *= damp;
-    const cap = Math.min(CFG.tele.holdSpeed, CFG.tele.maxSpeed);
+    // M9.1: пружина-серво. Скорость всегда направлена ровно в цель и падает
+    // вместе с расстоянием до неё: за кадр тело проходит не больше
+    // follow*dt остатка пути, поэтому перелёта нет по построению.
+    const T = CFG.tele;
+    const follow = this.player.hasGravityGun ? T.followGun : T.follow;
+    const cap = Math.min(T.holdSpeed, T.maxSpeed);
+    const ex = tx - b.cx, ey = ty - b.cy;
+    const err = Math.hypot(ex, ey);
     const sp = Math.hypot(b.vx, b.vy);
-    if (sp > cap) {
-      b.vx *= cap / sp;
-      b.vy *= cap / sp;
-    }
+    b.held = true;
     b.sleeping = false;
+
+    if (err <= T.snapDist && sp <= T.snapSpeed) {
+      // доехал: у курсора тело просто стоит, а не «ползёт» последние пиксели
+      b.vx = 0;
+      b.vy = 0;
+    } else {
+      const want = Math.min(cap, err * follow);
+      const wx = ex / err * want;
+      const wy = ey / err * want;
+      const blend = 1 - Math.exp(-T.grip * dt);
+      b.vx += (wx - b.vx) * blend;
+      b.vy += (wy - b.vy) * blend;
+      // Жёсткая гарантия «не перелететь»: за один кадр тело не проходит
+      // больше 90 % остатка пути. Без этого инерция серво давала перелёт 2–3 px,
+      // а вместе с гравитацией — «полз» вокруг цели.
+      const sp2 = Math.hypot(b.vx, b.vy);
+      const lim = Math.min(cap, (err / dt) * 0.9);
+      if (sp2 > lim) {
+        b.vx *= lim / sp2;
+        b.vy *= lim / sp2;
+      }
+    }
 
     // Ящик, который едет в игрока, толкает его, а не проходит насквозь
     this.separateFromPlayer(b);
@@ -5346,7 +5396,7 @@ class Game {
       if (!overlap(d, p, CFG.pickup.pad)) continue;
       this.inventory.add(d.type, 1);
       this.particles.pickup(d.type, d.cx, d.cy, this.rnd);
-      if (this.grab === d) this.grab = null;
+      if (this.grab === d) { d.held = false; this.grab = null; }
       this.drops.splice(i, 1);
     }
   }
@@ -5419,7 +5469,10 @@ class Game {
 
     // Прилив управляет телами жёстко: при катастрофе они летят вверх
     // Тела полностью подчинены мировой гравитации прилива
-    for (const c of this.crates) c.step(dt, this.world, g);
+    for (const c of this.crates) {
+      if (c.held && this.grab !== c) c.held = false;   // M9.1: страховка от «залипшего» захвата
+      c.step(dt, this.world, g);
+    }
     for (const d of this.drops) d.step(dt, this.world, g);
 
     this.updateCrawlers(dt);
@@ -5636,7 +5689,7 @@ class Game {
       b.vy = 0;
       if (b.gravityScale === 0) b.gravityScale = 1;   // телекинез не должен держать тело в приливе
     }
-    if (this.grab) this.grab = null;
+    if (this.grab) { this.grab.held = false; this.grab = null; }
     if (phaseId === 'CATASTROPHE') {
       // Мир тянет вверх: игрок тоже летит, если не среагирует на F
       this.player.gravityTarget = -1;
