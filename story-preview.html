@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GRAVITY: VOID — M8.2 «Сюжет и Ремонт»</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #05070c; overflow: hidden; }
+  iframe { display: block; width: 100vw; height: 100vh; border: 0; }
+  /* Экран подсказки: показывается, только если страницу открыли не по http */
+  #tip {
+    position: fixed; inset: 0; display: none; place-items: center; padding: 24px;
+    background: radial-gradient(900px 500px at 50% 0%, #131c2c 0%, #05070c 70%);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    color: #dfe8f6; z-index: 10;
+  }
+  #tip.show { display: grid; }
+  #tip .box { max-width: 560px; }
+  #tip h1 { font-size: 20px; margin: 0 0 10px; }
+  #tip p { color: #9fb0c8; margin: 0 0 12px; font-size: 14px; }
+  #tip code {
+    background: #0a1120; border: 1px solid rgba(150,180,220,0.18); border-radius: 6px;
+    padding: 2px 6px; font: 12.5px ui-monospace, Menlo, Consolas, monospace; color: #8fd8ff;
+  }
+  #tip a { color: #63c8ff; }
+</style>
+</head>
+<body>
+
+<!--
+  Превью сюжета M8.2 без правки gravity-void.html.
+
+  Файл игры по условию задания менять нельзя, поэтому страница загружает его
+  как обычный текст и дописывает одну строку — <script src="narrative.js"></script> —
+  ровно в то место, куда её надо вставить вручную (см. M82.md §1).
+  Дальше игра запускается во фрейме через srcdoc, уже с сюжетом.
+
+  Работает только по http(s): при открытии с диска (file://) браузер не даёт
+  прочитать соседний файл — тогда показываем подсказку, что делать.
+-->
+
+<div id="tip">
+  <div class="box">
+    <h1>Нужен http, а не file://</h1>
+    <p>Страница читает <code>gravity-void.html</code> как текст и дописывает в него строку
+       подключения сюжета. Браузер запрещает такое чтение локальных файлов.</p>
+    <p>Запустите в папке игры <code>python3 -m http.server 8000</code> и откройте
+       <code>http://localhost:8000/story-preview.html</code>. Либо вставьте строку
+       <code>&lt;script src="narrative.js"&gt;&lt;/script&gt;</code> в конец
+       <code>gravity-void.html</code> вручную — инструкция в <a href="M82.md">M82.md</a>.</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var tip = document.getElementById('tip');
+
+  function fail(reason) {
+    if (tip) tip.classList.add('show');
+    if (window.console) console.warn('[story-preview]', reason);
+  }
+
+  fetch('gravity-void.html', { cache: 'no-store' })
+    .then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    })
+    .then(function (html) {
+      if (html.indexOf('narrative.js') !== -1) {
+        // Файл уже содержит подключение — второй раз не вставляем
+        return html;
+      }
+      var tag = '<script src="narrative.js"><\/script>\n';
+      var cut = html.lastIndexOf('</body>');
+      if (cut === -1) throw new Error('в gravity-void.html нет </body>');
+      return html.slice(0, cut) + tag + html.slice(cut);
+    })
+    .then(function (html) {
+      var frame = document.createElement('iframe');
+      frame.title = 'GRAVITY: VOID — сюжетная версия';
+      frame.allow = 'fullscreen';
+      // srcdoc наследует базовый адрес страницы, поэтому narrative.js
+      // из строки подключения резолвится рядом — в ту же папку
+      frame.srcdoc = html;
+      document.body.appendChild(frame);
+      try { frame.focus(); } catch (e) { /* фокус — не критично */ }
+    })
+    .catch(function (e) { fail(e && e.message); });
+})();
+</script>
+</body>
+</html>
