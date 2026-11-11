@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { createCanvas } from '@napi-rs/canvas';
 
-const src = fs.readFileSync(new URL('../gravity-void.html', import.meta.url), 'utf8').match(/<script>([\s\S]*)<\/script>/)[1];
+const src = fs.readFileSync(new URL('../gravity-void.html', import.meta.url), 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
 const W = 1280, H = 720;
 const view = createCanvas(W, H);
 view.addEventListener = () => {}; view.style = {};
