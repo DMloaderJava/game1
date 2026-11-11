@@ -2556,6 +2556,146 @@ ok('M9: пока оружия нет, переключать нечего', gM9.
      `groundDamp=${CFG.crate.groundDamp} follow=${CFG.tele.follow} grip=${CFG.tele.grip}`);
 }
 
+// ================================================================
+// M9.2: захват не проходит сквозь тайлы
+// ================================================================
+{
+  const gC = new (sandbox.__cls.Game)(view);
+  const p = gC.player;
+  const sr = gC.world.surfaceRow;
+  const z = CFG.camera.zoom;
+  const aimAt = (wx, wy) => {
+    gC.input.mouse.x = (wx - Math.round(gC.camera.x)) * z;
+    gC.input.mouse.y = (wy - Math.round(gC.camera.y)) * z;
+  };
+  const overlapsSolid = (b) => {
+    const x0 = Math.floor(b.x / TS), x1 = Math.floor((b.x + b.w - 0.001) / TS);
+    const y0 = Math.floor(b.y / TS), y1 = Math.floor((b.y + b.h - 0.001) / TS);
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      if (gC.world.solid(x, y)) return true;
+    }
+    return false;
+  };
+  const arena = () => {
+    for (let x = 8; x <= 60; x++) {
+      for (let y = sr - 12; y <= sr - 1; y++) gC.world.set(x, y, TILE.EMPTY, false);
+      gC.world.set(x, sr, TILE.STONE, false);
+    }
+    gC.tiles.flush();
+    gC.crates.length = 0;
+    gC.grab = null;
+    gC.input.mouse.right = false;
+  };
+  const floorY = (b) => sr * TS - b.h;      // верх пола для тела высотой b.h
+
+  // --- 1. курсор на 2 тайла ниже уровня пола
+  arena();
+  p.x = 20 * TS; p.y = sr * TS - p.h; p.vx = p.vy = 0;
+  gC.camera.snap(p);
+  stepG(gC, 3);
+  // ящик уже лежит на полу — тянем курсором вниз, под пол
+  const crate = new (sandbox.__cls.Crate)(24 * TS, floorY({ h: CFG.crate.h }));
+  gC.crates.push(crate);
+  crate.wake();
+  gC.grab = crate;
+  gC.input.mouse.right = true;
+
+  const deepY = floorY(crate) + 2 * TS;      // центр цели внутри породы
+  aimAt(crate.cx, deepY);
+  const log = ['M9.2 · цель под полом: targetY=' + Math.round(deepY) + ', пол=' + floorY(crate).toFixed(0)];
+  let badFrames = 0, maxY = -Infinity;
+  for (let i = 1; i <= 10; i++) {
+    stepG(gC, 1);
+    log.push('  кадр ' + String(i).padStart(2) + ': box.y=' + crate.y.toFixed(1) +
+             '  box.vy=' + crate.vy.toFixed(1) + (overlapsSolid(crate) ? '  В ТАЙЛЕ' : ''));
+    maxY = Math.max(maxY, crate.y);
+    if (overlapsSolid(crate)) badFrames++;
+  }
+  console.log(log.join('\n'));
+  ok('M9.2: ящик не проваливается под пол', crate.y <= floorY(crate) + 0.5,
+     `y=${crate.y.toFixed(1)} при поле ${floorY(crate).toFixed(0)}`);
+  ok('M9.2: ящик не входит в тайлы за 10 кадров', badFrames === 0 && !overlapsSolid(crate));
+  ok('M9.2: у пола ящик прижимается, а не давит вечно',
+     Math.abs(crate.vy) < 1, `vy=${crate.vy.toFixed(2)}`);
+
+  // ещё 40 кадров давления — по-прежнему сверху пола
+  for (let i = 0; i < 40; i++) stepG(gC, 1);
+  ok('M9.2: длительное давление вниз не проваливает ящик',
+     crate.y <= floorY(crate) + 0.5 && !overlapsSolid(crate), `y=${crate.y.toFixed(1)}`);
+
+  // --- 2. курсор внутри стены справа
+  arena();
+  // стена в пределах радиуса телекинеза (8 тайлов от игрока)
+  for (let y = sr - 6; y <= sr - 1; y++) gC.world.set(27, y, TILE.STONE, false);
+  gC.tiles.flush();
+  p.x = 20 * TS; p.y = sr * TS - p.h; p.vx = p.vy = 0;
+  gC.camera.snap(p);
+  stepG(gC, 2);
+  const crate2 = new (sandbox.__cls.Crate)(25 * TS, floorY({ h: CFG.crate.h }));
+  gC.crates.push(crate2);
+  crate2.wake();
+  gC.grab = crate2;
+  gC.input.mouse.right = true;
+  aimAt(40 * TS, crate2.cy);            // курсор глубоко в стене
+  let bad2 = 0;
+  for (let i = 0; i < 60; i++) { stepG(gC, 1); if (overlapsSolid(crate2)) bad2++; }
+  ok('M9.2: цель за стеной — ящик упирается в стену', bad2 === 0 && !overlapsSolid(crate2),
+     `x=${crate2.x.toFixed(1)}, стена с ${27 * TS}`);
+  ok('M9.2: ящик подъехал к стене вплотную',
+     crate2.x + crate2.w <= 27 * TS + 0.5 && crate2.x + crate2.w > 27 * TS - 24,
+     `правый край ${(crate2.x + crate2.w).toFixed(1)}, стена ${27 * TS}`);
+
+  // --- 3. ящик зажат между игроком и стеной (раньше вдавливался в тайл)
+  arena();
+  for (let y = sr - 6; y <= sr - 1; y++) {
+    gC.world.set(33, y, TILE.STONE, false);
+    gC.world.set(34, y, TILE.STONE, false);
+  }
+  gC.tiles.flush();
+  p.x = 31 * TS; p.y = sr * TS - p.h;
+  gC.camera.snap(p);
+  stepG(gC, 2);
+  const crate3 = new (sandbox.__cls.Crate)(32 * TS, floorY({ h: CFG.crate.h }));
+  crate3.gravityScale = 1;
+  gC.crates.push(crate3);
+  crate3.wake();
+  gC.grab = crate3;
+  gC.input.mouse.right = true;
+  aimAt(p.cx, p.cy);
+  let bad3 = 0;
+  for (let i = 0; i < 90; i++) { stepG(gC, 1); if (overlapsSolid(crate3)) bad3++; }
+  ok('M9.2: зажатый между игроком и стеной ящик не входит в стену', bad3 === 0,
+     `кадров в стене: ${bad3}`);
+
+  // --- 4. тело, оказавшееся в породе, выталкивается страховкой
+  arena();
+  p.x = 20 * TS; p.y = sr * TS - p.h; p.vx = p.vy = 0;
+  gC.camera.snap(p);
+  const stuck = new (sandbox.__cls.Crate)(28 * TS, sr * TS - CFG.crate.h - 8);
+  gC.crates.push(stuck);
+  gC.grab = null;
+  stepG(gC, 1);
+  ok('M9.2: тело внутри породы выталкивается само', !overlapsSolid(stuck),
+     `x=${stuck.x.toFixed(1)} y=${stuck.y.toFixed(1)}`);
+
+  // --- 5. глубокая цель: ящик остаётся на поверхности
+  arena();
+  p.x = 20 * TS; p.y = sr * TS - p.h;
+  gC.camera.snap(p);
+  stepG(gC, 2);
+  const crate5 = new (sandbox.__cls.Crate)(23 * TS, floorY({ h: CFG.crate.h }));
+  gC.crates.push(crate5);
+  crate5.wake();
+  gC.grab = crate5;
+  gC.input.mouse.right = true;
+  aimAt(crate5.cx, sr * TS + 6 * TS);
+  let bad5 = 0;
+  for (let i = 0; i < 60; i++) { stepG(gC, 1); if (overlapsSolid(crate5)) bad5++; }
+  ok('M9.2: цель в глубине породы — ящик стоит на поверхности',
+     bad5 === 0 && crate5.y <= floorY(crate5) + 0.5,
+     `y=${crate5.y.toFixed(1)}, кадров в породе ${bad5}`);
+}
+
 // ---------------------------------------------------------------- итог
 const passed = results.filter(r => r.pass).length;
 console.log('\n=== РЕЗУЛЬТАТ ===');

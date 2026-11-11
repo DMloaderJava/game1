@@ -5184,6 +5184,94 @@ class Game {
     this.grab = null;
   }
 
+  /* ---------- M9.2: захват не проходит сквозь мир ---------- */
+
+  // Помещается ли коробка w×h с левым верхним углом (x, y) в свободные тайлы
+  fitsBoxAt(x, y, w, h) {
+    const x0 = Math.floor(x / TS), x1 = Math.floor((x + w - 0.001) / TS);
+    const y0 = Math.floor(y / TS), y1 = Math.floor((y + h - 0.001) / TS);
+    for (let ty = y0; ty <= y1; ty++) {
+      for (let tx = x0; tx <= x1; tx++) {
+        if (this.world.solid(tx, ty)) return false;
+      }
+    }
+    return true;
+  }
+
+  // Помещается ли тело, если его центр поставить в (cx, cy)
+  bodyFits(b, cx, cy) {
+    return this.fitsBoxAt(cx - b.w / 2, cy - b.h / 2, b.w, b.h);
+  }
+
+  // Цель захвата. Курсор может стоять в породе, под полом или за стеной —
+  // тогда цель «прижимается» к последней свободной точке по каждой оси отдельно.
+  // Оси независимы, поэтому по полу можно ехать вбок, а от пола — подниматься;
+  // ящик упирается в стену и останавливается, но не проходит насквозь.
+  clampGrabTarget(b, tx, ty) {
+    if (this.bodyFits(b, tx, ty)) return { x: tx, y: ty, clamped: false };
+    let cx = b.cx, cy = b.cy;
+
+    // X: бисекция между «помещается» и «не помещается»
+    if (this.bodyFits(b, tx, cy)) {
+      cx = tx;
+    } else {
+      let lo = cx, hi = tx;
+      for (let i = 0; i < 8; i++) {
+        const mid = (lo + hi) / 2;
+        if (this.bodyFits(b, mid, cy)) lo = mid; else hi = mid;
+      }
+      cx = lo;
+    }
+    // Y: уже при найденном X
+    if (this.bodyFits(b, cx, ty)) {
+      cy = ty;
+    } else {
+      let lo = cy, hi = ty;
+      for (let i = 0; i < 8; i++) {
+        const mid = (lo + hi) / 2;
+        if (this.bodyFits(b, cx, mid)) lo = mid; else hi = mid;
+      }
+      cy = lo;
+    }
+    return { x: cx, y: cy, clamped: Math.abs(cx - tx) > 0.01 || Math.abs(cy - ty) > 0.01 };
+  }
+
+  // Страховка: тело, оказавшееся внутри породы, выталкивается минимальным сдвигом.
+  // Коллизия с миром имеет приоритет над любой силой притяжения.
+  depenetrate(b) {
+    for (let iter = 0; iter < 4; iter++) {
+      if (!overlapsSolidTile(this.world, b)) return true;
+      const x0 = Math.floor(b.x / TS), x1 = Math.floor((b.x + b.w - 0.001) / TS);
+      const y0 = Math.floor(b.y / TS), y1 = Math.floor((b.y + b.h - 0.001) / TS);
+      let bestD = Infinity, bestX = b.x, bestY = b.y, axis = null;
+      for (let ty = y0; ty <= y1; ty++) {
+        for (let tx = x0; tx <= x1; tx++) {
+          if (!this.world.solid(tx, ty)) continue;
+          const ox = Math.min(b.x + b.w, (tx + 1) * TS) - Math.max(b.x, tx * TS);
+          const oy = Math.min(b.y + b.h, (ty + 1) * TS) - Math.max(b.y, ty * TS);
+          const cands = [
+            { x: b.x - ox - 0.01, y: b.y, d: ox, ax: 'x' },
+            { x: b.x + ox + 0.01, y: b.y, d: ox, ax: 'x' },
+            { x: b.x, y: b.y - oy - 0.01, d: oy, ax: 'y' },
+            { x: b.x, y: b.y + oy + 0.01, d: oy, ax: 'y' }
+          ];
+          for (const c of cands) {
+            if (c.d >= bestD) continue;
+            if (!this.fitsBoxAt(c.x, c.y, b.w, b.h)) continue;
+            bestD = c.d; bestX = c.x; bestY = c.y; axis = c.ax;
+          }
+        }
+      }
+      if (bestD === Infinity) break;
+      b.x = bestX;
+      b.y = bestY;
+      // гасим скорость, которая вдавливала тело в тайл
+      if (axis === 'x') b.vx = 0; else b.vy = 0;
+    }
+    if (overlapsSolidTile(this.world, b)) { b.vx = 0; b.vy = 0; return false; }
+    return true;
+  }
+
   // M7 + M9.1: захват. Источники «улёта» закрыты:
   //  1) скорость ограничена holdSpeed (было 950 — как у свободного падения);
   //  2) цель притяжения не доезжает до центра игрока (grabOffset) — тело не пролетает
@@ -5225,6 +5313,14 @@ class Game {
     // M9.1: пружина-серво. Скорость всегда направлена ровно в цель и падает
     // вместе с расстоянием до неё: за кадр тело проходит не больше
     // follow*dt остатка пути, поэтому перелёта нет по построению.
+    // M9.2: сначала выталкиваем тело из породы, если оно там оказалось,
+    // и только потом считаем тягу: коллизия важнее притяжения
+    this.depenetrate(b);
+    // курсор в стене/под землёй → цель прижимается к последней свободной точке
+    const aim = this.clampGrabTarget(b, tx, ty);
+    tx = aim.x;
+    ty = aim.y;
+
     const T = CFG.tele;
     const follow = this.player.hasGravityGun ? T.followGun : T.follow;
     const cap = Math.min(T.holdSpeed, T.maxSpeed);
@@ -5272,14 +5368,19 @@ class Game {
     const total = crateMass + playerMass;
     if (ox < oy) {
       const dir = Math.sign(b.cx - p.cx) || p.facing;
-      b.x += dir * ox * (playerMass / total);
-      p.x -= dir * ox * (crateMass / total);
+      const shift = dir * ox * (playerMass / total);
+      // M9.2: ящик не вдавливаем в стену — если там порода, сдвиг забирает игрок
+      b.x += shift;
+      if (overlapsSolidTile(this.world, b)) { b.x -= shift; p.x -= dir * ox; }
+      else p.x -= dir * ox * (crateMass / total);
       if (b.vx * dir < 0) b.vx = 0;
       p.vx = clamp(p.vx - dir * ox * 6, -CFG.player.speed, CFG.player.speed);
     } else {
       const dir = Math.sign(b.cy - p.cy) || 1;
-      b.y += dir * oy * (playerMass / total);
-      p.y -= dir * oy * (crateMass / total);
+      const shift = dir * oy * (playerMass / total);
+      b.y += shift;
+      if (overlapsSolidTile(this.world, b)) { b.y -= shift; p.y -= dir * oy; }
+      else p.y -= dir * oy * (crateMass / total);
       if (b.vy * dir < 0) b.vy = 0;
       p.vy = clamp(p.vy - dir * oy * 6, -CFG.physics.maxFall, CFG.physics.maxFall);
     }
@@ -5472,6 +5573,7 @@ class Game {
     for (const c of this.crates) {
       if (c.held && this.grab !== c) c.held = false;   // M9.1: страховка от «залипшего» захвата
       c.step(dt, this.world, g);
+      this.depenetrate(c);                             // M9.2: тело не живёт внутри породы
     }
     for (const d of this.drops) d.step(dt, this.world, g);
 
